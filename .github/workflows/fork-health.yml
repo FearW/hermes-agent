@@ -56,6 +56,7 @@ jobs:
         run: |
           uv run pytest \
             tests/hermes_cli/test_main_entry_integrity.py \
+            tests/hermes_cli/test_install_baseline.py \
             tests/hermes_cli/test_memory_doctor.py \
             tests/tools/test_memory_tool.py \
             tests/gateway/test_maintenance.py \

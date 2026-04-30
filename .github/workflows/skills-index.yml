@@ -1,15 +1,7 @@
 name: Build Skills Index
 
 on:
-  schedule:
-    # Run twice daily: 6 AM and 6 PM UTC
-    - cron: '0 6,18 * * *'
-  workflow_dispatch:  # Manual trigger
-  push:
-    branches: [main]
-    paths:
-      - 'scripts/build_skills_index.py'
-      - '.github/workflows/skills-index.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -31,7 +23,7 @@ jobs:
 
       - name: Build skills index
         env:
-          GITHUB_TOKEN: REDACTED secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python scripts/build_skills_index.py
 
       - name: Upload index artifact
@@ -46,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       pages: write
-      id-token: REDACTED
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}

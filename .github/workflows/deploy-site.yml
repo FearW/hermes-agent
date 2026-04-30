@@ -1,19 +1,11 @@
 name: Deploy Site
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'website/**'
-      - 'landingpage/**'
-      - 'skills/**'
-      - 'optional-skills/**'
-      - '.github/workflows/deploy-site.yml'
   workflow_dispatch:
 
 permissions:
   pages: write
-  id-token: REDACTED
+  id-token: write
 
 concurrency:
   group: pages
@@ -48,7 +40,7 @@ jobs:
 
       - name: Build skills index (if not already present)
         env:
-          GITHUB_TOKEN: REDACTED secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ ! -f website/static/api/skills-index.json ]; then
             python3 scripts/build_skills_index.py || echo "Skills index build failed (non-fatal)"
