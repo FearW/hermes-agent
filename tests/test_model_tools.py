@@ -1,6 +1,8 @@
 """Tests for model_tools.py — function call dispatch, agent-loop interception, legacy toolsets."""
 
+import importlib
 import json
+import sys
 from unittest.mock import call, patch
 
 import pytest
@@ -13,6 +15,17 @@ from model_tools import (
     _LEGACY_TOOLSET_MAP,
     TOOL_TO_TOOLSET_MAP,
 )
+
+
+def test_dynamic_tool_discovery_is_explicitly_lazy(monkeypatch):
+    sys.modules.pop("model_tools", None)
+    monkeypatch.setattr("tools.mcp_tool.discover_mcp_tools", lambda: (_ for _ in ()).throw(AssertionError("eager mcp discovery")))
+    monkeypatch.setattr("hermes_cli.plugins.discover_plugins", lambda: (_ for _ in ()).throw(AssertionError("eager plugin discovery")))
+
+    module = importlib.import_module("model_tools")
+
+    assert module._dynamic_discovery_done is False
+    module._dynamic_discovery_done = True
 
 
 # =========================================================================

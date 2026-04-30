@@ -39,6 +39,8 @@ logger = logging.getLogger(__name__)
 _tool_loop = None          # persistent loop for the main (CLI) thread
 _tool_loop_lock = threading.Lock()
 _worker_thread_local = threading.local()  # per-worker-thread persistent loops
+_dynamic_discovery_done = False
+_dynamic_discovery_lock = threading.Lock()
 
 
 def _get_tool_loop():
@@ -169,27 +171,41 @@ def _discover_tools():
 
 _discover_tools()
 
-# MCP tool discovery (external MCP servers from config)
-try:
-    from tools.mcp_tool import discover_mcp_tools
-    discover_mcp_tools()
-except Exception as e:
-    logger.debug("MCP tool discovery failed: %s", e)
 
-# Plugin tool discovery (user/project/pip plugins)
-try:
-    from hermes_cli.plugins import discover_plugins
-    discover_plugins()
-except Exception as e:
-    logger.debug("Plugin discovery failed: %s", e)
+def _ensure_dynamic_tool_discovery() -> None:
+    """Discover MCP/plugin tools once, only when tool APIs are actually used."""
+    global _dynamic_discovery_done, TOOL_TO_TOOLSET_MAP, TOOLSET_REQUIREMENTS
+    if _dynamic_discovery_done:
+        return
+    with _dynamic_discovery_lock:
+        if _dynamic_discovery_done:
+            return
 
-# Classify tools for Plan-mode (must run after MCP + plugin discovery so the
-# read-only set covers dynamically-registered names like mcp_minimax_*).
-try:
-    from tools.plan_mode import apply_classification
-    apply_classification()
-except Exception as e:
-    logger.debug("Plan-mode classification failed: %s", e)
+        # MCP tool discovery (external MCP servers from config)
+        try:
+            from tools.mcp_tool import discover_mcp_tools
+            discover_mcp_tools()
+        except Exception as e:
+            logger.debug("MCP tool discovery failed: %s", e)
+
+        # Plugin tool discovery (user/project/pip plugins)
+        try:
+            from hermes_cli.plugins import discover_plugins
+            discover_plugins()
+        except Exception as e:
+            logger.debug("Plugin discovery failed: %s", e)
+
+        # Classify tools for Plan-mode (must run after MCP + plugin discovery so the
+        # read-only set covers dynamically-registered names like mcp_minimax_*).
+        try:
+            from tools.plan_mode import apply_classification
+            apply_classification()
+        except Exception as e:
+            logger.debug("Plan-mode classification failed: %s", e)
+
+        TOOL_TO_TOOLSET_MAP = registry.get_tool_to_toolset_map()
+        TOOLSET_REQUIREMENTS = registry.get_toolset_requirements()
+        _dynamic_discovery_done = True
 
 
 # =============================================================================
@@ -261,6 +277,8 @@ def get_tool_definitions(
     Returns:
         Filtered list of OpenAI-format tool definitions.
     """
+    _ensure_dynamic_tool_discovery()
+
     # Determine which tool names the caller wants
     tools_to_include: set = set()
 
@@ -501,6 +519,8 @@ def handle_function_call(
         Function result as a JSON string.
     """
     # Coerce string arguments to their schema-declared types (e.g. "42"→42)
+    _ensure_dynamic_tool_discovery()
+
     function_args = coerce_tool_args(function_name, function_args)
 
     # Notify the read-loop tracker when a non-read/search tool runs,
@@ -573,24 +593,29 @@ def handle_function_call(
 
 def get_all_tool_names() -> List[str]:
     """Return all registered tool names."""
+    _ensure_dynamic_tool_discovery()
     return registry.get_all_tool_names()
 
 
 def get_toolset_for_tool(tool_name: str) -> Optional[str]:
     """Return the toolset a tool belongs to."""
+    _ensure_dynamic_tool_discovery()
     return registry.get_toolset_for_tool(tool_name)
 
 
 def get_available_toolsets() -> Dict[str, dict]:
     """Return toolset availability info for UI display."""
+    _ensure_dynamic_tool_discovery()
     return registry.get_available_toolsets()
 
 
 def check_toolset_requirements() -> Dict[str, bool]:
     """Return {toolset: available_bool} for every registered toolset."""
+    _ensure_dynamic_tool_discovery()
     return registry.check_toolset_requirements()
 
 
 def check_tool_availability(quiet: bool = False) -> Tuple[List[str], List[dict]]:
     """Return (available_toolsets, unavailable_info)."""
+    _ensure_dynamic_tool_discovery()
     return registry.check_tool_availability(quiet=quiet)
