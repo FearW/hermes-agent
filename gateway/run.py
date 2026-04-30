@@ -12668,6 +12668,10 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
                         older_than_days=int(_maintenance_cfg.get("retention_days", 14)),
                         initial_delay=int(_maintenance_cfg.get("initial_delay_seconds", 300)),
                         interval_seconds=int(_maintenance_cfg.get("interval_seconds", 21600)),
+                        l4_compaction=bool(_maintenance_cfg.get("l4_compaction", True)),
+                        l4_max_entries=int(_maintenance_cfg.get("l4_max_entries", 2000)),
+                        l4_max_age_days=int(_maintenance_cfg.get("l4_max_age_days", 180)),
+                        l4_keep_priority_at_least=int(_maintenance_cfg.get("l4_keep_priority_at_least", 4)),
                     ),
                     name="gateway-retention-maintenance",
                 ))
@@ -12677,6 +12681,7 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
                         runner.session_store,
                         initial_delay=int(_maintenance_cfg.get("l4_initial_delay_seconds", 120)),
                         interval_seconds=int(_maintenance_cfg.get("l4_interval_seconds", 7200)),
+                        max_sessions_per_cycle=int(_maintenance_cfg.get("l4_max_sessions_per_cycle", 50)),
                     ),
                     name="gateway-l4-periodic-archive",
                 ))

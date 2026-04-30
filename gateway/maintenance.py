@@ -8,7 +8,17 @@ from agent.capability_lifecycle import run_lifecycle_maintenance
 logger = logging.getLogger("gateway.maintenance")
 
 
-async def retention_loop(session_store, *, older_than_days: int = 14, initial_delay: int = 300, interval_seconds: int = 21600) -> None:
+async def retention_loop(
+    session_store,
+    *,
+    older_than_days: int = 14,
+    initial_delay: int = 300,
+    interval_seconds: int = 21600,
+    l4_compaction: bool = True,
+    l4_max_entries: int = 2000,
+    l4_max_age_days: int = 180,
+    l4_keep_priority_at_least: int = 4,
+) -> None:
     await asyncio.sleep(initial_delay)
     while True:
         try:
@@ -18,12 +28,28 @@ async def retention_loop(session_store, *, older_than_days: int = 14, initial_de
             lifecycle = run_lifecycle_maintenance()
             if any(lifecycle.values()):
                 logger.info("Lifecycle maintenance updated states: %s", lifecycle)
+            if l4_compaction:
+                from agent.l4_archive import compact_archive
+
+                compacted = compact_archive(
+                    max_entries=l4_max_entries,
+                    max_age_days=l4_max_age_days,
+                    keep_priority_at_least=l4_keep_priority_at_least,
+                )
+                if compacted.get("deleted"):
+                    logger.info("L4 compaction deleted %(deleted)d row(s), %(remaining)d remaining", compacted)
         except Exception as exc:
             logger.debug("Retention maintenance cycle failed: %s", exc)
         await asyncio.sleep(interval_seconds)
 
 
-async def l4_periodic_archive_loop(session_store, *, initial_delay: int = 120, interval_seconds: int = 7200) -> None:
+async def l4_periodic_archive_loop(
+    session_store,
+    *,
+    initial_delay: int = 120,
+    interval_seconds: int = 7200,
+    max_sessions_per_cycle: int = 50,
+) -> None:
     """Periodically archive sessions into L4 (every 2h, sessions idle 30+ min)."""
     await asyncio.sleep(initial_delay)
     while True:
@@ -34,6 +60,8 @@ async def l4_periodic_archive_loop(session_store, *, initial_delay: int = 120, i
             import datetime
             archived_count = 0
             for entry in session_store.list_sessions():
+                if max_sessions_per_cycle > 0 and archived_count >= max_sessions_per_cycle:
+                    break
                 sid = getattr(entry, "session_id", "")
                 if not sid or is_session_archived(sid):
                     continue

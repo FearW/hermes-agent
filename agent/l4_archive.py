@@ -14,6 +14,9 @@ ARCHIVE_DIR = get_hermes_home() / "memory_l4"
 ARCHIVE_PATH = ARCHIVE_DIR / "archive.json"
 ARCHIVE_DB_PATH = ARCHIVE_DIR / "archive.db"
 RETENTION_DAYS = 14
+DEFAULT_MAX_ARCHIVE_ENTRIES = 2000
+DEFAULT_MAX_ARCHIVE_AGE_DAYS = 180
+DEFAULT_KEEP_PRIORITY_AT_LEAST = 4
 
 
 def _ensure_archive_dir() -> None:
@@ -325,6 +328,81 @@ def archive_session_summary(session_id: str, source: str, messages: List[Dict[st
         _migrate_legacy_json_if_needed(conn)
         _insert_entry(conn, entry)
         conn.commit()
+    finally:
+        conn.close()
+
+
+def compact_archive(
+    *,
+    max_entries: int = DEFAULT_MAX_ARCHIVE_ENTRIES,
+    max_age_days: int = DEFAULT_MAX_ARCHIVE_AGE_DAYS,
+    keep_priority_at_least: int = DEFAULT_KEEP_PRIORITY_AT_LEAST,
+) -> Dict[str, int]:
+    """Prune low-value L4 rows with cheap SQLite rules.
+
+    High-priority, linked, unresolved, conflict, and workflow/skill candidate rows are kept.
+    This keeps long-running gateways fast without using an LLM or deleting important memory.
+    """
+    max_entries = max(0, int(max_entries or 0))
+    max_age_days = max(0, int(max_age_days or 0))
+    keep_priority_at_least = max(0, int(keep_priority_at_least or 0))
+    if max_entries == 0 and max_age_days == 0:
+        return {"deleted": 0, "remaining": 0}
+
+    cutoff = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - max_age_days * 86400)) if max_age_days else ""
+    conn = _connect()
+    try:
+        _migrate_legacy_json_if_needed(conn)
+        deleted_ids: set[str] = set()
+
+        protected = (
+            "priority >= ? OR unresolved = 1 OR conflict_flag = 1 OR "
+            "COALESCE(linked_workflow, '') != '' OR COALESCE(linked_skill, '') != '' OR "
+            "COALESCE(workflow_candidate, '') != '' OR COALESCE(skill_candidate, '') != ''"
+        )
+        if max_age_days:
+            rows = conn.execute(
+                f"SELECT session_id FROM l4_archive WHERE archived_at < ? AND NOT ({protected})",
+                (cutoff, keep_priority_at_least),
+            ).fetchall()
+            deleted_ids.update(str(row[0]) for row in rows)
+
+        if max_entries:
+            rows = conn.execute(
+                f"""
+                SELECT session_id FROM l4_archive
+                WHERE NOT ({protected})
+                ORDER BY priority ASC, archived_at ASC
+                LIMIT MAX((SELECT COUNT(*) FROM l4_archive) - ?, 0)
+                """,
+                (keep_priority_at_least, max_entries),
+            ).fetchall()
+            deleted_ids.update(str(row[0]) for row in rows)
+
+        if deleted_ids:
+            placeholders = ",".join("?" for _ in deleted_ids)
+            conn.execute(f"DELETE FROM l4_archive WHERE session_id IN ({placeholders})", tuple(deleted_ids))
+            conn.execute("DROP TABLE IF EXISTS l4_archive_fts")
+            conn.execute(
+                "CREATE VIRTUAL TABLE l4_archive_fts USING fts5("
+                "session_id UNINDEXED, source, summary, user_intents, tool_names, important_files, important_commands, category, project_tag, content='')"
+            )
+            for row in conn.execute("SELECT rowid, * FROM l4_archive").fetchall():
+                entry = _row_to_entry(row)
+                conn.execute(
+                    "INSERT INTO l4_archive_fts(rowid, session_id, source, summary, user_intents, tool_names, important_files, important_commands, category, project_tag) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        int(row["rowid"]), entry["session_id"], entry.get("source") or "", entry.get("summary") or "",
+                        "\n".join(entry.get("user_intents") or []), " ".join(entry.get("tool_names") or []),
+                        "\n".join(entry.get("important_files") or []), "\n".join(entry.get("important_commands") or []),
+                        entry.get("category") or "general", entry.get("project_tag") or "global",
+                    ),
+                )
+            conn.execute("PRAGMA optimize")
+            conn.commit()
+
+        remaining = int(conn.execute("SELECT COUNT(*) FROM l4_archive").fetchone()[0])
+        return {"deleted": len(deleted_ids), "remaining": remaining}
     finally:
         conn.close()
 

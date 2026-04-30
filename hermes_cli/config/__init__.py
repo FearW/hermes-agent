@@ -710,9 +710,14 @@ DEFAULT_CONFIG = {
         "retention_days": 14,
         "initial_delay_seconds": 300,
         "interval_seconds": 21600,
+        "l4_compaction": True,
+        "l4_max_entries": 2000,
+        "l4_max_age_days": 180,
+        "l4_keep_priority_at_least": 4,
         "l4_periodic_archive": True,
         "l4_initial_delay_seconds": 120,
         "l4_interval_seconds": 7200,
+        "l4_max_sessions_per_cycle": 50,
     },
     # Logging — controls file logging to ~/.hermes/logs/.
     # agent.log captures INFO+ (all agent activity); errors.log captures WARNING+.
