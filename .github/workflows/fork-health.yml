@@ -1,0 +1,64 @@
+name: Fork Health
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: fork-health-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  baseline:
+    name: Lightweight fork baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    env:
+      OPENROUTER_API_KEY: ""
+      OPENAI_API_KEY: ""
+      ANTHROPIC_API_KEY: ""
+      NOUS_API_KEY: ""
+      HERMES_HOME: ${{ github.workspace }}/.hermes-ci
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --extra dev --extra web
+
+      - name: Compile critical modules
+        run: |
+          uv run python -m py_compile \
+            hermes_cli/main.py \
+            hermes_cli/_parser.py \
+            hermes_cli/memory_doctor.py \
+            tools/memory_tool.py \
+            gateway/maintenance.py \
+            agent/l4_archive.py
+
+      - name: Smoke test CLI entrypoints
+        run: |
+          uv run python -m hermes_cli.main version
+          uv run python -m hermes_cli.main memory doctor
+
+      - name: Run fork health tests
+        run: |
+          uv run pytest \
+            tests/hermes_cli/test_main_entry_integrity.py \
+            tests/hermes_cli/test_memory_doctor.py \
+            tests/tools/test_memory_tool.py \
+            tests/gateway/test_maintenance.py \
+            tests/hermes_cli/test_web_server.py \
+            tests/cli/test_quick_commands.py \
+            -q --tb=short
