@@ -186,6 +186,22 @@ class TestUserSkins:
 
 
 class TestDisplayIntegration:
+    def test_kawaii_spinner_static_lists_exist(self):
+        from agent.display import KawaiiSpinner
+
+        assert KawaiiSpinner.get_waiting_faces()
+        assert KawaiiSpinner.get_thinking_faces()
+        assert KawaiiSpinner.get_thinking_verbs()
+
+    def test_kawaii_spinner_uses_active_skin_lists(self):
+        from hermes_cli.skin_engine import set_active_skin
+        from agent.display import KawaiiSpinner
+
+        set_active_skin("ares")
+
+        assert KawaiiSpinner.get_thinking_faces()[0] == "(⚔)"
+        assert KawaiiSpinner.get_thinking_verbs()[0] == "forging"
+
     def test_get_skin_tool_prefix_default(self):
         from agent.display import get_skin_tool_prefix
         assert get_skin_tool_prefix() == "┊"
