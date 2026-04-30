@@ -52,6 +52,46 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+
+_BUILTIN_TOP_LEVEL_COMMANDS = frozenset({
+    "acp", "auth", "backup", "chat", "claw", "completion", "config", "cron",
+    "curator", "dashboard", "debug", "doctor", "dump", "fallback", "gateway",
+    "hooks", "import", "insights", "login", "logout", "logs", "mcp", "memory",
+    "model", "plugins", "profile", "sessions", "setup", "skills", "slack",
+    "status", "tools", "uninstall", "update", "version", "webhook", "whatsapp",
+})
+
+_TOP_LEVEL_FLAGS_WITH_VALUES = frozenset({
+    "-m", "--model", "--provider", "-t", "--toolsets", "--resume", "-r",
+    "--continue", "-c", "--skills", "-s", "-z", "--oneshot", "--profile", "-p",
+})
+
+
+def _first_cli_command(argv: list[str]) -> str | None:
+    """Return the first positional command from argv without building argparse."""
+    skip_next = False
+    for arg in argv:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in _TOP_LEVEL_FLAGS_WITH_VALUES:
+            skip_next = True
+            continue
+        if arg.startswith("-"):
+            continue
+        return arg
+    return None
+
+
+def _should_discover_plugin_cli(argv: list[str] | None = None) -> bool:
+    """Avoid plugin CLI discovery for known built-in commands.
+
+    Plugin command discovery can import plugin packages. That work is only
+    needed when the user may be invoking a plugin-provided top-level command.
+    """
+    command = _first_cli_command(list(sys.argv[1:] if argv is None else argv))
+    return bool(command and command not in _BUILTIN_TOP_LEVEL_COMMANDS)
+
 def _add_accept_hooks_flag(parser) -> None:
     """Attach the ``--accept-hooks`` flag.  Shared across every agent
     subparser so the flag works regardless of CLI position."""
@@ -9015,19 +9055,20 @@ Examples:
     # Plugins provide a register_cli(subparser) function that builds their
     # own argparse tree.  No hardcoded plugin commands in main.py.
     # =========================================================================
-    try:
-        from plugins.memory import discover_plugin_cli_commands
+    if _should_discover_plugin_cli():
+        try:
+            from plugins.memory import discover_plugin_cli_commands
 
-        for cmd_info in discover_plugin_cli_commands():
-            plugin_parser = subparsers.add_parser(
-                cmd_info["name"],
-                help=cmd_info["help"],
-                description=cmd_info.get("description", ""),
-                formatter_class=__import__("argparse").RawDescriptionHelpFormatter,
-            )
-            cmd_info["setup_fn"](plugin_parser)
-    except Exception as _exc:
-        logging.getLogger(__name__).debug("Plugin CLI discovery failed: %s", _exc)
+            for cmd_info in discover_plugin_cli_commands():
+                plugin_parser = subparsers.add_parser(
+                    cmd_info["name"],
+                    help=cmd_info["help"],
+                    description=cmd_info.get("description", ""),
+                    formatter_class=__import__("argparse").RawDescriptionHelpFormatter,
+                )
+                cmd_info["setup_fn"](plugin_parser)
+        except Exception as _exc:
+            logging.getLogger(__name__).debug("Plugin CLI discovery failed: %s", _exc)
 
     # =========================================================================
     # curator command — background skill maintenance

@@ -25,3 +25,17 @@ def test_main_imports_without_missing_cli_modules():
     import hermes_cli.main as main_mod
 
     assert callable(main_mod.main)
+
+
+def test_builtin_commands_skip_plugin_cli_discovery():
+    import hermes_cli.main as main_mod
+
+    assert main_mod._should_discover_plugin_cli(["version"]) is False
+    assert main_mod._should_discover_plugin_cli(["memory", "doctor"]) is False
+    assert main_mod._should_discover_plugin_cli(["--profile", "coder", "version"]) is False
+
+
+def test_unknown_commands_allow_plugin_cli_discovery():
+    import hermes_cli.main as main_mod
+
+    assert main_mod._should_discover_plugin_cli(["honcho", "status"]) is True
