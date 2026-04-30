@@ -23,7 +23,6 @@ Design:
 - Frozen snapshot pattern: system prompt is stable, tool responses show live state
 """
 
-import fcntl
 import json
 import logging
 import os
@@ -32,9 +31,15 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 from hermes_constants import get_hermes_home
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+try:
+    import fcntl  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - exercised on Windows
+    fcntl = None
+    import msvcrt
 
 # Where memory files live — resolved dynamically so profile overrides
 # (HERMES_HOME env var changes) are always respected.  The old module-level
@@ -50,6 +55,14 @@ def get_memory_dir() -> Path:
 MEMORY_DIR = get_memory_dir()
 
 ENTRY_DELIMITER = "\n§\n"
+_AUTO_COMPACT_THRESHOLD = 0.82
+_SIMILARITY_THRESHOLD = 0.72
+_MAX_ENTRY_CHARS = 420
+_STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "have",
+    "in", "is", "it", "of", "on", "or", "that", "the", "this", "to", "use", "user",
+    "with", "you", "your", "用户", "使用", "喜欢", "项目", "记忆", "配置", "需要",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +110,92 @@ def _scan_memory_content(content: str) -> Optional[str]:
     return None
 
 
+def _normalize_memory_text(text: str) -> str:
+    return re.sub(r"\s+", " ", str(text or "").strip())
+
+
+def _memory_tokens(text: str) -> set[str]:
+    normalized = _normalize_memory_text(text).lower()
+    tokens = set(re.findall(r"[a-z0-9_./:-]{2,}|[\u4e00-\u9fff]{2,}", normalized))
+    return {token for token in tokens if token not in _STOPWORDS}
+
+
+def _memory_similarity(left: str, right: str) -> float:
+    left_tokens = _memory_tokens(left)
+    right_tokens = _memory_tokens(right)
+    if not left_tokens or not right_tokens:
+        return 0.0
+    if left_tokens == right_tokens and _normalize_memory_text(left).lower() != _normalize_memory_text(right).lower():
+        return 0.0
+    overlap = len(left_tokens & right_tokens)
+    return overlap / max(1, min(len(left_tokens), len(right_tokens)))
+
+
+def _merge_memory_pair(left: str, right: str) -> str:
+    left = _normalize_memory_text(left)
+    right = _normalize_memory_text(right)
+    if not left:
+        return right[:_MAX_ENTRY_CHARS].strip()
+    if not right or right == left:
+        return left[:_MAX_ENTRY_CHARS].strip()
+    if right.lower() in left.lower():
+        return left[:_MAX_ENTRY_CHARS].strip()
+    if left.lower() in right.lower():
+        return right[:_MAX_ENTRY_CHARS].strip()
+
+    parts: List[str] = []
+    for part in re.split(r"\s*[;；。]\s*", f"{left}; {right}"):
+        part = part.strip(" ;；。")
+        if part and not any(part.lower() == existing.lower() for existing in parts):
+            parts.append(part)
+    merged = "; ".join(parts)
+    if len(merged) <= _MAX_ENTRY_CHARS:
+        return merged
+    return (merged[: _MAX_ENTRY_CHARS - 1].rstrip(" ,;；。") + "…").strip()
+
+
+def _compact_memory_entries(entries: List[str], *, include_similar: bool = True) -> Tuple[List[str], Dict[str, int]]:
+    """Return compacted memory entries without semantic summarization.
+
+    This is intentionally conservative: normalize whitespace, remove exact/contained
+    duplicates, and merge strongly similar adjacent facts. It never invents new facts.
+    """
+    stats = {"normalized": 0, "removed": 0, "merged": 0}
+    compacted: List[str] = []
+
+    for raw in entries:
+        entry = _normalize_memory_text(raw)
+        if not entry:
+            stats["removed"] += 1
+            continue
+        if entry != raw:
+            stats["normalized"] += 1
+
+        match_index: Optional[int] = None
+        for idx, existing in enumerate(compacted):
+            existing_lower = existing.lower()
+            entry_lower = entry.lower()
+            if entry_lower == existing_lower or entry_lower in existing_lower:
+                stats["removed"] += 1
+                match_index = idx
+                break
+            if existing_lower in entry_lower:
+                compacted[idx] = entry
+                stats["removed"] += 1
+                match_index = idx
+                break
+            if include_similar and _memory_similarity(existing, entry) >= _SIMILARITY_THRESHOLD:
+                merged = _merge_memory_pair(existing, entry)
+                compacted[idx] = merged
+                stats["merged"] += 1
+                match_index = idx
+                break
+        if match_index is None:
+            compacted.append(entry)
+
+    return compacted, stats
+
+
 class MemoryStore:
     """
     Bounded curated memory with file persistence. One instance per AIAgent.
@@ -125,8 +224,8 @@ class MemoryStore:
         self.user_entries = self._read_file(mem_dir / "USER.md")
 
         # Deduplicate entries (preserves order, keeps first occurrence)
-        self.memory_entries = list(dict.fromkeys(self.memory_entries))
-        self.user_entries = list(dict.fromkeys(self.user_entries))
+        self.memory_entries, _ = _compact_memory_entries(self.memory_entries, include_similar=True)
+        self.user_entries, _ = _compact_memory_entries(self.user_entries, include_similar=True)
 
         # Capture frozen snapshot for system prompt injection
         self._system_prompt_snapshot = {
@@ -146,10 +245,20 @@ class MemoryStore:
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         fd = open(lock_path, "w")
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            if fcntl is not None:
+                fcntl.flock(fd, fcntl.LOCK_EX)
+            else:
+                msvcrt.locking(fd.fileno(), msvcrt.LK_LOCK, 1)
             yield
         finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            if fcntl is not None:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            else:
+                try:
+                    fd.seek(0)
+                    msvcrt.locking(fd.fileno(), msvcrt.LK_UNLCK, 1)
+                except OSError:
+                    pass
             fd.close()
 
     @staticmethod
@@ -165,7 +274,7 @@ class MemoryStore:
         Called under file lock to get the latest state before mutating.
         """
         fresh = self._read_file(self._path_for(target))
-        fresh = list(dict.fromkeys(fresh))  # deduplicate
+        fresh, _ = _compact_memory_entries(fresh, include_similar=True)
         self._set_entries(target, fresh)
 
     def save_to_disk(self, target: str):
@@ -195,6 +304,14 @@ class MemoryStore:
             return self.user_char_limit
         return self.memory_char_limit
 
+    def _auto_compact_target(self, target: str, *, include_similar: bool = True) -> Dict[str, int]:
+        entries = self._entries_for(target)
+        compacted, stats = _compact_memory_entries(entries, include_similar=include_similar)
+        if compacted != entries:
+            self._set_entries(target, compacted)
+            self.save_to_disk(target)
+        return stats
+
     def add(self, target: str, content: str) -> Dict[str, Any]:
         """Append a new entry. Returns error if it would exceed the char limit."""
         content = content.strip()
@@ -217,28 +334,51 @@ class MemoryStore:
             if content in entries:
                 return self._success_response(target, "Entry already exists (no duplicate added).")
 
+            compacted_entry, _stats = _compact_memory_entries(entries + [content], include_similar=True)
+            if len(compacted_entry) == len(entries):
+                self._set_entries(target, compacted_entry)
+                self.save_to_disk(target)
+                return self._success_response(target, "Entry merged into an existing similar memory.")
+
             # Calculate what the new total would be
-            new_entries = entries + [content]
+            new_entries = compacted_entry
             new_total = len(ENTRY_DELIMITER.join(new_entries))
 
             if new_total > limit:
+                self._set_entries(target, entries)
+                compact_stats = self._auto_compact_target(target, include_similar=True)
+                entries = self._entries_for(target)
+                new_entries = entries + [content]
+                new_total = len(ENTRY_DELIMITER.join(new_entries))
+                if new_total <= limit:
+                    entries.append(content)
+                    self._set_entries(target, entries)
+                    self.save_to_disk(target)
+                    return self._success_response(
+                        target,
+                        f"Entry added after auto-compaction ({compact_stats['removed']} removed, {compact_stats['merged']} merged).",
+                    )
                 current = self._char_count(target)
                 return {
                     "success": False,
                     "error": (
                         f"Memory at {current:,}/{limit:,} chars. "
                         f"Adding this entry ({len(content)} chars) would exceed the limit. "
-                        f"Replace or remove existing entries first."
+                        f"Replace or remove existing entries first. Auto-compaction could not free enough space."
                     ),
                     "current_entries": entries,
                     "usage": f"{current:,}/{limit:,}",
                 }
 
-            entries.append(content)
-            self._set_entries(target, entries)
+            self._set_entries(target, new_entries)
             self.save_to_disk(target)
 
-        return self._success_response(target, "Entry added.")
+            message = "Entry added."
+            if new_total >= int(limit * _AUTO_COMPACT_THRESHOLD):
+                stats = self._auto_compact_target(target, include_similar=True)
+                if stats["removed"] or stats["merged"]:
+                    message = f"Entry added; memory auto-compacted ({stats['removed']} removed, {stats['merged']} merged)."
+        return self._success_response(target, message)
 
     def replace(self, target: str, old_text: str, new_content: str) -> Dict[str, Any]:
         """Find entry containing old_text substring, replace it with new_content."""
@@ -497,8 +637,8 @@ MEMORY_SCHEMA = {
         "- 'user': who the user is (name, role, style, pet peeves)\n"
         "- 'memory': your notes (env facts, project conventions, tool quirks)\n\n"
         "Actions: add (new), replace (old_text identifies), remove (old_text identifies).\n\n"
-        "DON'T save: task progress / session outcomes (use session_search), trivial info, "
-        "raw data dumps. New procedures → save as skill instead."
+        "Do NOT save task progress / temporary task state / session outcomes (use session_search), "
+        "trivial info, raw data dumps. New procedures → save as skill instead."
     ),
     "parameters": {
         "type": "object",
@@ -543,7 +683,3 @@ registry.register(
     check_fn=check_memory_requirements,
     emoji="🧠",
 )
-
-
-
-

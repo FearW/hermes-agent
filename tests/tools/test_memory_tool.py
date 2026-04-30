@@ -8,6 +8,7 @@ from tools.memory_tool import (
     MemoryStore,
     memory_tool,
     _scan_memory_content,
+    _compact_memory_entries,
     ENTRY_DELIMITER,
     MEMORY_SCHEMA,
 )
@@ -120,6 +121,21 @@ class TestMemoryStoreAdd:
         assert result["success"] is True  # No error, just a note
         assert len(store.memory_entries) == 1  # Not duplicated
 
+    def test_add_similar_entry_merges(self, store):
+        store.add("memory", "Project hermes-agent uses Python 3.11")
+        result = store.add("memory", "Project hermes-agent uses Python 3.12")
+        assert result["success"] is True
+        assert len(store.memory_entries) == 1
+        assert "3.11" in store.memory_entries[0]
+        assert "3.12" in store.memory_entries[0]
+        assert "merged" in result["message"].lower()
+
+    def test_add_more_specific_entry_replaces_contained_entry(self, store):
+        store.add("memory", "Hermes uses uv")
+        result = store.add("memory", "Hermes uses uv and Python 3.12")
+        assert result["success"] is True
+        assert store.memory_entries == ["Hermes uses uv and Python 3.12"]
+
     def test_add_exceeding_limit_rejected(self, store):
         # Fill up to near limit
         store.add("memory", "x" * 490)
@@ -209,6 +225,46 @@ class TestMemoryStorePersistence:
         store = MemoryStore()
         store.load_from_disk()
         assert len(store.memory_entries) == 2
+
+    def test_compacts_similar_entries_on_load(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("tools.memory_tool.MEMORY_DIR", tmp_path)
+        monkeypatch.setattr("tools.memory_tool.get_memory_dir", lambda: tmp_path)
+        mem_file = tmp_path / "MEMORY.md"
+        mem_file.write_text(
+            "Project hermes-agent uses uv\n§\n"
+            "Project hermes-agent uses uv for installs\n§\n"
+            "User prefers concise Chinese"
+        )
+
+        store = MemoryStore()
+        store.load_from_disk()
+
+        assert len(store.memory_entries) == 2
+        assert any("installs" in entry for entry in store.memory_entries)
+
+
+class TestMemoryCompaction:
+    def test_compact_memory_entries_normalizes_and_merges(self):
+        entries, stats = _compact_memory_entries([
+            "  Project hermes-agent uses uv  ",
+            "Project hermes-agent uses uv for installs",
+            "User prefers concise Chinese",
+        ])
+
+        assert len(entries) == 2
+        assert stats["removed"] == 1
+        assert entries[0] == "Project hermes-agent uses uv for installs"
+
+    def test_compact_memory_entries_merges_strong_similarity(self):
+        entries, stats = _compact_memory_entries([
+            "Gateway memory maintenance archives L4 sessions",
+            "Gateway memory maintenance compacts L4 sessions",
+        ])
+
+        assert len(entries) == 1
+        assert stats["merged"] == 1
+        assert "archives" in entries[0]
+        assert "compacts" in entries[0]
 
 
 class TestMemoryStoreSnapshot:
