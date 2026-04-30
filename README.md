@@ -29,43 +29,62 @@
 
 ## 快速开始
 
-### 1. 克隆项目
+### 方式 A：最少命令直接运行（推荐）
+
+适合新用户。`uv` 会自动创建项目环境并安装基础依赖：
 
 ```bash
 git clone https://github.com/FearW/hermes-agent.git
 cd hermes-agent
+uv run hermes setup
+uv run hermes
 ```
 
-### 2. 安装依赖
-
-推荐使用 `uv`：
+如果已经配置过 API Key，也可以跳过 setup，直接：
 
 ```bash
-uv venv venv --python 3.11
-source venv/bin/activate
-uv pip install -e ".[all,dev]"
+uv run hermes
 ```
 
-Windows 建议在 WSL2 里运行；如果使用 PowerShell，本地虚拟环境激活命令通常是：
+### 方式 B：手动创建虚拟环境
+
+适合开发者或想固定环境的人：
+
+```bash
+uv venv .venv --python 3.11
+source .venv/bin/activate
+uv pip install -e ".[dev,web]"
+hermes setup
+hermes
+```
+
+Windows PowerShell 激活命令：
 
 ```powershell
-.\venv\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1
 ```
 
-### 3. 启动 Hermes
+### 可选能力按需安装
+
+不要一开始就装 `[all]`，它会拉取语音、消息平台、浏览器等较重依赖。需要什么再装什么：
 
 ```bash
-hermes
+uv pip install -e ".[messaging]"   # Telegram / Discord / Slack 等网关
+uv pip install -e ".[web]"         # Web Dashboard / TUI 网页服务
+uv pip install -e ".[voice]"       # 本地语音能力，依赖较重
+uv pip install -e ".[all]"         # 全量安装，不建议新手第一步使用
 ```
 
 常用命令：
 
 ```bash
-hermes setup      # 初始化配置
-hermes model      # 选择模型
-hermes tools      # 管理工具
-hermes gateway    # 启动 Telegram/Discord/Slack 等网关
-hermes doctor     # 检查环境问题
+uv run hermes version        # 查看版本
+uv run hermes setup          # 初始化配置
+uv run hermes model          # 选择模型
+uv run hermes tools          # 管理工具
+uv run hermes gateway        # 启动 Telegram/Discord/Slack 等网关
+uv run hermes memory doctor  # 检查记忆健康
+uv run hermes doctor         # 检查环境问题
 ```
 
 ---

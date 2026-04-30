@@ -35,7 +35,7 @@ def test_dynamic_tool_discovery_updates_existing_mapping_references(monkeypatch)
 
     tool_name = "test_dynamic_reference_tool"
     toolset_name = "test_dynamic_reference"
-    old_map = TOOL_TO_TOOLSET_MAP
+    old_map = module.TOOL_TO_TOOLSET_MAP
 
     def register_dynamic_tool():
         registry.register(
