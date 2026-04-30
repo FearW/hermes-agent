@@ -41,6 +41,8 @@ _tool_loop_lock = threading.Lock()
 _worker_thread_local = threading.local()  # per-worker-thread persistent loops
 _dynamic_discovery_done = False
 _dynamic_discovery_lock = threading.Lock()
+_toolset_resolution_cache: Dict[Tuple[Any, ...], Tuple[str, ...]] = {}
+
 
 
 def _get_tool_loop():
@@ -174,7 +176,7 @@ _discover_tools()
 
 def _ensure_dynamic_tool_discovery() -> None:
     """Discover MCP/plugin tools once, only when tool APIs are actually used."""
-    global _dynamic_discovery_done, TOOL_TO_TOOLSET_MAP, TOOLSET_REQUIREMENTS
+    global _dynamic_discovery_done
     if _dynamic_discovery_done:
         return
     with _dynamic_discovery_lock:
@@ -203,8 +205,11 @@ def _ensure_dynamic_tool_discovery() -> None:
         except Exception as e:
             logger.debug("Plan-mode classification failed: %s", e)
 
-        TOOL_TO_TOOLSET_MAP = registry.get_tool_to_toolset_map()
-        TOOLSET_REQUIREMENTS = registry.get_toolset_requirements()
+        TOOL_TO_TOOLSET_MAP.clear()
+        TOOL_TO_TOOLSET_MAP.update(registry.get_tool_to_toolset_map())
+        TOOLSET_REQUIREMENTS.clear()
+        TOOLSET_REQUIREMENTS.update(registry.get_toolset_requirements())
+        _toolset_resolution_cache.clear()
         _dynamic_discovery_done = True
 
 
@@ -255,31 +260,32 @@ _LEGACY_TOOLSET_MAP = {
 # get_tool_definitions  (the main schema provider)
 # =============================================================================
 
-def get_tool_definitions(
-    enabled_toolsets: List[str] = None,
-    disabled_toolsets: List[str] = None,
-    quiet_mode: bool = False,
-    allowed_tool_names: Optional[set] = None,
-) -> List[Dict[str, Any]]:
-    """
-    Get tool definitions for model API calls with toolset-based filtering.
+def _toolset_cache_key(
+    enabled_toolsets: Optional[List[str]],
+    disabled_toolsets: Optional[List[str]],
+    allowed_tool_names: Optional[set],
+) -> Tuple[Any, ...]:
+    return (
+        tuple(enabled_toolsets) if enabled_toolsets is not None else None,
+        tuple(disabled_toolsets) if disabled_toolsets is not None else None,
+        tuple(sorted(allowed_tool_names)) if allowed_tool_names is not None else None,
+        tuple(sorted(TOOL_TO_TOOLSET_MAP.items())),
+    )
 
-    All tools must be part of a toolset to be accessible.
 
-    Args:
-        enabled_toolsets: Only include tools from these toolsets.
-        disabled_toolsets: Exclude tools from these toolsets (if enabled_toolsets is None).
-        quiet_mode: Suppress status prints.
-        allowed_tool_names: If provided, intersects the toolset-resolved set
-            with this name allowlist.  Used by Plan mode to restrict the
-            planner to registry-flagged read-only tools.
+def _resolve_requested_tool_names(
+    enabled_toolsets: Optional[List[str]],
+    disabled_toolsets: Optional[List[str]],
+    quiet_mode: bool,
+    allowed_tool_names: Optional[set],
+) -> set:
+    cache_key = None
+    if quiet_mode:
+        cache_key = _toolset_cache_key(enabled_toolsets, disabled_toolsets, allowed_tool_names)
+        cached = _toolset_resolution_cache.get(cache_key)
+        if cached is not None:
+            return set(cached)
 
-    Returns:
-        Filtered list of OpenAI-format tool definitions.
-    """
-    _ensure_dynamic_tool_discovery()
-
-    # Determine which tool names the caller wants
     tools_to_include: set = set()
 
     if enabled_toolsets is not None:
@@ -322,18 +328,53 @@ def get_tool_definitions(
         for ts_name in get_all_toolsets():
             tools_to_include.update(resolve_toolset(ts_name))
 
+    if allowed_tool_names is not None:
+        tools_to_include = tools_to_include & set(allowed_tool_names)
+        if not quiet_mode:
+            print(f"🔒 Plan-mode allowlist applied: {len(tools_to_include)} tool(s) remain")
+
+    if cache_key is not None:
+        _toolset_resolution_cache[cache_key] = tuple(sorted(tools_to_include))
+
+    return tools_to_include
+
+
+def get_tool_definitions(
+    enabled_toolsets: List[str] = None,
+    disabled_toolsets: List[str] = None,
+    quiet_mode: bool = False,
+    allowed_tool_names: Optional[set] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Get tool definitions for model API calls with toolset-based filtering.
+
+    All tools must be part of a toolset to be accessible.
+
+    Args:
+        enabled_toolsets: Only include tools from these toolsets.
+        disabled_toolsets: Exclude tools from these toolsets (if enabled_toolsets is None).
+        quiet_mode: Suppress status prints.
+        allowed_tool_names: If provided, intersects the toolset-resolved set
+            with this name allowlist.  Used by Plan mode to restrict the
+            planner to registry-flagged read-only tools.
+
+    Returns:
+        Filtered list of OpenAI-format tool definitions.
+    """
+    _ensure_dynamic_tool_discovery()
+
+    tools_to_include = _resolve_requested_tool_names(
+        enabled_toolsets,
+        disabled_toolsets,
+        quiet_mode,
+        allowed_tool_names,
+    )
+
     # Plugin-registered tools are now resolved through the normal toolset
     # path — validate_toolset() / resolve_toolset() / get_all_toolsets()
     # all check the tool registry for plugin-provided toolsets.  No bypass
     # needed; plugins respect enabled_toolsets / disabled_toolsets like any
     # other toolset.
-
-    # Plan-mode name-level allowlist: applied AFTER toolset resolution so it
-    # can only shrink, never expand the selection.
-    if allowed_tool_names is not None:
-        tools_to_include = tools_to_include & set(allowed_tool_names)
-        if not quiet_mode:
-            print(f"🔒 Plan-mode allowlist applied: {len(tools_to_include)} tool(s) remain")
 
     # Ask the registry for schemas (only returns tools whose check_fn passes)
     filtered_tools = registry.get_definitions(tools_to_include, quiet=quiet_mode)

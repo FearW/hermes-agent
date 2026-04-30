@@ -7,6 +7,8 @@ from unittest.mock import call, patch
 
 import pytest
 
+from tools.registry import registry
+
 from model_tools import (
     handle_function_call,
     get_all_tool_names,
@@ -26,6 +28,66 @@ def test_dynamic_tool_discovery_is_explicitly_lazy(monkeypatch):
 
     assert module._dynamic_discovery_done is False
     module._dynamic_discovery_done = True
+
+
+def test_dynamic_tool_discovery_updates_existing_mapping_references(monkeypatch):
+    import model_tools as module
+
+    tool_name = "test_dynamic_reference_tool"
+    toolset_name = "test_dynamic_reference"
+    old_map = TOOL_TO_TOOLSET_MAP
+
+    def register_dynamic_tool():
+        registry.register(
+            name=tool_name,
+            toolset=toolset_name,
+            schema={
+                "description": "Dynamic test tool",
+                "parameters": {"type": "object", "properties": {}},
+            },
+            handler=lambda args, **kwargs: "{}",
+        )
+
+    monkeypatch.setattr("tools.mcp_tool.discover_mcp_tools", register_dynamic_tool)
+    monkeypatch.setattr("hermes_cli.plugins.discover_plugins", lambda: None)
+    monkeypatch.setattr("tools.plan_mode.apply_classification", lambda: None)
+    monkeypatch.setattr(module, "_dynamic_discovery_done", False)
+
+    try:
+        module._ensure_dynamic_tool_discovery()
+
+        assert old_map is module.TOOL_TO_TOOLSET_MAP
+        assert old_map[tool_name] == toolset_name
+    finally:
+        registry.deregister(tool_name)
+        module.TOOL_TO_TOOLSET_MAP.clear()
+        module.TOOL_TO_TOOLSET_MAP.update(registry.get_tool_to_toolset_map())
+        module.TOOLSET_REQUIREMENTS.clear()
+        module.TOOLSET_REQUIREMENTS.update(registry.get_toolset_requirements())
+
+
+def test_quiet_toolset_resolution_is_cached(monkeypatch):
+    import model_tools as module
+
+    calls = []
+
+    def fake_resolve_toolset(name):
+        calls.append(name)
+        return ["read_file"]
+
+    monkeypatch.setattr(module, "_dynamic_discovery_done", True)
+    monkeypatch.setattr(module, "validate_toolset", lambda name: True)
+    monkeypatch.setattr(module, "resolve_toolset", fake_resolve_toolset)
+    monkeypatch.setattr(module.registry, "get_definitions", lambda names, quiet=False: [])
+    module._toolset_resolution_cache.clear()
+
+    try:
+        module.get_tool_definitions(enabled_toolsets=["filesystem"], quiet_mode=True)
+        module.get_tool_definitions(enabled_toolsets=["filesystem"], quiet_mode=True)
+
+        assert calls == ["filesystem"]
+    finally:
+        module._toolset_resolution_cache.clear()
 
 
 # =========================================================================
