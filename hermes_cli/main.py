@@ -9054,9 +9054,9 @@ Examples:
     # =========================================================================
     memory_parser = subparsers.add_parser(
         "memory",
-        help="Configure external memory provider",
+        help="Configure and inspect memory",
         description=(
-            "Set up and manage external memory provider plugins.\n\n"
+            "Set up, inspect, and maintain memory.\n\n"
             "Available providers: honcho, openviking, mem0, hindsight,\n"
             "holographic, retaindb, byterover.\n\n"
             "Only one external provider can be active at a time.\n"
@@ -9068,6 +9068,15 @@ Examples:
         "setup", help="Interactive provider selection and configuration"
     )
     memory_sub.add_parser("status", help="Show current memory provider config")
+    _memory_doctor = memory_sub.add_parser(
+        "doctor",
+        help="Show built-in memory health and compaction advice",
+    )
+    _memory_doctor.add_argument(
+        "--compact",
+        action="store_true",
+        help="Apply safe compaction to MEMORY.md, USER.md, and low-value L4 rows",
+    )
     memory_sub.add_parser("off", help="Disable external provider (built-in only)")
     _reset_parser = memory_sub.add_parser(
         "reset",
@@ -9143,6 +9152,10 @@ Examples:
                 f"\n  Memory reset complete. New sessions will start with a blank slate."
             )
             print(f"  Files were in: {display_hermes_home()}/memories/\n")
+        elif sub == "doctor":
+            from hermes_cli.memory_doctor import run_memory_doctor
+
+            run_memory_doctor(args)
         else:
             from hermes_cli.memory_setup import memory_command
 
