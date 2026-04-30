@@ -241,6 +241,7 @@ class TestMemoryStorePersistence:
 
         assert len(store.memory_entries) == 2
         assert any("installs" in entry for entry in store.memory_entries)
+        assert len(mem_file.read_text(encoding="utf-8").split(ENTRY_DELIMITER)) == 2
 
 
 class TestMemoryCompaction:

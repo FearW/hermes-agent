@@ -220,18 +220,25 @@ class MemoryStore:
         mem_dir = get_memory_dir()
         mem_dir.mkdir(parents=True, exist_ok=True)
 
-        self.memory_entries = self._read_file(mem_dir / "MEMORY.md")
-        self.user_entries = self._read_file(mem_dir / "USER.md")
-
-        # Deduplicate entries (preserves order, keeps first occurrence)
-        self.memory_entries, _ = _compact_memory_entries(self.memory_entries, include_similar=True)
-        self.user_entries, _ = _compact_memory_entries(self.user_entries, include_similar=True)
+        self._load_and_compact_target("memory")
+        self._load_and_compact_target("user")
 
         # Capture frozen snapshot for system prompt injection
         self._system_prompt_snapshot = {
             "memory": self._render_block("memory", self.memory_entries),
             "user": self._render_block("user", self.user_entries),
         }
+
+    def _load_and_compact_target(self, target: str) -> Dict[str, int]:
+        """Load one store and persist safe compaction before prompt injection."""
+        path = self._path_for(target)
+        with self._file_lock(path):
+            entries = self._read_file(path)
+            compacted, stats = _compact_memory_entries(entries, include_similar=True)
+            self._set_entries(target, compacted)
+            if compacted != entries:
+                self._write_file(path, compacted)
+            return stats
 
     @staticmethod
     @contextmanager
@@ -620,6 +627,20 @@ def memory_tool(
 def check_memory_requirements() -> bool:
     """Memory tool has no external requirements -- always available."""
     return True
+
+
+def compact_builtin_memory(memory_char_limit: int = 2200, user_char_limit: int = 1375) -> Dict[str, Any]:
+    """Safely compact built-in memory files without requiring a user command."""
+    store = MemoryStore(memory_char_limit=memory_char_limit, user_char_limit=user_char_limit)
+    before_memory = store._read_file(store._path_for("memory"))
+    before_user = store._read_file(store._path_for("user"))
+    store.load_from_disk()
+    return {
+        "memory_removed": max(0, len(before_memory) - len(store.memory_entries)),
+        "user_removed": max(0, len(before_user) - len(store.user_entries)),
+        "memory_entries": len(store.memory_entries),
+        "user_entries": len(store.user_entries),
+    }
 
 
 # =============================================================================

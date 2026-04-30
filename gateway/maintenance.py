@@ -28,6 +28,11 @@ async def retention_loop(
             lifecycle = run_lifecycle_maintenance()
             if any(lifecycle.values()):
                 logger.info("Lifecycle maintenance updated states: %s", lifecycle)
+            from tools.memory_tool import compact_builtin_memory
+
+            builtin = compact_builtin_memory()
+            if builtin.get("memory_removed") or builtin.get("user_removed"):
+                logger.info("Built-in memory auto-compacted: %s", builtin)
             if l4_compaction:
                 from agent.l4_archive import compact_archive
 
