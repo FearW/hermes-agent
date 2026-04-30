@@ -28,6 +28,21 @@
 
 ## 快速开始
 
+### 方式 0：一键安装器（最省心）
+
+Windows PowerShell：
+
+```powershell
+irm https://raw.githubusercontent.com/FearW/hermes-agent/main/scripts/install.ps1 | iex
+```
+
+Linux / macOS / WSL：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/FearW/hermes-agent/main/scripts/install.sh | bash
+```
+
+安装器会从 `FearW/hermes-agent` 拉取本 Fork，默认只安装轻量基础依赖；语音、消息网关、Web 等重能力后续按需安装。
 ### 方式 A：最少命令直接运行（推荐）
 
 适合新用户。`uv` 会自动创建项目环境并安装基础依赖：
