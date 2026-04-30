@@ -6,7 +6,7 @@
 # Uses uv for desktop/server installs and Python's stdlib venv + pip on Termux.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/FearW/hermes-agent/main/scripts/install.sh | bash
 #
 # Or with options:
 #   curl -fsSL ... | bash -s -- --no-venv --skip-setup
@@ -26,8 +26,8 @@ NC='\033[0m' # No Color
 BOLD='\033[1m'
 
 # Configuration
-REPO_URL_SSH="git@github.com:NousResearch/hermes-agent.git"
-REPO_URL_HTTPS="https://github.com/NousResearch/hermes-agent.git"
+REPO_URL_SSH="git@github.com:FearW/hermes-agent.git"
+REPO_URL_HTTPS="https://github.com/FearW/hermes-agent.git"
 HERMES_HOME="$HOME/.hermes"
 INSTALL_DIR="${HERMES_INSTALL_DIR:-$HERMES_HOME/hermes-agent}"
 PYTHON_VERSION="3.11"
@@ -92,29 +92,26 @@ done
 
 print_banner() {
     echo ""
-    echo -e "${MAGENTA}${BOLD}"
-    echo "┌─────────────────────────────────────────────────────────┐"
-    echo "│             ⚕ Hermes Agent Installer                    │"
-    echo "├─────────────────────────────────────────────────────────┤"
-    echo "│  An open source AI agent by Nous Research.              │"
-    echo "└─────────────────────────────────────────────────────────┘"
-    echo -e "${NC}"
+    echo -e "${MAGENTA}${BOLD}============================================================${NC}"
+    echo -e "${MAGENTA}${BOLD}              Hermes Agent Installer - FearW Fork${NC}"
+    echo -e "${MAGENTA}${BOLD}============================================================${NC}"
+    echo ""
 }
 
 log_info() {
-    echo -e "${CYAN}→${NC} $1"
+    echo -e "${CYAN}->${NC} $1"
 }
 
 log_success() {
-    echo -e "${GREEN}✓${NC} $1"
+    echo -e "${GREEN}OK${NC} $1"
 }
 
 log_warn() {
-    echo -e "${YELLOW}⚠${NC} $1"
+    echo -e "${YELLOW}WARN${NC} $1"
 }
 
 log_error() {
-    echo -e "${RED}✗${NC} $1"
+    echo -e "${RED}ERROR${NC} $1"
 }
 
 is_termux() {
@@ -175,7 +172,7 @@ detect_os() {
             OS="windows"
             DISTRO="windows"
             log_error "Windows detected. Please use the PowerShell installer:"
-            log_info "  irm https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.ps1 | iex"
+            log_info "  irm https://raw.githubusercontent.com/FearW/hermes-agent/main/scripts/install.ps1 | iex"
             exit 1
             ;;
         *)
@@ -869,24 +866,17 @@ install_deps() {
         fi
     fi
 
-    # Install the main package in editable mode with all extras.
-    # Try [all] first, fall back to base install if extras have issues.
-    ALL_INSTALL_LOG=$(mktemp)
-    if ! $UV_CMD pip install -e ".[all]" 2>"$ALL_INSTALL_LOG"; then
-        log_warn "Full install (.[all]) failed, trying base install..."
-        log_info "Reason: $(tail -5 "$ALL_INSTALL_LOG" | head -3)"
-        rm -f "$ALL_INSTALL_LOG"
-        if ! $UV_CMD pip install -e "."; then
-            log_error "Package installation failed."
-            log_info "Check that build tools are installed: sudo apt install build-essential python3-dev"
-            log_info "Then re-run: cd $INSTALL_DIR && uv pip install -e '.[all]'"
-            exit 1
-        fi
-    else
-        rm -f "$ALL_INSTALL_LOG"
+    # Keep first-run installs lightweight and reliable. Heavy optional extras
+    # (voice, messaging, browser/RL integrations) can be installed later.
+    if ! $UV_CMD pip install -e "."; then
+        log_error "Package installation failed."
+        log_info "Check that build tools are installed: sudo apt install build-essential python3-dev"
+        log_info "Then re-run: cd $INSTALL_DIR && uv pip install -e '.'"
+        exit 1
     fi
 
     log_success "Main package installed"
+    log_info "Optional extras can be installed later, for example: uv pip install -e '.[messaging,web]'"
 
     # tinker-atropos (RL training) is optional — skip by default.
     # To enable RL tools: git submodule update --init tinker-atropos && uv pip install -e "./tinker-atropos"
@@ -918,7 +908,7 @@ setup_path() {
         if [ "$DISTRO" = "termux" ]; then
             log_info "Try: cd $INSTALL_DIR && python -m pip install -e '.[termux]' -c constraints-termux.txt"
         else
-            log_info "Try: cd $INSTALL_DIR && uv pip install -e '.[all]'"
+            log_info "Try: cd $INSTALL_DIR && uv pip install -e '.'"
         fi
         return 0
     fi

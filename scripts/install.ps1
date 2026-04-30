@@ -5,7 +5,7 @@
 # Uses uv for fast Python provisioning and package management.
 #
 # Usage:
-#   irm https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/FearW/hermes-agent/main/scripts/install.ps1 | iex
 #
 # Or download and run with options:
 #   .\install.ps1 -NoVenv -SkipSetup
@@ -26,8 +26,8 @@ $ErrorActionPreference = "Stop"
 # Configuration
 # ============================================================================
 
-$RepoUrlSsh = "git@github.com:NousResearch/hermes-agent.git"
-$RepoUrlHttps = "https://github.com/NousResearch/hermes-agent.git"
+$RepoUrlSsh = "git@github.com:FearW/hermes-agent.git"
+$RepoUrlHttps = "https://github.com/FearW/hermes-agent.git"
 $PythonVersion = "3.11"
 $NodeVersion = "22"
 
@@ -37,11 +37,9 @@ $NodeVersion = "22"
 
 function Write-Banner {
     Write-Host ""
-    Write-Host "┌─────────────────────────────────────────────────────────┐" -ForegroundColor Magenta
-    Write-Host "│             ⚕ Hermes Agent Installer                    │" -ForegroundColor Magenta
-    Write-Host "├─────────────────────────────────────────────────────────┤" -ForegroundColor Magenta
-    Write-Host "│  An open source AI agent by Nous Research.              │" -ForegroundColor Magenta
-    Write-Host "└─────────────────────────────────────────────────────────┘" -ForegroundColor Magenta
+    Write-Host "============================================================" -ForegroundColor Magenta
+    Write-Host "              Hermes Agent Installer - FearW Fork" -ForegroundColor Magenta
+    Write-Host "============================================================" -ForegroundColor Magenta
     Write-Host ""
 }
 
@@ -461,7 +459,7 @@ function Install-Repository {
             if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue }
             Write-Warn "Git clone failed — downloading ZIP archive instead..."
             try {
-                $zipUrl = "https://github.com/NousResearch/hermes-agent/archive/refs/heads/$Branch.zip"
+                $zipUrl = "https://github.com/FearW/hermes-agent/archive/refs/heads/$Branch.zip"
                 $zipPath = "$env:TEMP\hermes-agent-$Branch.zip"
                 $extractPath = "$env:TEMP\hermes-agent-extract"
                 
@@ -550,26 +548,19 @@ function Install-Dependencies {
         $env:VIRTUAL_ENV = "$InstallDir\venv"
     }
     
-    # Install main package with all extras
-    try {
-        & $UvCmd pip install -e ".[all]" 2>&1 | Out-Null
-    } catch {
-        & $UvCmd pip install -e "." | Out-Null
-    }
+    # Keep first-run installs lightweight and reliable. Heavy optional extras
+    # (voice, messaging, browser/RL integrations) can be installed later.
+    & $UvCmd pip install -e "." | Out-Null
     
     Write-Success "Main package installed"
+    Write-Info "Optional extras can be installed later, for example: uv pip install -e '.[messaging,web]'"
     
-    # Install optional submodules
-    Write-Info "Installing tinker-atropos (RL training backend)..."
+    # RL training backend is optional; do not make the default install depend on it.
     if (Test-Path "tinker-atropos\pyproject.toml") {
-        try {
-            & $UvCmd pip install -e ".\tinker-atropos" 2>&1 | Out-Null
-            Write-Success "tinker-atropos installed"
-        } catch {
-            Write-Warn "tinker-atropos install failed (RL tools may not work)"
-        }
+        Write-Info "tinker-atropos found; skipping optional RL install."
+        Write-Info "  To install later: uv pip install -e '.\tinker-atropos'"
     } else {
-        Write-Warn "tinker-atropos not found (run: git submodule update --init)"
+        Write-Info "tinker-atropos not found; skipping optional RL install."
     }
     
     Pop-Location
@@ -823,9 +814,9 @@ function Start-GatewayIfConfigured {
 
 function Write-Completion {
     Write-Host ""
-    Write-Host "┌─────────────────────────────────────────────────────────┐" -ForegroundColor Green
-    Write-Host "│              ✓ Installation Complete!                   │" -ForegroundColor Green
-    Write-Host "└─────────────────────────────────────────────────────────┘" -ForegroundColor Green
+    Write-Host "============================================================" -ForegroundColor Green
+    Write-Host "                 Installation Complete!" -ForegroundColor Green
+    Write-Host "============================================================" -ForegroundColor Green
     Write-Host ""
     
     # Show file locations
@@ -836,9 +827,9 @@ function Write-Completion {
     Write-Host "   API Keys:  " -NoNewline -ForegroundColor Yellow
     Write-Host "$HermesHome\.env"
     Write-Host "   Data:      " -NoNewline -ForegroundColor Yellow
-    Write-Host "$HermesHome\cron\, sessions\, logs\"
+    Write-Host "$HermesHome\cron\, sessions\, logs"
     Write-Host "   Code:      " -NoNewline -ForegroundColor Yellow
-    Write-Host "$HermesHome\hermes-agent\"
+    Write-Host "$HermesHome\hermes-agent"
     Write-Host ""
     
     Write-Host "─────────────────────────────────────────────────────────" -ForegroundColor Cyan
@@ -913,7 +904,7 @@ try {
     Write-Err "Installation failed: $_"
     Write-Host ""
     Write-Info "If the error is unclear, try downloading and running the script directly:"
-    Write-Host "  Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.ps1' -OutFile install.ps1" -ForegroundColor Yellow
+    Write-Host "  Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/FearW/hermes-agent/main/scripts/install.ps1' -OutFile install.ps1" -ForegroundColor Yellow
     Write-Host "  .\install.ps1" -ForegroundColor Yellow
     Write-Host ""
 }
