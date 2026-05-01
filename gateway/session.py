@@ -12,9 +12,7 @@ import hashlib
 import logging
 import os
 import json
-import re
 import threading
-import time
 import uuid
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -27,19 +25,6 @@ logger = logging.getLogger(__name__)
 def _now() -> datetime:
     """Return the current local time."""
     return datetime.now()
-
-
-def _sanitize_extra_content(extra_content: Any) -> Optional[Dict[str, Any]]:
-    """Keep only JSON-safe mapping payloads for replayable tool-call metadata."""
-    if extra_content is None:
-        return None
-    if not isinstance(extra_content, dict):
-        return None
-    try:
-        json.dumps(extra_content, ensure_ascii=False)
-    except Exception:
-        return None
-    return extra_content
 
 
 # ---------------------------------------------------------------------------
@@ -69,77 +54,17 @@ def _hash_chat_id(value: str) -> str:
     return _hash_id(value)
 
 
-
-def _normalize_tool_calls(tool_calls: Any) -> Optional[List[Dict[str, Any]]]:
-    """Normalize stored tool_calls so replayed sessions keep valid JSON arguments."""
-    if not isinstance(tool_calls, list):
-        return None
-
-    normalized: List[Dict[str, Any]] = []
-    for tc in tool_calls:
-        if not isinstance(tc, dict):
-            continue
-        func = tc.get("function")
-        if not isinstance(func, dict):
-            continue
-        name = func.get("name")
-        if not isinstance(name, str) or not name.strip():
-            continue
-
-        arguments = func.get("arguments")
-        if isinstance(arguments, dict):
-            arguments = json.dumps(arguments, ensure_ascii=False)
-        elif arguments is None:
-            arguments = "{}"
-        elif not isinstance(arguments, str):
-            arguments = str(arguments)
-
-        arguments = arguments.strip() if isinstance(arguments, str) else "{}"
-        if not arguments:
-            arguments = "{}"
-        else:
-            try:
-                json.loads(arguments)
-            except Exception:
-                try:
-                    decoder = json.JSONDecoder()
-                    idx = 0
-                    merged = {}
-                    parsed_any = False
-                    while idx < len(arguments):
-                        while idx < len(arguments) and arguments[idx].isspace():
-                            idx += 1
-                        if idx >= len(arguments):
-                            break
-                        obj, next_idx = decoder.raw_decode(arguments, idx)
-                        parsed_any = True
-                        if isinstance(obj, dict):
-                            merged.update(obj)
-                        idx = next_idx
-                    arguments = json.dumps(merged, ensure_ascii=False) if parsed_any and merged else "{}"
-                except Exception:
-                    arguments = "{}"
-
-        normalized_tc = {
-            **tc,
-            "function": {**func, "name": name.strip(), "arguments": arguments},
-        }
-        extra_content = _sanitize_extra_content(tc.get("extra_content"))
-        if extra_content is not None:
-            normalized_tc["extra_content"] = extra_content
-        else:
-            normalized_tc.pop("extra_content", None)
-        normalized.append(normalized_tc)
-
-    return normalized or None
-
-
 from .config import (
     Platform,
     GatewayConfig,
     SessionResetPolicy,  # noqa: F401 — re-exported via gateway/__init__.py
     HomeChannel,
 )
+from .whatsapp_identity import (
+    canonical_whatsapp_identifier,
+    normalize_whatsapp_identifier,  # noqa: F401 - re-exported for gateway.session callers
+)
+from utils import atomic_replace
 
 
 @dataclass
@@ -160,8 +85,12 @@ class SessionSource:
     user_name: Optional[str] = None
     thread_id: Optional[str] = None  # For forum topics, Discord threads, etc.
     chat_topic: Optional[str] = None  # Channel topic/description (Discord, Slack)
-    user_id_alt: Optional[str] = None  # Signal UUID (alternative to phone number)
+    user_id_alt: Optional[str] = None  # Platform-specific stable alt ID (Signal UUID, Feishu union_id)
     chat_id_alt: Optional[str] = None  # Signal group internal ID
+    is_bot: bool = False  # True when the message author is a bot/webhook (Discord)
+    guild_id: Optional[str] = None  # Discord guild / Slack workspace / Matrix server scope
+    parent_chat_id: Optional[str] = None  # Parent channel when chat_id refers to a thread
+    message_id: Optional[str] = None  # ID of the triggering message (for pin/reply/react)
     
     @property
     def description(self) -> str:
@@ -199,8 +128,14 @@ class SessionSource:
             d["user_id_alt"] = self.user_id_alt
         if self.chat_id_alt:
             d["chat_id_alt"] = self.chat_id_alt
+        if self.guild_id:
+            d["guild_id"] = self.guild_id
+        if self.parent_chat_id:
+            d["parent_chat_id"] = self.parent_chat_id
+        if self.message_id:
+            d["message_id"] = self.message_id
         return d
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SessionSource":
         return cls(
@@ -214,6 +149,9 @@ class SessionSource:
             chat_topic=data.get("chat_topic"),
             user_id_alt=data.get("user_id_alt"),
             chat_id_alt=data.get("chat_id_alt"),
+            guild_id=data.get("guild_id"),
+            parent_chat_id=data.get("parent_chat_id"),
+            message_id=data.get("message_id"),
         )
     
 
@@ -231,8 +169,7 @@ class SessionContext:
     source: SessionSource
     connected_platforms: List[Platform]
     home_channels: Dict[Platform, HomeChannel]
-    project_tag: str = "global"
-    project_root: str = ""
+    shared_multi_user_session: bool = False
     
     # Session metadata
     session_key: str = ""
@@ -247,6 +184,7 @@ class SessionContext:
             "home_channels": {
                 p.value: hc.to_dict() for p, hc in self.home_channels.items()
             },
+            "shared_multi_user_session": self.shared_multi_user_session,
             "session_key": self.session_key,
             "session_id": self.session_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -265,6 +203,31 @@ that requires raw IDs).  Discord is excluded because mentions use ``<@user_id>``
 and the LLM needs the real ID to tag users."""
 
 
+def _discord_tools_loaded() -> bool:
+    """True iff the agent will actually have Discord tools this session.
+
+    Two conditions must hold:
+      1. The `discord` or `discord_admin` toolset is enabled for the
+         Discord platform via `hermes tools` (opt-in, default OFF).
+      2. `DISCORD_BOT_TOKEN` is set — the tool's `check_fn` gates on it
+         at registry time, so the toolset being enabled in config is not
+         enough if the token isn't configured.
+
+    Returns False (safe default — keeps the stale-API disclaimer) on any
+    error so a bad config can't silently promise tools the agent lacks.
+    """
+    if not (os.environ.get("DISCORD_BOT_TOKEN") or "").strip():
+        return False
+    try:
+        from hermes_cli.config import load_config
+        from hermes_cli.tools_config import _get_platform_tools
+        cfg = load_config()
+        enabled = _get_platform_tools(cfg, "discord", include_default_mcp_servers=False)
+        return "discord" in enabled or "discord_admin" in enabled
+    except Exception:
+        return False
+
+
 def build_session_context_prompt(
     context: SessionContext,
     *,
@@ -272,7 +235,7 @@ def build_session_context_prompt(
 ) -> str:
     """
     Build the dynamic system prompt section that tells the agent about its context.
-    
+
     This is injected into the system prompt so the agent knows:
     - Where messages are coming from
     - What platforms are connected
@@ -284,13 +247,23 @@ def build_session_context_prompt(
     Platforms like Discord are excluded because mentions need real IDs.
     Routing still uses the original values (they stay in SessionSource).
     """
-    # Only apply redaction on platforms where IDs aren't needed for mentions
-    redact_pii = redact_pii and context.source.platform in _PII_SAFE_PLATFORMS
+    # Only apply redaction on platforms where IDs aren't needed for mentions.
+    # Check both the hardcoded set (builtins) and the plugin registry.
+    _is_pii_safe = context.source.platform in _PII_SAFE_PLATFORMS
+    if not _is_pii_safe:
+        try:
+            from gateway.platform_registry import platform_registry
+            entry = platform_registry.get(context.source.platform.value)
+            if entry and entry.pii_safe:
+                _is_pii_safe = True
+        except Exception:
+            pass
+    redact_pii = redact_pii and _is_pii_safe
     lines = [
         "## Current Session Context",
         "",
     ]
-    
+
     # Source info
     platform_name = context.source.platform.value.title()
     if context.source.platform == Platform.LOCAL:
@@ -315,29 +288,22 @@ def build_session_context_prompt(
         else:
             desc = src.description
         lines.append(f"**Source:** {platform_name} ({desc})")
-    
+
     # Channel topic (if available - provides context about the channel's purpose)
     if context.source.chat_topic:
         lines.append(f"**Channel Topic:** {context.source.chat_topic}")
 
-    if context.project_tag:
-        lines.append(f"**Project Tag:** {context.project_tag}")
-    if context.project_root:
-        lines.append(f"**Project Root:** {context.project_root}")
-
     # User identity.
-    # In shared thread sessions (non-DM with thread_id), multiple users
-    # contribute to the same conversation.  Don't pin a single user name
-    # in the system prompt — it changes per-turn and would bust the prompt
-    # cache.  Instead, note that this is a multi-user thread; individual
-    # sender names are prefixed on each user message by the gateway.
-    _is_shared_thread = (
-        context.source.chat_type != "dm"
-        and context.source.thread_id
-    )
-    if _is_shared_thread:
+    # In shared multi-user sessions (shared threads OR shared non-thread groups
+    # when group_sessions_per_user=False), multiple users contribute to the same
+    # conversation.  Don't pin a single user name in the system prompt — it
+    # changes per-turn and would bust the prompt cache.  Instead, note that
+    # this is a multi-user session; individual sender names are prefixed on
+    # each user message by the gateway.
+    if context.shared_multi_user_session:
+        session_label = "Multi-user thread" if context.source.thread_id else "Multi-user session"
         lines.append(
-            "**Session type:** Multi-user thread — messages are prefixed "
+            f"**Session type:** {session_label} — messages are prefixed "
             "with [sender name]. Multiple users may participate."
         )
     elif context.source.user_name:
@@ -347,7 +313,7 @@ def build_session_context_prompt(
         if redact_pii:
             uid = _hash_sender_id(uid)
         lines.append(f"**User ID:** {uid}")
-    
+
     # Platform-specific behavioral notes
     if context.source.platform == Platform.SLACK:
         lines.append("")
@@ -355,17 +321,57 @@ def build_session_context_prompt(
             "**Platform notes:** You are running inside Slack. "
             "You do NOT have access to Slack-specific APIs — you cannot search "
             "channel history, pin/unpin messages, manage channels, or list users. "
-            "Do not promise to perform these actions. If the user asks, explain "
-            "that you can only read messages sent directly to you and respond."
+            "Do not promise to perform these actions. The gateway may inline the "
+            "current message's Slack block/attachment payload when available, but "
+            "you still cannot call Slack APIs yourself."
         )
     elif context.source.platform == Platform.DISCORD:
+        # Inject the Discord IDs block only when the agent actually has
+        # Discord tools loaded this session — i.e. the user opted into
+        # `discord` / `discord_admin` via `hermes tools` AND the bot
+        # token is configured.  Otherwise keep the stale-API disclaimer
+        # honest so we never promise tools the agent lacks.
+        if _discord_tools_loaded():
+            src = context.source
+            id_lines = ["", "**Discord IDs (for the `discord` / `discord_admin` tools):**"]
+            if src.guild_id:
+                id_lines.append(f"  - Guild: `{src.guild_id}`")
+            if src.thread_id and src.parent_chat_id:
+                id_lines.append(f"  - Parent channel: `{src.parent_chat_id}`")
+                id_lines.append(f"  - Thread: `{src.thread_id}` (use as `channel_id` for fetch_messages etc.)")
+            else:
+                id_lines.append(f"  - Channel: `{src.chat_id}`")
+            if src.message_id:
+                id_lines.append(f"  - Triggering message: `{src.message_id}`")
+            lines.extend(id_lines)
+        else:
+            lines.append("")
+            lines.append(
+                "**Platform notes:** You are running inside Discord. "
+                "You do NOT have access to Discord-specific APIs — you cannot search "
+                "channel history, pin messages, manage roles, or list server members. "
+                "Do not promise to perform these actions. If the user asks, explain "
+                "that you can only read messages sent directly to you and respond."
+            )
+    elif context.source.platform == Platform.BLUEBUBBLES:
         lines.append("")
         lines.append(
-            "**Platform notes:** You are running inside Discord. "
-            "You do NOT have access to Discord-specific APIs — you cannot search "
-            "channel history, pin messages, manage roles, or list server members. "
-            "Do not promise to perform these actions. If the user asks, explain "
-            "that you can only read messages sent directly to you and respond."
+            "**Platform notes:** You are responding via iMessage. "
+            "Keep responses short and conversational — think texts, not essays. "
+            "Structure longer replies as separate short thoughts, each separated "
+            "by a blank line (double newline). Each block between blank lines "
+            "will be delivered as its own iMessage bubble, so write accordingly: "
+            "one idea per bubble, 1–3 sentences each. "
+            "If the user needs a detailed answer, give the short version first "
+            "and offer to elaborate."
+        )
+    elif context.source.platform == Platform.YUANBAO:
+        lines.append("")
+        lines.append(
+            "**Platform notes:** You are running inside Yuanbao. "
+            "You CAN send private (DM) messages via the send_message tool. "
+            "Use target='yuanbao:direct:<account_id>' for DM "
+            "and target='yuanbao:group:<group_code>' for group chat."
         )
 
     # Connected platforms
@@ -373,9 +379,9 @@ def build_session_context_prompt(
     for p in context.connected_platforms:
         if p != Platform.LOCAL:
             platforms_list.append(f"{p.value}: Connected ✓")
-    
+
     lines.append(f"**Connected Platforms:** {', '.join(platforms_list)}")
-    
+
     # Home channels
     if context.home_channels:
         lines.append("")
@@ -383,11 +389,13 @@ def build_session_context_prompt(
         for platform, home in context.home_channels.items():
             hc_id = _hash_chat_id(home.chat_id) if redact_pii else home.chat_id
             lines.append(f"  - {platform.value}: {home.name} (ID: {hc_id})")
-    
+
     # Delivery options for scheduled tasks
     lines.append("")
     lines.append("**Delivery options for scheduled tasks:**")
-    
+
+    from hermes_constants import display_hermes_home
+
     # Origin delivery
     if context.source.platform == Platform.LOCAL:
         lines.append("- `\"origin\"` → Local output (saved to files)")
@@ -396,18 +404,20 @@ def build_session_context_prompt(
             _hash_chat_id(context.source.chat_id) if redact_pii else context.source.chat_id
         )
         lines.append(f"- `\"origin\"` → Back to this chat ({_origin_label})")
-    
+
     # Local always available
-    lines.append("- `\"local\"` → Save to local files only (~/.hermes/cron/output/)")
-    
+    lines.append(
+        f"- `\"local\"` → Save to local files only ({display_hermes_home()}/cron/output/)"
+    )
+
     # Platform home channels
     for platform, home in context.home_channels.items():
         lines.append(f"- `\"{platform.value}\"` → Home channel ({home.name})")
-    
+
     # Note about explicit targeting
     lines.append("")
     lines.append("*For explicit targeting, use `\"platform:chat_id\"` format if the user provides a specific chat ID.*")
-    
+
     return "\n".join(lines)
 
 
@@ -449,22 +459,29 @@ class SessionEntry:
     auto_reset_reason: Optional[str] = None  # "idle" or "daily"
     reset_had_activity: bool = False  # whether the expired session had any messages
     
-    # Set by the background expiry watcher after it successfully flushes
-    # memories for this session.  Persisted to sessions.json so the flag
-    # survives gateway restarts (the old in-memory _pre_flushed_sessions
-    # set was lost on restart, causing redundant re-flushes).
-    memory_flushed: bool = False
+    # Set by the background expiry watcher after it finalizes an expired
+    # session (invoking on_session_finalize hooks and evicting the cached
+    # agent).  Persisted to sessions.json so the flag survives gateway
+    # restarts — prevents redundant finalization runs.
+    expiry_finalized: bool = False
 
     # When True the next call to get_or_create_session() will auto-reset
     # this session (create a new session_id) so the user starts fresh.
     # Set by /stop to break stuck-resume loops (#7536).
     suspended: bool = False
 
-    # Signature of model/routing config used when this session was created.
-    # If the signature changes, the session should auto-reset to avoid
-    # replaying incompatible cached context into a different model stack.
-    model_signature: Optional[str] = None
-    
+    # When True the session was interrupted by a gateway restart/shutdown
+    # drain timeout, but recovery is still expected.  Unlike ``suspended``,
+    # ``resume_pending`` preserves the existing session_id on next access —
+    # the user stays on the same transcript and the agent auto-continues
+    # from where it left off.  Cleared after the next successful turn.
+    # Escalation to ``suspended`` is handled by the existing
+    # ``.restart_failure_counts`` stuck-loop counter (#7536), not by a
+    # parallel counter on this entry.
+    resume_pending: bool = False
+    resume_reason: Optional[str] = None  # e.g. "restart_timeout"
+    last_resume_marked_at: Optional[datetime] = None
+
     def to_dict(self) -> Dict[str, Any]:
         result = {
             "session_key": self.session_key,
@@ -482,9 +499,15 @@ class SessionEntry:
             "last_prompt_tokens": self.last_prompt_tokens,
             "estimated_cost_usd": self.estimated_cost_usd,
             "cost_status": self.cost_status,
-            "memory_flushed": self.memory_flushed,
+            "expiry_finalized": self.expiry_finalized,
             "suspended": self.suspended,
-            "model_signature": self.model_signature,
+            "resume_pending": self.resume_pending,
+            "resume_reason": self.resume_reason,
+            "last_resume_marked_at": (
+                self.last_resume_marked_at.isoformat()
+                if self.last_resume_marked_at
+                else None
+            ),
         }
         if self.origin:
             result["origin"] = self.origin.to_dict()
@@ -502,7 +525,15 @@ class SessionEntry:
                 platform = Platform(data["platform"])
             except ValueError as e:
                 logger.debug("Unknown platform value %r: %s", data["platform"], e)
-        
+
+        last_resume_marked_at = None
+        _lrma = data.get("last_resume_marked_at")
+        if _lrma:
+            try:
+                last_resume_marked_at = datetime.fromisoformat(_lrma)
+            except (TypeError, ValueError):
+                last_resume_marked_at = None
+
         return cls(
             session_key=data["session_key"],
             session_id=data["session_id"],
@@ -520,9 +551,11 @@ class SessionEntry:
             last_prompt_tokens=data.get("last_prompt_tokens", 0),
             estimated_cost_usd=data.get("estimated_cost_usd", 0.0),
             cost_status=data.get("cost_status", "unknown"),
-            memory_flushed=data.get("memory_flushed", False),
+            expiry_finalized=data.get("expiry_finalized", data.get("memory_flushed", False)),
             suspended=data.get("suspended", False),
-            model_signature=data.get("model_signature"),
+            resume_pending=data.get("resume_pending", False),
+            resume_reason=data.get("resume_reason"),
+            last_resume_marked_at=last_resume_marked_at,
         )
 
 
@@ -532,7 +565,14 @@ def is_shared_multi_user_session(
     group_sessions_per_user: bool = True,
     thread_sessions_per_user: bool = False,
 ) -> bool:
-    """Return True when a non-DM session is shared across participants."""
+    """Return True when a non-DM session is shared across participants.
+
+    Mirrors the isolation rules in :func:`build_session_key`:
+      - DMs are never shared.
+      - Threads are shared unless ``thread_sessions_per_user`` is True.
+      - Non-thread group/channel sessions are shared unless
+        ``group_sessions_per_user`` is True (default: True = isolated).
+    """
     if source.chat_type == "dm":
         return False
     if source.thread_id:
@@ -570,15 +610,24 @@ def build_session_key(
     """
     platform = source.platform.value
     if source.chat_type == "dm":
-        if source.chat_id:
+        dm_chat_id = source.chat_id
+        if source.platform == Platform.WHATSAPP:
+            dm_chat_id = canonical_whatsapp_identifier(source.chat_id)
+
+        if dm_chat_id:
             if source.thread_id:
-                return f"agent:main:{platform}:dm:{source.chat_id}:{source.thread_id}"
-            return f"agent:main:{platform}:dm:{source.chat_id}"
+                return f"agent:main:{platform}:dm:{dm_chat_id}:{source.thread_id}"
+            return f"agent:main:{platform}:dm:{dm_chat_id}"
         if source.thread_id:
             return f"agent:main:{platform}:dm:{source.thread_id}"
         return f"agent:main:{platform}:dm"
 
     participant_id = source.user_id_alt or source.user_id
+    if participant_id and source.platform == Platform.WHATSAPP:
+        # Same JID/LID-flip bug as the DM case: without canonicalisation, a
+        # single group member gets two isolated per-user sessions when the
+        # bridge reshuffles alias forms.
+        participant_id = canonical_whatsapp_identifier(str(participant_id)) or participant_id
     key_parts = ["agent:main", platform, source.chat_type]
 
     if source.chat_id:
@@ -667,7 +716,7 @@ class SessionStore:
                 json.dump(data, f, indent=2)
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(tmp_path, sessions_file)
+            atomic_replace(tmp_path, sessions_file)
         except BaseException:
             try:
                 os.unlink(tmp_path)
@@ -787,33 +836,6 @@ class SessionStore:
             self._ensure_loaded_locked()
             return len(self._entries) > 1
 
-    def _build_model_signature(self) -> str:
-        import hashlib
-        import json as _json
-        from pathlib import Path as _Path
-
-        payload = {}
-        try:
-            import yaml as _y
-
-            cfg_path = _Path.home() / '.hermes' / 'config.yaml'
-            if cfg_path.exists():
-                with open(cfg_path, encoding='utf-8') as _f:
-                    cfg = _y.safe_load(_f) or {}
-                payload = {
-                    'model': cfg.get('model'),
-                    'fallback_providers': cfg.get('fallback_providers'),
-                    'fallback_model': cfg.get('fallback_model'),
-                    'smart_model_routing': cfg.get('smart_model_routing'),
-                    'context': cfg.get('context'),
-                    'compression': cfg.get('compression'),
-                }
-        except Exception:
-            payload = {}
-
-        raw = _json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
-        return hashlib.sha1(raw.encode('utf-8')).hexdigest()
-
     def get_or_create_session(
         self,
         source: SessionSource,
@@ -827,7 +849,6 @@ class SessionStore:
         """
         session_key = self._generate_session_key(source)
         now = _now()
-        current_model_signature = self._build_model_signature()
 
         # SQLite calls are made outside the lock to avoid holding it during I/O.
         # All _entries / _loaded mutations are protected by self._lock.
@@ -841,11 +862,23 @@ class SessionStore:
                 entry = self._entries[session_key]
 
                 # Auto-reset sessions marked as suspended (e.g. after /stop
-                # broke a stuck loop — #7536).
-                if entry.model_signature and entry.model_signature != current_model_signature:
-                    reset_reason = "model_config_changed"
-                elif entry.suspended:
+                # broke a stuck loop — #7536).  ``suspended`` is the hard
+                # forced-wipe signal and always wins over ``resume_pending``,
+                # so repeated interrupted restarts that escalate via the
+                # existing ``.restart_failure_counts`` stuck-loop counter
+                # still converge to a clean slate.
+                if entry.suspended:
                     reset_reason = "suspended"
+                elif entry.resume_pending:
+                    # Restart-interrupted session: preserve the session_id
+                    # and return the existing entry so the transcript
+                    # reloads intact.  ``resume_pending`` is cleared after
+                    # the NEXT successful turn completes (not here), which
+                    # means a re-interrupted retry keeps trying — the
+                    # stuck-loop counter handles terminal escalation.
+                    entry.updated_at = now
+                    self._save()
+                    return entry
                 else:
                     reset_reason = self._should_reset(entry, source)
                 if not reset_reason:
@@ -935,6 +968,112 @@ class SessionStore:
                 return True
         return False
 
+    def mark_resume_pending(
+        self,
+        session_key: str,
+        reason: str = "restart_timeout",
+    ) -> bool:
+        """Mark a session as resumable after a restart interruption.
+
+        Unlike ``suspend_session()``, this preserves the existing
+        ``session_id`` and the transcript.  The next call to
+        ``get_or_create_session()`` for this key returns the same entry
+        so the user auto-resumes on the same conversation lane.
+
+        Returns True if the session existed and was marked.
+        """
+        with self._lock:
+            self._ensure_loaded_locked()
+            if session_key in self._entries:
+                entry = self._entries[session_key]
+                # Never override an explicit ``suspended`` — that is a hard
+                # forced-wipe signal (from /stop or stuck-loop escalation).
+                if entry.suspended:
+                    return False
+                entry.resume_pending = True
+                entry.resume_reason = reason
+                entry.last_resume_marked_at = _now()
+                self._save()
+                return True
+        return False
+
+    def clear_resume_pending(self, session_key: str) -> bool:
+        """Clear the resume-pending flag after a successful resumed turn.
+
+        Called from the gateway after ``run_conversation()`` returns a
+        final response for a session that had ``resume_pending=True``,
+        signalling that recovery succeeded.
+
+        Returns True if a flag was cleared.
+        """
+        with self._lock:
+            self._ensure_loaded_locked()
+            entry = self._entries.get(session_key)
+            if entry is None or not entry.resume_pending:
+                return False
+            entry.resume_pending = False
+            entry.resume_reason = None
+            entry.last_resume_marked_at = None
+            self._save()
+            return True
+
+    def prune_old_entries(self, max_age_days: int) -> int:
+        """Drop SessionEntry records older than max_age_days.
+
+        Pruning is based on ``updated_at`` (last activity), not ``created_at``.
+        A session that's been active within the window is kept regardless of
+        how old it is.  Entries marked ``suspended`` are kept — the user
+        explicitly paused them for later resume.  Entries held by an active
+        process (via has_active_processes_fn) are also kept so long-running
+        background work isn't orphaned.
+
+        Pruning is functionally identical to a natural reset-policy expiry:
+        the transcript in SQLite stays, but the session_key → session_id
+        mapping is dropped and the user starts a fresh session on return.
+
+        ``max_age_days <= 0`` disables pruning; returns 0 immediately.
+        Returns the number of entries removed.
+        """
+        if max_age_days is None or max_age_days <= 0:
+            return 0
+        from datetime import timedelta
+
+        cutoff = _now() - timedelta(days=max_age_days)
+        removed_keys: list[str] = []
+
+        with self._lock:
+            self._ensure_loaded_locked()
+            for key, entry in list(self._entries.items()):
+                if entry.suspended:
+                    continue
+                # Never prune sessions with an active background process
+                # attached — the user may still be waiting on output.
+                # The callback is keyed by session_key (see process_registry.
+                # has_active_for_session); passing session_id here used to
+                # never match, so active sessions got pruned anyway.
+                if self._has_active_processes_fn is not None:
+                    try:
+                        if self._has_active_processes_fn(entry.session_key):
+                            continue
+                    except Exception as exc:
+                        logger.debug(
+                            "has_active_processes_fn raised during prune for %s: %s",
+                            entry.session_key, exc,
+                        )
+                if entry.updated_at < cutoff:
+                    removed_keys.append(key)
+            for key in removed_keys:
+                self._entries.pop(key, None)
+            if removed_keys:
+                self._save()
+
+        if removed_keys:
+            logger.info(
+                "SessionStore pruned %d entries older than %d days",
+                len(removed_keys), max_age_days,
+            )
+        return len(removed_keys)
+
     def suspend_recently_active(self, max_age_seconds: int = 120) -> int:
         """Mark recently-active sessions as suspended.
 
@@ -943,6 +1082,12 @@ class SessionStore:
         (#7536).  Only suspends sessions updated within *max_age_seconds*
         to avoid resetting long-idle sessions that are harmless to resume.
         Returns the number of sessions that were suspended.
+
+        Entries flagged ``resume_pending=True`` are skipped — those were
+        marked intentionally by the drain-timeout path as recoverable.
+        Terminal escalation for genuinely stuck ``resume_pending`` sessions
+        is handled by the existing ``.restart_failure_counts`` stuck-loop
+        counter, which runs after this method on startup.
         """
         from datetime import timedelta
 
@@ -951,6 +1096,8 @@ class SessionStore:
         with self._lock:
             self._ensure_loaded_locked()
             for entry in self._entries.values():
+                if entry.resume_pending:
+                    continue
                 if not entry.suspended and entry.updated_at >= cutoff:
                     entry.suspended = True
                     count += 1
@@ -1015,7 +1162,8 @@ class SessionStore:
         Used by ``/resume`` to restore a previously-named session.
         Ends the current session in SQLite (like reset), but instead of
         generating a fresh session ID, re-uses ``target_session_id`` so the
-        old transcript is loaded on the next message.
+        old transcript is loaded on the next message. If the target session was
+        previously ended, re-open it so gateway resume semantics match the CLI.
         """
         db_end_session_id = None
         new_entry = None
@@ -1055,6 +1203,12 @@ class SessionStore:
             except Exception as e:
                 logger.debug("Session DB end_session failed: %s", e)
 
+        if self._db:
+            try:
+                self._db.reopen_session(target_session_id)
+            except Exception as e:
+                logger.debug("Session DB reopen_session failed: %s", e)
+
         return new_entry
 
     def list_sessions(self, active_minutes: Optional[int] = None) -> List[SessionEntry]:
@@ -1084,28 +1238,29 @@ class SessionStore:
                      via its own _flush_messages_to_session_db(), preventing
                      the duplicate-write bug (#860).
         """
-        normalized_message = dict(message)
-        normalized_tool_calls = _normalize_tool_calls(message.get("tool_calls"))
-        if normalized_tool_calls:
-            normalized_message["tool_calls"] = normalized_tool_calls
-        else:
-            normalized_message.pop("tool_calls", None)
-
         # Write to SQLite (unless the agent already handled it)
         if self._db and not skip_db:
             try:
                 self._db.append_message(
                     session_id=session_id,
-                    role=normalized_message.get("role", "unknown"),
-                    content=normalized_message.get("content"),
-                    tool_name=normalized_message.get("tool_name"),
-                    tool_calls=normalized_message.get("tool_calls"),
-                    tool_call_id=normalized_message.get("tool_call_id"),
+                    role=message.get("role", "unknown"),
+                    content=message.get("content"),
+                    tool_name=message.get("tool_name"),
+                    tool_calls=message.get("tool_calls"),
+                    tool_call_id=message.get("tool_call_id"),
+                    reasoning=message.get("reasoning") if message.get("role") == "assistant" else None,
+                    reasoning_content=message.get("reasoning_content") if message.get("role") == "assistant" else None,
+                    reasoning_details=message.get("reasoning_details") if message.get("role") == "assistant" else None,
+                    codex_reasoning_items=message.get("codex_reasoning_items") if message.get("role") == "assistant" else None,
+                    codex_message_items=message.get("codex_message_items") if message.get("role") == "assistant" else None,
                 )
             except Exception as e:
                 logger.debug("Session DB operation failed: %s", e)
-
-        # Legacy JSONL writes disabled; SQLite is the primary transcript store.
+        
+        # Also write legacy JSONL (keeps existing tooling working during transition)
+        transcript_path = self.get_transcript_path(session_id)
+        with open(transcript_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(message, ensure_ascii=False) + "\n")
     
     def rewrite_transcript(self, session_id: str, messages: List[Dict[str, Any]]) -> None:
         """Replace the entire transcript for a session with new messages.
@@ -1113,33 +1268,19 @@ class SessionStore:
         Used by /retry, /undo, and /compress to persist modified conversation history.
         Rewrites both SQLite and legacy JSONL storage.
         """
-        # SQLite: clear old messages and re-insert
+        # SQLite: replace atomically so a mid-rewrite failure doesn't leave
+        # the session half-empty in the DB while JSONL still has history.
         if self._db:
             try:
-                self._db.clear_messages(session_id)
-                for msg in messages:
-                    normalized_msg = dict(msg)
-                    normalized_tool_calls = _normalize_tool_calls(msg.get("tool_calls"))
-                    if normalized_tool_calls:
-                        normalized_msg["tool_calls"] = normalized_tool_calls
-                    else:
-                        normalized_msg.pop("tool_calls", None)
-                    role = normalized_msg.get("role", "unknown")
-                    self._db.append_message(
-                        session_id=session_id,
-                        role=role,
-                        content=normalized_msg.get("content"),
-                        tool_name=normalized_msg.get("tool_name"),
-                        tool_calls=normalized_msg.get("tool_calls"),
-                        tool_call_id=normalized_msg.get("tool_call_id"),
-                        reasoning=normalized_msg.get("reasoning") if role == "assistant" else None,
-                        reasoning_details=normalized_msg.get("reasoning_details") if role == "assistant" else None,
-                        codex_reasoning_items=normalized_msg.get("codex_reasoning_items") if role == "assistant" else None,
-                    )
+                self._db.replace_messages(session_id, messages)
             except Exception as e:
                 logger.debug("Failed to rewrite transcript in DB: %s", e)
         
-        # Legacy JSONL rewrite disabled; SQLite is the primary transcript store.
+        # JSONL: overwrite the file
+        transcript_path = self.get_transcript_path(session_id)
+        with open(transcript_path, "w", encoding="utf-8") as f:
+            for msg in messages:
+                f.write(json.dumps(msg, ensure_ascii=False) + "\n")
 
     def load_transcript(self, session_id: str) -> List[Dict[str, Any]]:
         """Load all messages from a session's transcript."""
@@ -1190,34 +1331,6 @@ class SessionStore:
         return db_messages
 
 
-
-    def archive_and_prune_expired_transcripts(self, older_than_days: int = 14) -> int:
-        """Archive expired sessions into L4 memory, then delete raw transcript state."""
-        if not self._db:
-            return 0
-        from agent.l4_archive import archive_session_summary
-        cutoff = time.time() - (older_than_days * 86400)
-        with self._db._lock:
-            cursor = self._db._conn.execute(
-                "SELECT id, source FROM sessions WHERE started_at < ? AND ended_at IS NOT NULL",
-                (cutoff,),
-            )
-            rows = [dict(row) for row in cursor.fetchall()]
-        archived = 0
-        for row in rows:
-            sid = row["id"]
-            try:
-                messages = self._db.get_messages_as_conversation(sid)
-                archive_session_summary(sid, row.get("source") or "unknown", messages)
-                transcript_path = self.get_transcript_path(sid)
-                if transcript_path.exists():
-                    transcript_path.unlink()
-                self._db.delete_session(sid)
-                archived += 1
-            except Exception as e:
-                logger.debug("Failed to archive/prune session %s: %s", sid, e)
-        return archived
-
 def build_session_context(
     source: SessionSource,
     config: GatewayConfig,
@@ -1236,14 +1349,15 @@ def build_session_context(
         if home:
             home_channels[platform] = home
     
-    _project_root = os.getenv("TERMINAL_CWD", "").strip()
-    _project_tag = Path(_project_root).name if _project_root else "global"
     context = SessionContext(
         source=source,
         connected_platforms=connected,
         home_channels=home_channels,
-        project_tag=_project_tag or "global",
-        project_root=_project_root,
+        shared_multi_user_session=is_shared_multi_user_session(
+            source,
+            group_sessions_per_user=getattr(config, "group_sessions_per_user", True),
+            thread_sessions_per_user=getattr(config, "thread_sessions_per_user", False),
+        ),
     )
     
     if session_entry:

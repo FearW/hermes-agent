@@ -458,6 +458,12 @@ _PROVIDER_MODELS["ai-gateway"] = [mid for mid, _ in VERCEL_AI_GATEWAY_MODELS]
 # surface it to users as-is — no local allowlist filtering.
 
 
+_NOUS_ALLOWED_FREE_MODELS: frozenset[str] = frozenset({
+    "xiaomi/mimo-v2-pro",
+    "xiaomi/mimo-v2-omni",
+})
+
+
 def _is_model_free(model_id: str, pricing: dict[str, dict[str, str]]) -> bool:
     """Return True if *model_id* has zero-cost prompt AND completion pricing."""
     p = pricing.get(model_id)
@@ -467,6 +473,26 @@ def _is_model_free(model_id: str, pricing: dict[str, dict[str, str]]) -> bool:
         return float(p.get("prompt", "1")) == 0 and float(p.get("completion", "1")) == 0
     except (TypeError, ValueError):
         return False
+
+
+def filter_nous_free_models(
+    model_ids: list[str],
+    pricing: dict[str, dict[str, str]],
+) -> list[str]:
+    """Filter Nous Portal free models to the curated free allowlist."""
+    if not pricing:
+        return model_ids
+    filtered: list[str] = []
+    for model_id in model_ids:
+        price = pricing.get(model_id)
+        if price is None:
+            filtered.append(model_id)
+        elif _is_model_free(model_id, pricing):
+            if model_id in _NOUS_ALLOWED_FREE_MODELS:
+                filtered.append(model_id)
+        elif model_id not in _NOUS_ALLOWED_FREE_MODELS:
+            filtered.append(model_id)
+    return filtered
 
 
 # ---------------------------------------------------------------------------
@@ -1007,6 +1033,15 @@ def fetch_openrouter_models(
 def model_ids(*, force_refresh: bool = False) -> list[str]:
     """Return just the OpenRouter model-id strings."""
     return [mid for mid, _ in fetch_openrouter_models(force_refresh=force_refresh)]
+
+
+def menu_labels(*, force_refresh: bool = False) -> list[str]:
+    """Return OpenRouter model picker labels aligned with ``model_ids()``."""
+    labels: list[str] = []
+    for model_id, description in fetch_openrouter_models(force_refresh=force_refresh):
+        suffix = f" ({description})" if description else ""
+        labels.append(f"{model_id}{suffix}")
+    return labels
 
 
 def get_curated_nous_model_ids() -> list[str]:

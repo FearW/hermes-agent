@@ -85,6 +85,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
     CommandDef("queue", "Queue a prompt for the next turn (doesn't interrupt)", "Session",
                aliases=("q",), args_hint="<prompt>"),
     CommandDef("status", "Show session info", "Session"),
+    CommandDef("agents", "Show active agents and background tasks", "Session",
+               aliases=("tasks",)),
     CommandDef("profile", "Show active profile name and home directory", "Info"),
     CommandDef("sethome", "Set this chat as the home channel", "Session",
                gateway_only=True, aliases=("set-home",)),
@@ -1071,6 +1073,8 @@ def resolve_command(text):
         return None
     if name == 'reset':
         return _ResolvedCommand('new')
+    if name == 'tasks':
+        return _ResolvedCommand('agents')
     if name in ACTIVE_SESSION_BYPASS_COMMANDS:
         return _ResolvedCommand(name)
     return None
@@ -1084,4 +1088,10 @@ def is_gateway_known_command(command):
     if resolved is not None:
         return True
     raw = (command or '').strip().lower().lstrip('/')
-    return raw in GATEWAY_KNOWN_COMMANDS
+    if raw in GATEWAY_KNOWN_COMMANDS:
+        return True
+    try:
+        from hermes_cli.plugins import get_plugin_commands
+        return raw.replace("_", "-") in get_plugin_commands()
+    except Exception:
+        return False

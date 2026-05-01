@@ -50,6 +50,24 @@ from hermes_cli.config import get_hermes_home
 logger = logging.getLogger(__name__)
 
 
+def format_uptime_short(seconds: int | float) -> str:
+    """Format an elapsed duration for compact gateway status output."""
+    try:
+        remaining = max(0, int(seconds))
+    except (TypeError, ValueError):
+        remaining = 0
+    days, remaining = divmod(remaining, 86_400)
+    hours, remaining = divmod(remaining, 3_600)
+    minutes, secs = divmod(remaining, 60)
+    if days:
+        return f"{days}d{hours}h"
+    if hours:
+        return f"{hours}h{minutes}m"
+    if minutes:
+        return f"{minutes}m{secs}s"
+    return f"{secs}s"
+
+
 # Checkpoint file for crash recovery (gateway only)
 CHECKPOINT_PATH = get_hermes_home() / "processes.json"
 

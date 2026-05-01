@@ -607,6 +607,24 @@ def get_plugin_cli_commands() -> Dict[str, dict]:
     return dict(get_plugin_manager()._cli_commands)
 
 
+def get_plugin_commands() -> Dict[str, dict]:
+    """Return plugin slash/CLI commands keyed by command name.
+
+    Older gateway command-routing code used this name for plugin slash
+    commands.  Keep it as a compatibility alias for ``get_plugin_cli_commands``
+    so hooks and command discovery can recognize plugin-registered commands.
+    """
+    return get_plugin_cli_commands()
+
+
+def get_plugin_command_handler(name: str) -> Callable | None:
+    """Return a plugin command handler, if one was registered."""
+    command = get_plugin_cli_commands().get((name or "").strip().lower())
+    if not isinstance(command, dict):
+        return None
+    return command.get("handler_fn")
+
+
 def get_plugin_context_engine():
     """Return the plugin-registered context engine, or None."""
     return get_plugin_manager()._context_engine

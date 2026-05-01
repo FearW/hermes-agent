@@ -514,6 +514,11 @@ def _get_default_summarizer_model() -> Optional[str]:
 _debug = DebugSession("web_tools", env_var="WEB_TOOLS_DEBUG")
 
 
+def get_debug_session_info() -> dict:
+    """Return web tools debug session metadata."""
+    return _debug.get_session_info()
+
+
 async def process_content_with_llm(
     content: str, 
     url: str = "", 

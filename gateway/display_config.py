@@ -49,7 +49,7 @@ _TIER_HIGH = {
 }
 
 _TIER_MEDIUM = {
-    "tool_progress": "new",
+    "tool_progress": "off",
     "show_reasoning": False,
     "tool_preview_length": 40,
     "streaming": None,

@@ -210,6 +210,44 @@ def _check_disk_usage_warning():
         return False
 
 
+def _directory_size_bytes(path: Path) -> int:
+    total = 0
+    for item in path.rglob("*"):
+        if not item.is_file():
+            continue
+        try:
+            total += item.stat().st_size
+        except OSError as e:
+            logger.debug("Could not stat file %s: %s", item, e)
+    return total
+
+
+def get_active_environments_info() -> dict:
+    """Return compact diagnostics for active terminal environments."""
+    scratch_dir = _get_scratch_dir()
+    environments: list[dict[str, Any]] = []
+    total_bytes = 0
+
+    for task_id, env in list(_active_environments.items()):
+        prefix = str(task_id).split("-", 1)[0]
+        disk_bytes = 0
+        for path in scratch_dir.glob(f"hermes-sandbox-{prefix}*"):
+            if path.is_dir():
+                disk_bytes += _directory_size_bytes(path)
+        total_bytes += disk_bytes
+        environments.append({
+            "task_id": task_id,
+            "environment_type": type(env).__name__,
+            "disk_usage_mb": disk_bytes / (1024 * 1024),
+        })
+
+    return {
+        "count": len(environments),
+        "environments": environments,
+        "total_disk_usage_mb": total_bytes / (1024 * 1024),
+    }
+
+
 # Interactive sudo password cache.
 #
 # Scope the cache to the active session when a session key is available, then

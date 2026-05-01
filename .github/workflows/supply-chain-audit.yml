@@ -21,7 +21,7 @@ jobs:
       - name: Scan diff for suspicious patterns
         id: scan
         env:
-          GH_TOKEN: REDACTED secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -167,7 +167,7 @@ jobs:
       - name: Post warning comment
         if: steps.scan.outputs.found == 'true'
         env:
-          GH_TOKEN: REDACTED secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           SEVERITY="⚠️ Supply Chain Risk Detected"
           if [ "${{ steps.scan.outputs.critical }}" = "true" ]; then
