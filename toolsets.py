@@ -404,7 +404,17 @@ def get_toolset(name: str) -> Optional[Dict[str, Any]]:
         None: If toolset not found
     """
     # Return toolset definition
-    return TOOLSETS.get(name)
+    toolset = TOOLSETS.get(name)
+    if toolset is not None:
+        return toolset
+    try:
+        from tools.registry import registry
+        resolved = registry.resolve_toolset_alias(name)
+        if resolved != name:
+            return TOOLSETS.get(resolved)
+    except Exception:
+        pass
+    return None
 
 
 def resolve_toolset(name: str, visited: Set[str] = None) -> List[str]:
@@ -441,6 +451,12 @@ def resolve_toolset(name: str, visited: Set[str] = None) -> List[str]:
         return []
 
     visited.add(name)
+
+    try:
+        from tools.registry import registry
+        name = registry.resolve_toolset_alias(name)
+    except Exception:
+        pass
 
     # Get toolset definition
     toolset = TOOLSETS.get(name)
@@ -539,6 +555,11 @@ def get_toolset_names() -> List[str]:
     """
     names = set(TOOLSETS.keys())
     names |= _get_plugin_toolset_names()
+    try:
+        from tools.registry import registry
+        names |= set(registry.get_toolset_aliases().keys())
+    except Exception:
+        pass
     return sorted(names)
 
 
@@ -559,6 +580,13 @@ def validate_toolset(name: str) -> bool:
         return True
     if name in TOOLSETS:
         return True
+    try:
+        from tools.registry import registry
+        resolved = registry.resolve_toolset_alias(name)
+        if resolved != name:
+            return validate_toolset(resolved)
+    except Exception:
+        pass
     # Check tool registry for plugin-provided toolsets
     return name in _get_plugin_toolset_names()
 

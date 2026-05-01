@@ -588,7 +588,7 @@ def _print_setup_summary(config: dict, hermes_home):
     print(color("📝 To edit your configuration:", Colors.CYAN, Colors.BOLD))
     print()
     print(f"   {color('hermes setup', Colors.GREEN)}          Re-run the full wizard")
-    print(f"   {color('hermes setup model', Colors.GREEN)}    Change model/provider")
+    print(f"   {color('hermes setup model', Colors.GREEN)}    Change CPA model/channel")
     print(f"   {color('hermes setup terminal', Colors.GREEN)} Change terminal backend")
     print(f"   {color('hermes setup gateway', Colors.GREEN)}  Configure messaging")
     print(f"   {color('hermes setup tools', Colors.GREEN)}    Configure tool providers")
@@ -2941,7 +2941,7 @@ def _offer_openclaw_migration(hermes_home: Path) -> bool:
 # =============================================================================
 
 SETUP_SECTIONS = [
-    ("model", "Model & Provider", setup_model_provider),
+    ("model", "CPA Model & Channel", setup_model_provider),
     ("tts", "Text-to-Speech", setup_tts),
     ("terminal", "Terminal Backend", setup_terminal_backend),
     ("gateway", "Messaging Platforms (Gateway)", setup_gateway),
@@ -3126,8 +3126,8 @@ def run_setup_wizard(args):
         print_info("Each section below will show what was imported — press Enter to keep,")
         print_info("or choose to reconfigure if needed.")
 
-    # Section 1: Model & Provider
-    if not (migration_ran and _skip_configured_section(config, "model", "Model & Provider")):
+    # Section 1: CPA Model & Channel
+    if not (migration_ran and _skip_configured_section(config, "model", "CPA Model & Channel")):
         setup_model_provider(config)
 
     # Section 2: Terminal Backend
@@ -3170,7 +3170,7 @@ def _run_first_time_quick_setup(config: dict, hermes_home, is_existing: bool):
     settings, and tools — the user can customize later via
     ``hermes setup <section>``.
     """
-    # Step 1: Model & Provider (essential — skips rotation/vision/TTS)
+    # Step 1: CPA Model & Channel (essential — skips rotation/vision/TTS)
     setup_model_provider(config, quick=True)
 
     # Step 2: Apply defaults for everything else

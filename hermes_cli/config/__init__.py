@@ -357,7 +357,11 @@ def _ensure_hermes_home_managed(home: Path):
 # =============================================================================
 
 DEFAULT_CONFIG = {
-    "model": "",
+    "model": {
+        "default": "gpt-5(8192)",
+        "provider": "cliproxyapi",
+        "base_url": "http://127.0.0.1:8080/v1",
+    },
     "providers": {},
     "fallback_providers": [],
     "credential_pool_strategies": {},
@@ -585,7 +589,7 @@ DEFAULT_CONFIG = {
         "provider": "local",  # "local" (free, faster-whisper) | "groq" | "openai" (Whisper API) | "mistral" (Voxtral Transcribe)
         "local": {
             "model": "base",  # tiny, base, small, medium, large-v3
-            "language": "",  # auto-detect by default; set to "en", "es", "fr", etc. to force
+            "language": "zh",  # default Chinese; set to "" for auto-detect or another ISO language code
         },
         "openai": {
             "model": "whisper-1",  # whisper-1, gpt-4o-mini-transcribe, gpt-4o-transcribe
@@ -738,7 +742,7 @@ DEFAULT_CONFIG = {
         "force_ipv4": False,
     },
     # Config schema version - bump this when adding new required fields
-    "_config_version": 16,
+    "_config_version": 17,
 }
 
 # =============================================================================
@@ -1740,34 +1744,31 @@ def validate_config_structure(
     # ── fallback_model must be a top-level dict with provider + model ────
     fb = config.get("fallback_model")
     if fb is not None:
-        if not isinstance(fb, dict):
+        if isinstance(fb, str):
+            if not fb.strip():
+                issues.append(
+                    ConfigIssue(
+                        "warning",
+                        "fallback_model is empty - fallback will be disabled",
+                        "Set fallback_model to a CPA model name, e.g.: gpt-5-mini",
+                    )
+                )
+        elif not isinstance(fb, dict):
             issues.append(
                 ConfigIssue(
                     "error",
-                    f"fallback_model should be a dict with 'provider' and 'model', got {type(fb).__name__}",
-                    "Change to:\n"
-                    "  fallback_model:\n"
-                    "    provider: openrouter\n"
-                    "    model: anthropic/claude-sonnet-4",
+                    f"fallback_model should be a CPA model string or dict with 'model', got {type(fb).__name__}",
+                    "Change to:\n  fallback_model: gpt-5-mini",
                 )
             )
-        elif fb:
-            if not fb.get("provider"):
-                issues.append(
-                    ConfigIssue(
-                        "warning",
-                        "fallback_model is missing 'provider' field — fallback will be disabled",
-                        "Add: provider: openrouter (or another provider)",
-                    )
+        elif fb and not fb.get("model"):
+            issues.append(
+                ConfigIssue(
+                    "warning",
+                    "fallback_model is missing 'model' field - fallback will be disabled",
+                    "Add: model: gpt-5-mini",
                 )
-            if not fb.get("model"):
-                issues.append(
-                    ConfigIssue(
-                        "warning",
-                        "fallback_model is missing 'model' field — fallback will be disabled",
-                        "Add: model: anthropic/claude-sonnet-4 (or another model)",
-                    )
-                )
+            )
 
     # ── Check for fallback_model accidentally nested inside custom_providers ──
     if (
@@ -2117,6 +2118,21 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
             results["config_added"].append(
                 "display.platforms (migrated from tool_progress_overrides)"
             )
+
+    # Version 16 -> 17: make fresh/empty Hermes configs CPA-first.
+    # Existing explicit model/provider selections are preserved.
+    if current_ver < 17:
+        raw = read_raw_config()
+        raw_model = raw.get("model") if isinstance(raw, dict) else None
+        if raw_model in (None, ""):
+            config = raw if isinstance(raw, dict) else {}
+            default_model = DEFAULT_CONFIG.get("model")
+            if isinstance(default_model, dict):
+                config["model"] = dict(default_model)
+                save_config(config)
+                results["config_added"].append("model=cliproxyapi default")
+                if not quiet:
+                    print("  ✓ Set default model provider to CLIProxyAPI / CPA")
 
     if current_ver < latest_ver and not quiet:
         print(f"Config version: {current_ver} → {latest_ver}")

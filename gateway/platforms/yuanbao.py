@@ -1323,16 +1323,12 @@ class RecallGuardMiddleware(InboundMiddleware):
                               group_code: str, from_account: str) -> None:
         where = f"group {group_code}" if group_code else f"direct chat with {from_account}"
         recall_text = (
-            f"[CRITICAL — MESSAGE RECALLED] The user message that triggered "
-            f"your current task (message_id=\"{recalled_id}\") in {where} has "
-            f"been recalled/withdrawn by the sender. "
-            f"IGNORE any prior system note asking you to finish processing "
-            f"tool results — the original request is void. "
-            f"Do NOT continue the task, do NOT call more tools, do NOT "
-            f"reference the recalled content. "
-            f"Reply only with a brief acknowledgment such as "
-            f"\"The message has been recalled.\" in the "
-            f"language the user was using."
+            f"[重要：消息已撤回] 触发当前任务的用户消息 "
+            f"(message_id=\"{recalled_id}\") 在 {where} 已被发送者撤回。"
+            f"请忽略此前要求你继续处理工具结果的系统说明；原始请求已经失效。"
+            f"不要继续该任务，不要继续调用工具，不要引用已撤回内容。"
+            f"只回复一句简短确认，例如：\"消息已撤回。\""
+            f"默认使用中文；只有用户上下文明显使用英文时才使用英文。"
         )
 
         synth_event = MessageEvent(

@@ -35,20 +35,31 @@ def _read_chain(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     chain = config.get("fallback_providers") or []
     if isinstance(chain, list):
-        result = [dict(e) for e in chain if isinstance(e, dict) and e.get("provider") and e.get("model")]
+        result = []
+        for entry in chain:
+            if isinstance(entry, str) and entry.strip():
+                result.append({"provider": "cliproxyapi", "model": entry.strip()})
+            elif isinstance(entry, dict) and entry.get("model"):
+                item = dict(entry)
+                item["provider"] = "cliproxyapi"
+                result.append(item)
         if result:
             return result
     legacy = config.get("fallback_model")
-    if isinstance(legacy, dict) and legacy.get("provider") and legacy.get("model"):
-        return [dict(legacy)]
+    if isinstance(legacy, str) and legacy.strip():
+        return [{"provider": "cliproxyapi", "model": legacy.strip()}]
+    if isinstance(legacy, dict) and legacy.get("model"):
+        item = dict(legacy)
+        item["provider"] = "cliproxyapi"
+        return [item]
     if isinstance(legacy, list):
-        return [dict(e) for e in legacy if isinstance(e, dict) and e.get("provider") and e.get("model")]
+        return _read_chain({"fallback_providers": legacy})
     return []
 
 
 def _write_chain(config: Dict[str, Any], chain: List[Dict[str, Any]]) -> None:
     """Persist the chain to ``fallback_providers`` and clear legacy key."""
-    config["fallback_providers"] = chain
+    config["fallback_providers"] = [entry.get("model", "") for entry in chain if entry.get("model")]
     # Drop the legacy single-dict key on write so there's only one source of truth.
     if "fallback_model" in config:
         config.pop("fallback_model", None)
@@ -56,11 +67,10 @@ def _write_chain(config: Dict[str, Any], chain: List[Dict[str, Any]]) -> None:
 
 def _format_entry(entry: Dict[str, Any]) -> str:
     """One-line human-readable rendering of a fallback entry."""
-    provider = entry.get("provider", "?")
     model = entry.get("model", "?")
-    base = entry.get("base_url")
-    suffix = f"  [{base}]" if base else ""
-    return f"{model}  (via {provider}){suffix}"
+    context = entry.get("context_length")
+    suffix = f"  [{context} ctx]" if context else ""
+    return f"{model}  (CPA){suffix}"
 
 
 def _extract_fallback_from_model_cfg(model_cfg: Any) -> Optional[Dict[str, Any]]:
@@ -157,6 +167,38 @@ def cmd_fallback_add(args) -> None:
     from hermes_cli.config import load_config, save_config
 
     _require_tty("fallback add")
+
+    print()
+    print("  Adding a CPA fallback model. Hermes keeps the same CPA endpoint")
+    print("  and only switches the model name sent to CPA.")
+    print()
+    try:
+        model = input("  CPA fallback model name: ").strip()
+    except (KeyboardInterrupt, EOFError):
+        print()
+        print("  No fallback added.")
+        return
+    if not model:
+        print("  No fallback added.")
+        return
+
+    final_cfg = load_config()
+    chain = _read_chain(final_cfg)
+    new_entry = {"provider": "cliproxyapi", "model": model}
+    for existing in chain:
+        if existing.get("model") == model:
+            print()
+            print(f"  {_format_entry(new_entry)} is already in the fallback chain — skipped.")
+            return
+    chain.append(new_entry)
+    _write_chain(final_cfg, chain)
+    save_config(final_cfg)
+    print()
+    print(f"  Added fallback: {_format_entry(new_entry)}")
+    print(f"  Chain is now {len(chain)} {'entry' if len(chain) == 1 else 'entries'} long.")
+    print()
+    print("  Run `hermes fallback list` to view, or `hermes fallback remove` to delete.")
+    return
 
     # Snapshot BEFORE the picker runs so we can distinguish "user actually
     # picked something" from "user cancelled" by comparing before/after.

@@ -1,12 +1,4 @@
-"""
-Sticker description cache for Telegram.
-
-When users send stickers, we describe them via the vision tool and cache
-the descriptions keyed by file_unique_id so we don't re-analyze the same
-sticker image on every send. Descriptions are concise (1-2 sentences).
-
-Cache location: ~/.hermes/sticker_cache.json
-"""
+"""Sticker description cache for Telegram."""
 
 import json
 import time
@@ -17,10 +9,10 @@ from hermes_cli.config import get_hermes_home
 
 CACHE_PATH = get_hermes_home() / "sticker_cache.json"
 
-# Vision prompt for describing stickers -- kept concise to save tokens
 STICKER_VISION_PROMPT = (
-    "Describe this sticker in 1-2 sentences. Focus on what it depicts -- "
-    "character, action, emotion. Be concise and objective."
+    "\u8bf7\u7528\u4e2d\u6587\u7528 1-2 \u53e5\u8bdd\u63cf\u8ff0\u8fd9\u4e2a\u8d34\u7eb8\u3002"
+    "\u91cd\u70b9\u63cf\u8ff0\u89d2\u8272\u3001\u52a8\u4f5c\u548c\u60c5\u7eea\u3002"
+    "\u4fdd\u6301\u7b80\u6d01\u3001\u5ba2\u89c2\uff1b\u53ea\u6709\u8d34\u7eb8\u6587\u5b57\u672c\u8eab\u662f\u82f1\u6587\u65f6\u624d\u4fdd\u7559\u82f1\u6587\u3002"
 )
 
 
@@ -44,12 +36,7 @@ def _save_cache(cache: dict) -> None:
 
 
 def get_cached_description(file_unique_id: str) -> Optional[dict]:
-    """
-    Look up a cached sticker description.
-
-    Returns:
-        dict with keys {description, emoji, set_name, cached_at} or None.
-    """
+    """Look up a cached sticker description."""
     cache = _load_cache()
     return cache.get(file_unique_id)
 
@@ -60,15 +47,7 @@ def cache_sticker_description(
     emoji: str = "",
     set_name: str = "",
 ) -> None:
-    """
-    Store a sticker description in the cache.
-
-    Args:
-        file_unique_id: Telegram's stable sticker identifier.
-        description:    Vision-generated description text.
-        emoji:          Associated emoji (e.g. "😀").
-        set_name:       Sticker set name if available.
-    """
+    """Store a sticker description in the cache."""
     cache = _load_cache()
     cache[file_unique_id] = {
         "description": description,
@@ -84,28 +63,21 @@ def build_sticker_injection(
     emoji: str = "",
     set_name: str = "",
 ) -> str:
-    """
-    Build the warm-style injection text for a sticker description.
-
-    Returns a string like:
-      [The user sent a sticker 😀 from "MyPack"~ It shows: "A cat waving" (=^.w.^=)]
-    """
+    """Build Chinese Hermes injection text for a sticker description."""
     context = ""
     if set_name and emoji:
-        context = f" {emoji} from \"{set_name}\""
+        context = f" {emoji}\uff0c\u6765\u81ea\u201c{set_name}\u201d"
     elif emoji:
         context = f" {emoji}"
 
-    return f"[The user sent a sticker{context}~ It shows: \"{description}\" (=^.w.^=)]"
+    return f"[\u7528\u6237\u53d1\u9001\u4e86\u4e00\u4e2a\u8d34\u7eb8{context}\u3002\u8d34\u7eb8\u5185\u5bb9\uff1a\u201c{description}\u201d]"
 
 
 def build_animated_sticker_injection(emoji: str = "") -> str:
-    """
-    Build injection text for animated/video stickers we can't analyze.
-    """
+    """Build injection text for animated/video stickers we can't analyze."""
     if emoji:
         return (
-            f"[The user sent an animated sticker {emoji}~ "
-            f"I can't see animated ones yet, but the emoji suggests: {emoji}]"
+            f"[\u7528\u6237\u53d1\u9001\u4e86\u4e00\u4e2a\u52a8\u6001\u8d34\u7eb8 {emoji}\u3002"
+            f"\u5f53\u524d\u65e0\u6cd5\u76f4\u63a5\u67e5\u770b\u52a8\u6001\u8d34\u7eb8\uff0c\u4f46\u8868\u60c5\u63d0\u793a\u4e3a\uff1a{emoji}]"
         )
-    return "[The user sent an animated sticker~ I can't see animated ones yet]"
+    return "[\u7528\u6237\u53d1\u9001\u4e86\u4e00\u4e2a\u52a8\u6001\u8d34\u7eb8\u3002\u5f53\u524d\u65e0\u6cd5\u76f4\u63a5\u67e5\u770b\u52a8\u6001\u8d34\u7eb8\u3002]"

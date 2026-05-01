@@ -521,10 +521,22 @@ def _try_resolve_fallback_provider() -> dict | None:
         fb_list = fb if isinstance(fb, list) else [fb]
         for entry in fb_list:
             if not isinstance(entry, dict):
+                if isinstance(entry, str) and entry.strip():
+                    runtime = resolve_runtime_provider(requested="cliproxyapi")
+                    return {
+                        "api_key": runtime.get("api_key"),
+                        "base_url": runtime.get("base_url"),
+                        "provider": runtime.get("provider"),
+                        "api_mode": runtime.get("api_mode"),
+                        "command": runtime.get("command"),
+                        "args": list(runtime.get("args") or []),
+                        "credential_pool": runtime.get("credential_pool"),
+                    }
                 continue
             try:
+                requested = entry.get("provider") or "cliproxyapi"
                 runtime = resolve_runtime_provider(
-                    requested=entry.get("provider"),
+                    requested=requested,
                     explicit_base_url=entry.get("base_url"),
                     explicit_api_key=entry.get("api_key"),
                 )

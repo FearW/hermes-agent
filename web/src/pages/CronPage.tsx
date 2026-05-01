@@ -23,6 +23,14 @@ const STATUS_VARIANT: Record<string, "success" | "warning" | "destructive"> = {
   error: "destructive",
 };
 
+function jobStatus(job: CronJob): string {
+  return job.status ?? job.state ?? (job.enabled ? "enabled" : "paused");
+}
+
+function jobSchedule(job: CronJob): string {
+  return typeof job.schedule === "string" ? job.schedule : (job.schedule_display || job.schedule.display || job.schedule.expr);
+}
+
 export default function CronPage() {
   const [jobs, setJobs] = useState<CronJob[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,7 +83,7 @@ export default function CronPage() {
 
   const handlePauseResume = async (job: CronJob) => {
     try {
-      if (job.status === "paused") {
+      if (jobStatus(job) === "paused") {
         await api.resumeCronJob(job.id);
         showToast(`Resumed "${job.name || job.prompt.slice(0, 30)}"`, "success");
       } else {
@@ -212,8 +220,8 @@ export default function CronPage() {
                   <span className="font-medium text-sm truncate">
                     {job.name || job.prompt.slice(0, 60) + (job.prompt.length > 60 ? "..." : "")}
                   </span>
-                  <Badge variant={STATUS_VARIANT[job.status] ?? "secondary"}>
-                    {job.status}
+                  <Badge variant={STATUS_VARIANT[jobStatus(job)] ?? "secondary"}>
+                    {jobStatus(job)}
                   </Badge>
                   {job.deliver && job.deliver !== "local" && (
                     <Badge variant="outline">{job.deliver}</Badge>
@@ -225,12 +233,12 @@ export default function CronPage() {
                   </p>
                 )}
                 <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                  <span className="font-mono">{job.schedule}</span>
+                  <span className="font-mono">{jobSchedule(job)}</span>
                   <span>Last: {formatTime(job.last_run_at)}</span>
                   <span>Next: {formatTime(job.next_run_at)}</span>
                 </div>
-                {job.error && (
-                  <p className="text-xs text-destructive mt-1">{job.error}</p>
+                {(job.error || job.last_error) && (
+                  <p className="text-xs text-destructive mt-1">{job.error || job.last_error}</p>
                 )}
               </div>
 
@@ -239,11 +247,11 @@ export default function CronPage() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  title={job.status === "paused" ? "Resume" : "Pause"}
-                  aria-label={job.status === "paused" ? "Resume job" : "Pause job"}
+                  title={jobStatus(job) === "paused" ? "Resume" : "Pause"}
+                  aria-label={jobStatus(job) === "paused" ? "Resume job" : "Pause job"}
                   onClick={() => handlePauseResume(job)}
                 >
-                  {job.status === "paused" ? (
+                  {jobStatus(job) === "paused" ? (
                     <Play className="h-4 w-4 text-success" />
                   ) : (
                     <Pause className="h-4 w-4 text-warning" />

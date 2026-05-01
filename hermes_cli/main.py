@@ -306,6 +306,13 @@ def _has_any_provider_configured() -> bool:
         _model_name = ""
     _has_hermes_config = _model_name and _model_name != _DEFAULT_MODEL
 
+    if isinstance(model_cfg, str) and not model_cfg.strip():
+        default_model_cfg = DEFAULT_CONFIG.get("model")
+        if isinstance(default_model_cfg, dict):
+            default_provider = (default_model_cfg.get("provider") or "").strip().lower()
+            if default_provider in {"cliproxyapi", "cpa"}:
+                return True
+
     # Check env vars (may be set by .env or shell).
     # OPENAI_BASE_URL alone counts — local models (vLLM, llama.cpp, etc.)
     # often don't require an API key.
@@ -1679,6 +1686,8 @@ def select_provider_and_model(args=None):
     print(f"  Active provider:  {active_label}")
     print()
 
+    return _model_flow_cpa_only(config, current_model)
+
     # Step 1: Provider selection — flat list from CANONICAL_PROVIDERS
     all_providers = [(p.slug, p.tui_desc) for p in CANONICAL_PROVIDERS]
 
@@ -2267,6 +2276,149 @@ def _aux_flow_custom_endpoint(task: str, task_cfg: dict) -> None:
     )
     short_url = url.replace("https://", "").replace("http://", "").rstrip("/")
     print(f"{display_name}: custom ({short_url})" + (f" · {model}" if model else ""))
+
+
+_CPA_SETUP_CHANNELS = [
+    ("openai", "OpenAI compatible", "OpenAI-compatible upstreams such as OpenRouter, local proxy, or custom API"),
+    ("gemini", "Gemini API Key", "Google Gemini API key channel"),
+    ("codex", "Codex API Key", "CPA Codex key channel; use the WebUI CPA page for OAuth"),
+    ("claude", "Claude API Key", "Anthropic Claude key channel; use the WebUI CPA page for OAuth"),
+    ("vertex", "Vertex API Key", "Google Vertex AI credential channel"),
+    ("skip", "Skip channel setup", "Only save Hermes to CPA transport for now"),
+]
+
+
+def _cpa_management_url(base_url: str, path: str) -> str:
+    import urllib.parse
+
+    base_url = (base_url or "http://127.0.0.1:8080/v1").strip().rstrip("/")
+    parsed = urllib.parse.urlsplit(base_url)
+    clean_path = parsed.path.rstrip("/")
+    if clean_path.endswith("/v1"):
+        clean_path = clean_path[:-3].rstrip("/")
+    root = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, clean_path, "", "")).rstrip("/")
+    return f"{root}/{path.strip('/')}"
+
+
+def _cpa_put_provider_config(base_url: str, api_key: str, endpoint: str, payload: list[dict]) -> tuple[bool, str]:
+    import json
+    import urllib.error
+    import urllib.request
+
+    data = json.dumps(payload).encode("utf-8")
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    request = urllib.request.Request(
+        _cpa_management_url(base_url, endpoint),
+        data=data,
+        headers=headers,
+        method="PUT",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as resp:
+            resp.read()
+        return True, "已写入 CPA"
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace") or str(exc)
+        return False, f"CPA 返回 {exc.code}: {detail}"
+    except Exception as exc:
+        return False, f"无法连接 CPA: {exc}"
+
+
+def _model_flow_cpa_only(config, current_model=""):
+    """CPA-only model setup: Hermes saves only CPA transport and writes channels into CPA."""
+    import getpass
+
+    from hermes_cli.config import save_config, save_env_value
+
+    model_cfg = config.get("model") if isinstance(config.get("model"), dict) else {}
+    saved_model = str(model_cfg.get("default") or current_model or "gpt-5(8192)").strip()
+    if saved_model == "(not set)":
+        saved_model = "gpt-5(8192)"
+    saved_base_url = str(model_cfg.get("base_url") or "http://127.0.0.1:8080/v1").strip()
+
+    print("  Hermes 已切换为 CPA-only：不再配置 Hermes 自己的 provider。")
+    print("  所有上游渠道都会写入 CPA，Hermes 只请求 CPA 的 OpenAI-compatible /v1。")
+    print()
+
+    try:
+        model_name = input(f"Hermes 发给 CPA 的模型名 [{saved_model}]: ").strip() or saved_model
+        base_url = input(f"CPA /v1 地址 [{saved_base_url}]: ").strip() or saved_base_url
+        cpa_key = getpass.getpass("CPA API Key（本地无鉴权可留空）: ").strip()
+    except (KeyboardInterrupt, EOFError):
+        print()
+        return
+
+    model_cfg = dict(model_cfg)
+    model_cfg.update({
+        "default": model_name,
+        "provider": "cliproxyapi",
+        "base_url": base_url.rstrip("/"),
+    })
+    config["model"] = model_cfg
+    save_config(config)
+    if cpa_key:
+        save_env_value("CLIPROXY_API_KEY", cpa_key)
+
+    choices = [f"{label} — {desc}" for _, label, desc in _CPA_SETUP_CHANNELS]
+    idx = _prompt_provider_choice(choices, default=0)
+    if idx is None:
+        print("已保存 Hermes → CPA 连接。")
+        return
+    channel = _CPA_SETUP_CHANNELS[idx][0]
+    if channel == "skip":
+        print("已保存 Hermes → CPA 连接；可稍后在 WebUI 的 CPA 页面添加渠道。")
+        return
+
+    try:
+        upstream_key = getpass.getpass("上游 API Key: ").strip()
+        if not upstream_key:
+            print("未填写上游 API Key，只保存 Hermes → CPA 连接。")
+            return
+        prefix = input("渠道前缀（可选，例如 openrouter）: ").strip()
+    except (KeyboardInterrupt, EOFError):
+        print()
+        return
+
+    endpoint = {
+        "gemini": "gemini-api-key",
+        "codex": "codex-api-key",
+        "claude": "claude-api-key",
+        "vertex": "vertex-api-key",
+        "openai": "openai-compatibility",
+    }[channel]
+
+    if channel == "openai":
+        try:
+            name = input("渠道名称 [openai-compatible]: ").strip() or "openai-compatible"
+            upstream_base = input("上游 Base URL（必须是 /v1 兼容地址）: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            return
+        if not upstream_base:
+            print("未填写上游 Base URL，只保存 Hermes → CPA 连接。")
+            return
+        payload = [{
+            "name": name,
+            "base-url": upstream_base.rstrip("/"),
+            "api-key-entries": [{"api-key": upstream_key}],
+        }]
+        if prefix:
+            payload[0]["prefix"] = prefix
+    else:
+        entry = {"api-key": upstream_key}
+        if prefix:
+            entry["prefix"] = prefix
+        payload = [entry]
+
+    ok, message = _cpa_put_provider_config(base_url, cpa_key, endpoint, payload)
+    print(message)
+    if ok:
+        print(f"Hermes 默认模型：{model_name}")
+        print(f"CPA 渠道：{channel}")
+    else:
+        print("Hermes 连接已保存；启动 CPA 后可在 WebUI 的 CPA 页面重新保存渠道。")
 
 
 def _prompt_provider_choice(choices, *, default=0):
@@ -7892,8 +8044,8 @@ def main():
     # =========================================================================
     model_parser = subparsers.add_parser(
         "model",
-        help="Select default model and provider",
-        description="Interactively select your inference provider and default model",
+        help="Configure CPA model and upstream channel",
+        description="Configure Hermes to talk only to CPA and optionally add an upstream CPA channel",
     )
     model_parser.add_argument(
         "--portal-url",

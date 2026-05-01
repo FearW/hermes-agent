@@ -20,6 +20,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -396,6 +397,16 @@ def _build_schema_from_config(
         else:
             category = "general"
 
+        if full_key == "model" and isinstance(value, dict):
+            entry = {
+                "type": "string",
+                "description": "Default model routed through CPA",
+                "category": "general",
+            }
+            entry.update(_SCHEMA_OVERRIDES.get("model", {}))
+            schema[full_key] = entry
+            continue
+
         if isinstance(value, dict):
             # Recurse into nested dicts
             schema.update(_build_schema_from_config(value, full_key))
@@ -441,6 +452,22 @@ CONFIG_SCHEMA = _ordered_schema
 
 class ConfigUpdate(BaseModel):
     config: dict
+
+
+class CPAConfigUpdate(BaseModel):
+    model: Optional[str] = None
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+
+
+class CPAOAuthCallback(BaseModel):
+    provider: str
+    redirect_url: str
+
+
+class CPAAuthFileStatusUpdate(BaseModel):
+    name: str
+    disabled: bool
 
 
 class EnvVarUpdate(BaseModel):
@@ -983,6 +1010,217 @@ def _denormalize_config_from_web(config: Dict[str, Any]) -> Dict[str, Any]:
         except Exception:
             pass  # can't read disk config — just use the string form
     return config
+
+
+
+def _cpa_model_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    model_cfg = config.get("model")
+    default_model = DEFAULT_CONFIG.get("model", {})
+    if not isinstance(default_model, dict):
+        default_model = {}
+    if isinstance(model_cfg, dict):
+        merged = dict(default_model)
+        merged.update(model_cfg)
+    else:
+        merged = dict(default_model)
+        if isinstance(model_cfg, str) and model_cfg.strip():
+            merged["default"] = model_cfg.strip()
+    merged["provider"] = "cliproxyapi"
+    merged.setdefault("default", "gpt-5(8192)")
+    merged.setdefault("base_url", "http://127.0.0.1:8080/v1")
+    return merged
+
+
+@app.get("/api/cpa/config")
+async def get_cpa_config():
+    config = load_config()
+    model_cfg = _cpa_model_config(config)
+    env_on_disk = load_env()
+    api_key = (
+        env_on_disk.get("CLIPROXY_API_KEY")
+        or env_on_disk.get("CPA_API_KEY")
+        or os.getenv("CLIPROXY_API_KEY")
+        or os.getenv("CPA_API_KEY")
+        or ""
+    )
+    return {
+        "provider": "cliproxyapi",
+        "model": model_cfg.get("default", "gpt-5(8192)"),
+        "base_url": model_cfg.get("base_url", "http://127.0.0.1:8080/v1"),
+        "api_key_set": bool(api_key),
+        "api_key_preview": redact_key(api_key) if api_key else None,
+        "note": "Hermes only talks to CPA. Manage upstream model channels in the CPA WebUI.",
+    }
+
+
+@app.put("/api/cpa/config")
+async def update_cpa_config(body: CPAConfigUpdate):
+    config = load_config()
+    model_cfg = _cpa_model_config(config)
+    if body.model is not None and body.model.strip():
+        model_cfg["default"] = body.model.strip()
+    if body.base_url is not None and body.base_url.strip():
+        model_cfg["base_url"] = body.base_url.strip().rstrip("/")
+    config["model"] = model_cfg
+    save_config(config)
+    if body.api_key is not None:
+        value = body.api_key.strip()
+        if value:
+            save_env_value("CLIPROXY_API_KEY", value)
+    return {"ok": True, "config": await get_cpa_config()}
+
+
+_CPA_PROVIDER_ENDPOINTS = {
+    "gemini": "gemini-api-key",
+    "codex": "codex-api-key",
+    "claude": "claude-api-key",
+    "vertex": "vertex-api-key",
+    "openai": "openai-compatibility",
+}
+_CPA_OAUTH_PROVIDERS = {"codex", "anthropic", "antigravity", "gemini-cli", "kimi"}
+
+
+def _cpa_management_base_url() -> str:
+    model_cfg = _cpa_model_config(load_config())
+    base_url = str(model_cfg.get("base_url") or "http://127.0.0.1:8080/v1").strip().rstrip("/")
+    parsed = urllib.parse.urlsplit(base_url)
+    path = parsed.path.rstrip("/")
+    if path.endswith("/v1"):
+        path = path[:-3].rstrip("/")
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path, "", "")).rstrip("/")
+
+
+def _cpa_api_key() -> str:
+    env_on_disk = load_env()
+    return (
+        env_on_disk.get("CLIPROXY_API_KEY")
+        or env_on_disk.get("CPA_API_KEY")
+        or os.getenv("CLIPROXY_API_KEY")
+        or os.getenv("CPA_API_KEY")
+        or ""
+    )
+
+
+def _cpa_url(path: str, query: str = "") -> str:
+    clean_path = path.strip("/")
+    url = f"{_cpa_management_base_url()}/{clean_path}"
+    return f"{url}?{query}" if query else url
+
+
+def _jsonable_proxy_response(raw: bytes, content_type: str) -> Any:
+    text = raw.decode("utf-8", errors="replace")
+    if "application/json" in content_type.lower():
+        try:
+            return json.loads(text) if text else {}
+        except json.JSONDecodeError:
+            return {"raw": text}
+    return {"raw": text}
+
+
+def _cpa_proxy(
+    method: str,
+    path: str,
+    *,
+    query: str = "",
+    body: bytes | None = None,
+    content_type: str | None = "application/json",
+) -> Any:
+    headers = {"Accept": "application/json"}
+    api_key = _cpa_api_key()
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    if content_type and body is not None:
+        headers["Content-Type"] = content_type
+    request = urllib.request.Request(_cpa_url(path, query), data=body, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=20) as resp:
+            return _jsonable_proxy_response(resp.read(), resp.headers.get("Content-Type", ""))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace") or exc.reason
+        raise HTTPException(status_code=exc.code, detail=detail) from exc
+    except urllib.error.URLError as exc:
+        raise HTTPException(status_code=502, detail=f"CPA is unreachable: {exc.reason}") from exc
+
+
+async def _request_body_and_type(request: Request) -> tuple[bytes | None, str | None]:
+    body = await request.body()
+    content_type = request.headers.get("content-type")
+    return (body if body else None), content_type
+
+
+@app.get("/api/cpa/providers")
+async def list_cpa_provider_kinds():
+    return {"providers": list(_CPA_PROVIDER_ENDPOINTS.keys())}
+
+
+@app.get("/api/cpa/providers/{provider_kind}")
+async def get_cpa_provider_configs(provider_kind: str):
+    endpoint = _CPA_PROVIDER_ENDPOINTS.get(provider_kind)
+    if not endpoint:
+        raise HTTPException(status_code=404, detail="Unknown CPA provider")
+    return _cpa_proxy("GET", endpoint)
+
+
+@app.put("/api/cpa/providers/{provider_kind}")
+async def save_cpa_provider_configs(provider_kind: str, request: Request):
+    endpoint = _CPA_PROVIDER_ENDPOINTS.get(provider_kind)
+    if not endpoint:
+        raise HTTPException(status_code=404, detail="Unknown CPA provider")
+    body, content_type = await _request_body_and_type(request)
+    return _cpa_proxy("PUT", endpoint, body=body, content_type=content_type)
+
+
+@app.delete("/api/cpa/providers/{provider_kind}")
+async def delete_cpa_provider_config(provider_kind: str, request: Request):
+    endpoint = _CPA_PROVIDER_ENDPOINTS.get(provider_kind)
+    if not endpoint:
+        raise HTTPException(status_code=404, detail="Unknown CPA provider")
+    body, content_type = await _request_body_and_type(request)
+    return _cpa_proxy("DELETE", endpoint, query=request.url.query, body=body, content_type=content_type)
+
+
+@app.get("/api/cpa/oauth/{provider}/start")
+async def start_cpa_oauth(provider: str, request: Request):
+    if provider not in _CPA_OAUTH_PROVIDERS:
+        raise HTTPException(status_code=404, detail="Unknown CPA OAuth provider")
+    params = dict(request.query_params)
+    if provider in {"codex", "anthropic", "antigravity", "gemini-cli"}:
+        params.setdefault("is_webui", "true")
+    return _cpa_proxy("GET", f"{provider}-auth-url", query=urllib.parse.urlencode(params))
+
+
+@app.get("/api/cpa/oauth/status")
+async def get_cpa_oauth_status(request: Request):
+    return _cpa_proxy("GET", "get-auth-status", query=request.url.query)
+
+
+@app.post("/api/cpa/oauth/callback")
+async def submit_cpa_oauth_callback(body: CPAOAuthCallback):
+    payload = json.dumps(body.dict()).encode("utf-8")
+    return _cpa_proxy("POST", "oauth-callback", body=payload, content_type="application/json")
+
+
+@app.get("/api/cpa/auth-files")
+async def list_cpa_auth_files():
+    return _cpa_proxy("GET", "auth-files")
+
+
+@app.patch("/api/cpa/auth-files/status")
+async def update_cpa_auth_file_status(body: CPAAuthFileStatusUpdate):
+    payload = json.dumps(body.dict()).encode("utf-8")
+    return _cpa_proxy("PATCH", "auth-files/status", body=payload, content_type="application/json")
+
+
+@app.post("/api/cpa/auth-files")
+async def upload_cpa_auth_files(request: Request):
+    body, content_type = await _request_body_and_type(request)
+    return _cpa_proxy("POST", "auth-files", body=body, content_type=content_type)
+
+
+@app.delete("/api/cpa/auth-files")
+async def delete_cpa_auth_files(request: Request):
+    body, content_type = await _request_body_and_type(request)
+    return _cpa_proxy("DELETE", "auth-files", query=request.url.query, body=body, content_type=content_type)
 
 
 @app.put("/api/config")

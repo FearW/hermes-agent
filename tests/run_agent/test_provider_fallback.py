@@ -69,8 +69,9 @@ class TestFallbackChainInit:
             "not-a-dict",
         ]
         agent = _make_agent(fallback_model=fbs)
-        assert len(agent._fallback_chain) == 1
+        assert len(agent._fallback_chain) == 2
         assert agent._fallback_chain[0]["provider"] == "openai"
+        assert agent._fallback_chain[1] == {"provider": "cliproxyapi", "model": "not-a-dict"}
 
     def test_empty_list(self):
         agent = _make_agent(fallback_model=[])
@@ -81,6 +82,16 @@ class TestFallbackChainInit:
         agent = _make_agent(fallback_model={"model": "gpt-4o"})
         assert agent._fallback_chain == []
 
+    def test_cpa_fallback_accepts_model_string(self):
+        agent = _make_agent(fallback_model=None)
+        agent.provider = "cliproxyapi"
+        agent.base_url = "http://127.0.0.1:8080/v1"
+        agent.api_mode = "chat_completions"
+
+        assert agent._normalize_fallback_chain("gpt-5-mini") == [
+            {"provider": "cliproxyapi", "model": "gpt-5-mini"}
+        ]
+
 
 # ── Chain advancement ─────────────────────────────────────────────────────
 
@@ -89,6 +100,26 @@ class TestFallbackChainAdvancement:
     def test_exhausted_returns_false(self):
         agent = _make_agent(fallback_model=None)
         assert agent._try_activate_fallback() is False
+
+    def test_cpa_fallback_switches_only_model(self):
+        agent = _make_agent(fallback_model=None)
+        agent.provider = "cliproxyapi"
+        agent.base_url = "http://127.0.0.1:8080/v1"
+        agent.api_mode = "chat_completions"
+        agent.api_key = "cpa-key"
+        agent.model = "gpt-5(8192)"
+        agent.client = _mock_client(base_url="http://127.0.0.1:8080/v1", api_key="cpa-key")
+        agent._fallback_chain = agent._normalize_fallback_chain("gpt-5-mini")
+
+        with patch("agent.auxiliary_client.resolve_provider_client") as mock_rpc:
+            assert agent._try_activate_fallback() is True
+
+        mock_rpc.assert_not_called()
+        assert agent.model == "gpt-5-mini"
+        assert agent.provider == "cliproxyapi"
+        assert agent.base_url == "http://127.0.0.1:8080/v1"
+        assert agent.api_mode == "chat_completions"
+        assert agent.client.api_key == "cpa-key"
 
     def test_advances_index(self):
         fbs = [
@@ -181,6 +212,31 @@ class TestFallbackChainAdvancement:
         ):
             assert agent._try_activate_fallback() is True
             assert mock_rpc.call_args.kwargs["explicit_api_key"] == "env-secret"
+
+    def test_anthropic_messages_fallback_preserves_explicit_base_url(self):
+        fbs = [
+            {
+                "provider": "minimax-cn",
+                "model": "MiniMax-M2.7",
+                "base_url": "https://api.minimaxi.com/anthropic",
+                "api_mode": "anthropic_messages",
+                "api_key": "mm-key",
+            }
+        ]
+        agent = _make_agent(fallback_model=fbs)
+        with (
+            patch("agent.auxiliary_client.resolve_provider_client", return_value=(
+                _mock_client(base_url="https://api.minimaxi.com/v1", api_key="mm-key"),
+                "MiniMax-M2.7",
+            )),
+            patch("agent.anthropic_adapter.build_anthropic_client", return_value=MagicMock()) as build_client,
+        ):
+            assert agent._try_activate_fallback() is True
+
+        assert agent.api_mode == "anthropic_messages"
+        assert agent.base_url == "https://api.minimaxi.com/anthropic"
+        build_client.assert_called_once()
+        assert build_client.call_args.args[1] == "https://api.minimaxi.com/anthropic"
 
 
 # ── Pool-rotation vs fallback gating (#11314) ────────────────────────────

@@ -42,10 +42,11 @@ async def _llm_summarize(session_id: str, messages: List[Dict[str, Any]]) -> Opt
             return None
         transcript_text = "\n".join(lines)
         prompt = (
-            "You are a memory archivist. Summarize this conversation in 3-5 sentences.\n"
-            "Cover: what the user wanted, what was done, key decisions/findings, outcome, unresolved items.\n"
-            "Be factual and concise. Use the same language as the conversation.\n\n"
-            f"CONVERSATION:\n{transcript_text}\n\nSUMMARY:"
+            "你是 Hermes 的记忆归档员。请用 3-5 句总结这段对话。\n"
+            "覆盖：用户想要什么、已经做了什么、关键决策/发现、结果、未解决事项。\n"
+            "要求：事实准确、简洁。默认中文输出；只有原对话明确全程英文时才使用英文。\n"
+            "不要输出日语、德语、法语、西班牙语或其他语言。\n\n"
+            f"对话内容：\n{transcript_text}\n\n摘要："
         )
         resp = await asyncio.wait_for(
             openai_client.chat.completions.create(

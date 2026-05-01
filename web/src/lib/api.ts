@@ -1,7 +1,5 @@
 const BASE = "";
 
-import type { DashboardTheme } from "@/themes/types";
-
 // Ephemeral session token for protected endpoints.
 // Injected into index.html by the server — never fetched via API.
 declare global {
@@ -69,6 +67,48 @@ export const api = {
   getDefaults: () => fetchJSON<Record<string, unknown>>("/api/config/defaults"),
   getSchema: () => fetchJSON<{ fields: Record<string, unknown>; category_order: string[] }>("/api/config/schema"),
   getModelInfo: () => fetchJSON<ModelInfoResponse>("/api/model/info"),
+  getCPAConfig: () => fetchJSON<CPAConfigResponse>("/api/cpa/config"),
+  saveCPAConfig: (config: { model?: string; base_url?: string; api_key?: string }) =>
+    fetchJSON<{ ok: boolean; config: CPAConfigResponse }>("/api/cpa/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(config),
+    }),
+  listCPAProviderKinds: () => fetchJSON<{ providers: CPAProviderKind[] }>("/api/cpa/providers"),
+  getCPAProviderConfigs: (kind: CPAProviderKind) =>
+    fetchJSON<unknown>(`/api/cpa/providers/${encodeURIComponent(kind)}`),
+  saveCPAProviderConfigs: (kind: CPAProviderKind, configs: unknown) =>
+    fetchJSON<unknown>(`/api/cpa/providers/${encodeURIComponent(kind)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(configs),
+    }),
+  startCPAOAuth: (provider: CPAOAuthProvider, options?: { projectId?: string }) => {
+    const qs = new URLSearchParams();
+    if (options?.projectId) qs.set("project_id", options.projectId);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return fetchJSON<CPAOAuthStartResponse>(`/api/cpa/oauth/${encodeURIComponent(provider)}/start${suffix}`);
+  },
+  getCPAOAuthStatus: (state: string) =>
+    fetchJSON<CPAOAuthStatusResponse>(`/api/cpa/oauth/status?state=${encodeURIComponent(state)}`),
+  submitCPAOAuthCallback: (provider: CPAOAuthProvider, redirectUrl: string) =>
+    fetchJSON<{ status: string }>("/api/cpa/oauth/callback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider, redirect_url: redirectUrl }),
+    }),
+  listCPAAuthFiles: () => fetchJSON<CPAAuthFilesResponse>("/api/cpa/auth-files"),
+  setCPAAuthFileStatus: (name: string, disabled: boolean) =>
+    fetchJSON<unknown>("/api/cpa/auth-files/status", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, disabled }),
+    }),
+  uploadCPAAuthFiles: (files: FileList | File[]) => {
+    const form = new FormData();
+    Array.from(files).forEach((file) => form.append("file", file, file.name));
+    return fetchJSON<unknown>("/api/cpa/auth-files", { method: "POST", body: form });
+  },
   saveConfig: (config: Record<string, unknown>) =>
     fetchJSON<{ ok: boolean }>("/api/config", {
       method: "PUT",
@@ -412,6 +452,51 @@ export interface ModelsAnalyticsResponse {
   period_days: number;
 }
 
+export interface CPAConfigResponse {
+  provider: string;
+  model: string;
+  base_url: string;
+  api_key_set: boolean;
+  api_key_preview: string | null;
+  note: string;
+}
+
+export type CPAProviderKind = "gemini" | "codex" | "claude" | "vertex" | "openai";
+export type CPAOAuthProvider = "codex" | "anthropic" | "antigravity" | "gemini-cli" | "kimi";
+
+export interface CPAOAuthStartResponse {
+  url: string;
+  state?: string;
+}
+
+export interface CPAOAuthStatusResponse {
+  status: "ok" | "wait" | "error" | string;
+  error?: string;
+}
+
+export interface CPAAuthFileItem {
+  name: string;
+  type?: string;
+  channel?: string;
+  provider?: string;
+  disabled?: boolean;
+  authIndex?: number;
+  modified?: string;
+  mtime?: string;
+  size?: number;
+  models?: string[];
+}
+
+export interface CPAAuthFilesResponse {
+  files?: CPAAuthFileItem[];
+  items?: CPAAuthFileItem[];
+  [key: string]: unknown;
+}
+
+export interface DashboardTheme {
+  [key: string]: unknown;
+}
+
 export interface CronJob {
   id: string;
   name?: string;
@@ -420,10 +505,12 @@ export interface CronJob {
   schedule_display: string;
   enabled: boolean;
   state: string;
+  status?: string;
   deliver?: string;
   last_run_at?: string | null;
   next_run_at?: string | null;
   last_error?: string | null;
+  error?: string | null;
 }
 
 export interface SkillInfo {

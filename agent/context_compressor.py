@@ -741,18 +741,15 @@ class ContextCompressor(ContextEngine):
         # Inspired by OpenCode's "do not respond to any questions" instruction
         # and Codex's "another language model" framing.
         _summarizer_preamble = (
-            "You are a summarization agent creating a context checkpoint. "
-            "Your output will be injected as reference material for a DIFFERENT "
-            "assistant that continues the conversation. "
-            "Do NOT respond to any questions or requests in the conversation — "
-            "only output the structured summary. "
-            "Do NOT include any preamble, greeting, or prefix. "
-            "Write the summary in the same language the user was using in the "
-            "conversation — do not translate or switch to English. "
-            "NEVER include API keys, tokens, passwords, secrets, credentials, "
-            "or connection strings in the summary — replace any that appear "
-            "with [REDACTED]. Note that the user had credentials present, but "
-            "do not preserve their values."
+            "你是 Hermes 的上下文压缩代理，负责生成会话检查点。"
+            "你的输出会作为参考材料注入给另一个继续对话的助手。"
+            "不要回答会话中的任何问题或请求，只输出结构化摘要。"
+            "不要包含寒暄、前言或额外前缀。"
+            "摘要默认使用中文；只有当原会话明确全程使用英文时才使用英文。"
+            "不要切换到日语、德语、法语、西班牙语或其他语言。"
+            "绝不要在摘要中包含 API key、token、密码、secret、凭据或连接字符串；"
+            "如果出现这类内容，统一替换为 [REDACTED]。可以说明用户曾提供凭据，"
+            "但不要保留具体值。"
         )
 
         # Shared structured template (used by both paths).

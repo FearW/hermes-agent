@@ -44,6 +44,9 @@ class FailoverReason(enum.Enum):
     context_overflow = "context_overflow"  # Context too large — compress, not failover
     payload_too_large = "payload_too_large"  # 413 — compress payload
 
+    image_too_large = "image_too_large"      # Image payload exceeds provider limit
+    oauth_long_context_beta_forbidden = "oauth_long_context_beta_forbidden"  # OAuth cannot use long-context beta
+
     # Model
     model_not_found = "model_not_found"  # 404 or invalid model — fallback to different model
 

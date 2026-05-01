@@ -542,6 +542,7 @@ def handle_function_call(
     session_id: Optional[str] = None,
     user_task: Optional[str] = None,
     enabled_tools: Optional[List[str]] = None,
+    skip_pre_tool_call_hook: bool = False,
 ) -> str:
     """
     Main function call dispatcher that routes calls to the tool registry.
@@ -555,6 +556,9 @@ def handle_function_call(
                        execute_code uses this list to determine which sandbox
                        tools to generate.  Falls back to the process-global
                        ``_last_resolved_tool_names`` for backward compat.
+        skip_pre_tool_call_hook: When True, do not emit the pre_tool_call
+                                 plugin hook.  Used by agent-loop callers that
+                                 already emitted approval/progress hooks.
 
     Returns:
         Function result as a JSON string.
@@ -577,18 +581,19 @@ def handle_function_call(
         if function_name in _AGENT_LOOP_TOOLS:
             return json.dumps({"error": f"{function_name} must be handled by the agent loop"})
 
-        try:
-            from hermes_cli.plugins import invoke_hook
-            invoke_hook(
-                "pre_tool_call",
-                tool_name=function_name,
-                args=function_args,
-                task_id=task_id or "",
-                session_id=session_id or "",
-                tool_call_id=tool_call_id or "",
-            )
-        except Exception:
-            pass
+        if not skip_pre_tool_call_hook:
+            try:
+                from hermes_cli.plugins import invoke_hook
+                invoke_hook(
+                    "pre_tool_call",
+                    tool_name=function_name,
+                    args=function_args,
+                    task_id=task_id or "",
+                    session_id=session_id or "",
+                    tool_call_id=tool_call_id or "",
+                )
+            except Exception:
+                pass
 
         if function_name == "execute_code":
             # Prefer the caller-provided list so subagents can't overwrite

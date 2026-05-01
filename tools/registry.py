@@ -54,6 +54,7 @@ class ToolRegistry:
     def __init__(self):
         self._tools: Dict[str, ToolEntry] = {}
         self._toolset_checks: Dict[str, Callable] = {}
+        self._toolset_aliases: Dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # Registration
@@ -132,6 +133,29 @@ class ToolRegistry:
         ):
             self._toolset_checks.pop(entry.toolset, None)
         logger.debug("Deregistered tool: %s", name)
+
+    def register_toolset_alias(self, alias: str, target: str) -> None:
+        """Register a runtime alias for a dynamically-created toolset.
+
+        MCP server names can contain characters that are not used in generated
+        toolset ids.  The alias lets users enable the raw server name while the
+        registry still stores tools under the sanitized MCP toolset name.
+        """
+        alias = str(alias or "").strip()
+        target = str(target or "").strip()
+        if alias and target and alias != target:
+            self._toolset_aliases[alias] = target
+
+    def unregister_toolset_alias(self, alias: str) -> None:
+        self._toolset_aliases.pop(str(alias or "").strip(), None)
+
+    def resolve_toolset_alias(self, name: str) -> str:
+        """Resolve a runtime toolset alias to its registered target."""
+        return self._toolset_aliases.get(name, name)
+
+    def get_toolset_aliases(self) -> Dict[str, str]:
+        """Return a copy of runtime toolset aliases."""
+        return dict(self._toolset_aliases)
 
     # ------------------------------------------------------------------
     # Schema retrieval

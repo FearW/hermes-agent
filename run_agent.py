@@ -1510,15 +1510,7 @@ class AIAgent:
         # when the primary is exhausted (rate-limit, overload, connection
         # failure).  Supports both legacy single-dict ``fallback_model`` and
         # new list ``fallback_providers`` format.
-        if isinstance(fallback_model, list):
-            self._fallback_chain = [
-                f for f in fallback_model
-                if isinstance(f, dict) and f.get("provider") and f.get("model")
-            ]
-        elif isinstance(fallback_model, dict) and fallback_model.get("provider") and fallback_model.get("model"):
-            self._fallback_chain = [fallback_model]
-        else:
-            self._fallback_chain = []
+        self._fallback_chain = self._normalize_fallback_chain(fallback_model)
         self._fallback_index = 0
         self._fallback_activated = False
         # Legacy attribute kept for backward compat (tests, external callers)
@@ -7365,6 +7357,37 @@ class AIAgent:
 
     # ── Provider fallback ──────────────────────────────────────────────────
 
+    def _normalize_fallback_chain(self, fallback_model) -> list[dict]:
+        """Normalize fallback config for CPA-only runtime."""
+        raw_entries = fallback_model if isinstance(fallback_model, list) else [fallback_model]
+        result: list[dict] = []
+        primary_provider = (getattr(self, "provider", "") or "").strip().lower()
+        cpa_only = primary_provider in {"cliproxyapi", "cpa"}
+
+        for entry in raw_entries:
+            normalized: dict = {}
+            if isinstance(entry, str):
+                model = entry.strip()
+                if model:
+                    normalized = {"provider": primary_provider or "cliproxyapi", "model": model}
+            elif isinstance(entry, dict):
+                model = str(entry.get("model") or entry.get("default") or "").strip()
+                if not model:
+                    continue
+                normalized = dict(entry)
+                normalized["model"] = model
+                if cpa_only:
+                    normalized["provider"] = primary_provider or "cliproxyapi"
+                    normalized["base_url"] = self.base_url
+                    normalized["api_mode"] = self.api_mode
+                    if getattr(self, "api_key", ""):
+                        normalized.setdefault("api_key", self.api_key)
+                elif not normalized.get("provider"):
+                    continue
+            if normalized:
+                result.append(normalized)
+        return result
+
     def _try_activate_fallback(self, reason: "FailoverReason | None" = None) -> bool:
         """Switch to the next fallback model/provider in the chain.
 
@@ -7395,6 +7418,37 @@ class AIAgent:
         fb_model = (fb.get("model") or "").strip()
         if not fb_provider or not fb_model:
             return self._try_activate_fallback()  # skip invalid, try next
+
+        if (getattr(self, "provider", "") or "").strip().lower() in {"cliproxyapi", "cpa"}:
+            old_model = self.model
+            self.model = fb_model
+            self.provider = "cliproxyapi"
+            self.api_mode = "chat_completions"
+            if fb.get("context_length"):
+                try:
+                    self._config_context_length = int(fb.get("context_length"))
+                except (TypeError, ValueError):
+                    pass
+            if hasattr(self, "_transport_cache"):
+                self._transport_cache.clear()
+            self._fallback_activated = True
+            if hasattr(self, 'context_compressor') and self.context_compressor:
+                from agent.model_metadata import get_model_context_length
+                fb_context_length = get_model_context_length(
+                    self.model, base_url=self.base_url,
+                    api_key=getattr(self, "api_key", ""), provider=self.provider,
+                    config_context_length=getattr(self, "_config_context_length", None),
+                )
+                self.context_compressor.update_model(
+                    model=self.model,
+                    context_length=fb_context_length,
+                    base_url=self.base_url,
+                    api_key=getattr(self, "api_key", ""),
+                    provider=self.provider,
+                )
+            self._emit_status(f"🔁 Primary model failed — switching CPA model: {fb_model}")
+            logging.info("CPA fallback activated: %s -> %s", old_model, fb_model)
+            return True
 
         # Use centralized router for client construction.
         # raw_codex=True because the main agent needs direct responses.stream()
@@ -7431,11 +7485,21 @@ class AIAgent:
             except Exception:
                 pass
 
-            # Determine api_mode from provider / base URL / model
-            fb_api_mode = "chat_completions"
-            fb_base_url = str(fb_client.base_url)
+            # Determine api_mode from explicit fallback config first, then
+            # provider / base URL / model.  Some providers (for example
+            # MiniMax-CN M2.7) must use Anthropic Messages on an explicit
+            # /anthropic endpoint; resolve_provider_client may otherwise build
+            # an OpenAI-compatible client at /v1.
+            fb_api_mode = str(fb.get("api_mode") or "").strip() or "chat_completions"
+            fb_base_url = (
+                fb_base_url_hint
+                if fb_base_url_hint and fb_api_mode == "anthropic_messages"
+                else str(fb_client.base_url)
+            )
             _fb_is_azure = self._is_azure_openai_url(fb_base_url)
-            if fb_provider == "openai-codex":
+            if fb.get("api_mode"):
+                pass
+            elif fb_provider == "openai-codex":
                 fb_api_mode = "codex_responses"
             elif fb_provider == "anthropic" or fb_base_url.rstrip("/").lower().endswith("/anthropic"):
                 fb_api_mode = "anthropic_messages"

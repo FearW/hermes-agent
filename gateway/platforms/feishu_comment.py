@@ -866,18 +866,19 @@ def _select_whole_timeline(
 
 
 _COMMON_INSTRUCTIONS = """
-This is a Feishu document comment thread, not an IM chat.
-Do NOT call feishu_drive_add_comment or feishu_drive_reply_comment yourself.
-Your reply will be posted automatically. Just output the reply text.
-Use the thread timeline above as the main context.
-If the quoted content is not enough, use feishu_doc_read to read nearby context.
-The quoted content is your primary anchor — insert/summarize/explain requests are about it.
-Do not guess document content you haven't read.
-Reply in the same language as the user's comment unless they request otherwise.
-Use plain text only. Do not use Markdown, headings, bullet lists, tables, or code blocks.
-Do not show your reasoning process. Do not start with "I will", "Let me", or "I'll first".
-Output only the final user-facing reply.
-If no reply is needed, output exactly NO_REPLY.
+这是飞书文档评论线程，不是普通即时聊天。
+不要主动调用 feishu_drive_add_comment 或 feishu_drive_reply_comment。
+你的回复会被系统自动发布；你只需要输出最终回复文本。
+以上方线程时间线作为主要上下文。
+如果引用内容不足，请使用 feishu_doc_read 阅读附近上下文。
+引用内容是主要锚点；插入、总结、解释等请求都围绕引用内容处理。
+不要猜测你没有读到的文档内容。
+默认使用中文回复；只有用户评论明确使用英文时才使用英文。
+不要输出日语、德语、法语、西班牙语或其他语言。
+只使用纯文本。不要使用 Markdown、标题、项目符号、表格或代码块。
+不要展示推理过程。不要以“我将”“让我”“我先”等过程性话术开头。
+只输出最终面向用户的回复。
+如果不需要回复，严格输出 NO_REPLY。
 """.strip()
 
 
@@ -900,22 +901,22 @@ def build_local_comment_prompt(
     selected = _select_local_timeline(timeline, target_index)
 
     lines = [
-        f'The user added a reply in "{doc_title}".',
-        f'Current user comment text: "{_truncate(target_reply_text)}"',
-        f'Original comment text: "{_truncate(root_comment_text)}"',
-        f'Quoted content: "{_truncate(quote_text, 500)}"',
-        "This comment mentioned you (@mention is for routing, not task content).",
-        f"Document link: {doc_url}",
-        "Current commented document:",
+        f'\u7528\u6237\u5728\u300c{doc_title}\u300d\u4e2d\u65b0\u589e\u4e86\u4e00\u6761\u56de\u590d\u3002',
+        f'\u5f53\u524d\u7528\u6237\u8bc4\u8bba\u5185\u5bb9\uff1a\u201c{_truncate(target_reply_text)}\u201d',
+        f'\u539f\u59cb\u8bc4\u8bba\u5185\u5bb9\uff1a\u201c{_truncate(root_comment_text)}\u201d',
+        f'\u88ab\u8bc4\u8bba\u7684\u539f\u6587\u7247\u6bb5\uff1a\u201c{_truncate(quote_text, 500)}\u201d',
+        "\u8fd9\u6761\u8bc4\u8bba\u63d0\u5230\u4e86\u4f60\uff08@mention \u53ea\u7528\u4e8e\u8def\u7531\uff0c\u4e0d\u662f\u4efb\u52a1\u5185\u5bb9\uff09\u3002",
+        f"\u6587\u6863\u94fe\u63a5\uff1a{doc_url}",
+        "\u5f53\u524d\u8bc4\u8bba\u6240\u5728\u6587\u6863\uff1a",
         f"- file_type={file_type}",
         f"- file_token={file_token}",
         f"- comment_id={comment_id}",
         "",
-        f"Current comment card timeline ({len(selected)}/{len(timeline)} entries):",
+        f"\u5f53\u524d\u8bc4\u8bba\u5361\u7247\u65f6\u95f4\u7ebf\uff08{len(selected)}/{len(timeline)} \u6761\uff09\uff1a",
     ]
 
     for user_id, text, is_self in selected:
-        marker = " <-- YOU" if is_self else ""
+        marker = " <-- \u4f60" if is_self else ""
         lines.append(f"[{user_id}] {_truncate(text)}{marker}")
 
     if referenced_docs:
@@ -943,20 +944,20 @@ def build_whole_comment_prompt(
     selected = _select_whole_timeline(timeline, current_index, nearest_self_index)
 
     lines = [
-        f'The user added a comment in "{doc_title}".',
-        f'Current user comment text: "{_truncate(comment_text)}"',
-        "This is a whole-document comment.",
-        "This comment mentioned you (@mention is for routing, not task content).",
-        f"Document link: {doc_url}",
-        "Current commented document:",
+        f'\u7528\u6237\u5728\u300c{doc_title}\u300d\u4e2d\u65b0\u589e\u4e86\u4e00\u6761\u8bc4\u8bba\u3002',
+        f'\u5f53\u524d\u7528\u6237\u8bc4\u8bba\u5185\u5bb9\uff1a\u201c{_truncate(comment_text)}\u201d',
+        "\u8fd9\u662f\u4e00\u6761\u5168\u6587\u6863\u8bc4\u8bba\u3002",
+        "\u8fd9\u6761\u8bc4\u8bba\u63d0\u5230\u4e86\u4f60\uff08@mention \u53ea\u7528\u4e8e\u8def\u7531\uff0c\u4e0d\u662f\u4efb\u52a1\u5185\u5bb9\uff09\u3002",
+        f"\u6587\u6863\u94fe\u63a5\uff1a{doc_url}",
+        "\u5f53\u524d\u8bc4\u8bba\u6240\u5728\u6587\u6863\uff1a",
         f"- file_type={file_type}",
         f"- file_token={file_token}",
         "",
-        f"Whole-document comment timeline ({len(selected)}/{len(timeline)} entries):",
+        f"\u5168\u6587\u6863\u8bc4\u8bba\u65f6\u95f4\u7ebf\uff08{len(selected)}/{len(timeline)} \u6761\uff09\uff1a",
     ]
 
     for user_id, text, is_self in selected:
-        marker = " <-- YOU" if is_self else ""
+        marker = " <-- \u4f60" if is_self else ""
         lines.append(f"[{user_id}] {_truncate(text)}{marker}")
 
     if referenced_docs:

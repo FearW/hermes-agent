@@ -4202,9 +4202,9 @@ class HermesCLI:
         from tools.vision_tools import vision_analyze_tool
 
         analysis_prompt = (
-            "Describe everything visible in this image in thorough detail. "
-            "Include any text, code, data, objects, people, layout, colors, "
-            "and any other notable visual information."
+            "\u8bf7\u7528\u4e2d\u6587\u8be6\u7ec6\u63cf\u8ff0\u8fd9\u5f20\u56fe\u7247\u4e2d\u53ef\u89c1\u7684\u4e00\u5207\u3002"
+            "\u5305\u62ec\u6587\u5b57\u3001\u4ee3\u7801\u3001\u6570\u636e\u3001\u7269\u4f53\u3001\u4eba\u7269\u3001\u5e03\u5c40\u3001\u989c\u8272\u4ee5\u53ca\u5176\u4ed6\u91cd\u8981\u89c6\u89c9\u4fe1\u606f\u3002"
+            "\u5982\u679c\u56fe\u7247\u91cc\u7684\u6587\u5b57\u662f\u82f1\u6587\uff0c\u53ef\u4ee5\u4fdd\u7559\u82f1\u6587\u539f\u6587\uff1b\u4e0d\u8981\u8f93\u51fa\u65e5\u8bed\u3001\u5fb7\u8bed\u6216\u5176\u4ed6\u8bed\u8a00\u3002"
         )
 
         enriched_parts = []
@@ -4222,25 +4222,22 @@ class HermesCLI:
                 if result.get("success"):
                     description = result.get("analysis", "")
                     enriched_parts.append(
-                        f"[The user attached an image. Here's what it contains:\n{description}]\n"
-                        f"[If you need a closer look, use vision_analyze with "
-                        f"image_url: {img_path}]"
+                        f"[\u7528\u6237\u9644\u52a0\u4e86\u4e00\u5f20\u56fe\u7247\u3002\u56fe\u7247\u5185\u5bb9\u5982\u4e0b\uff1a\n{description}]\n"
+                        f"[\u5982\u679c\u9700\u8981\u66f4\u4ed4\u7ec6\u67e5\u770b\uff0c\u8bf7\u4f7f\u7528 vision_analyze\uff0cimage_url: {img_path}]"
                     )
                     if announce:
                         _cprint(f"  {_DIM}✓ image analyzed{_RST}")
                 else:
                     enriched_parts.append(
-                        f"[The user attached an image but it couldn't be analyzed. "
-                        f"You can try examining it with vision_analyze using "
-                        f"image_url: {img_path}]"
+                        f"[\u7528\u6237\u9644\u52a0\u4e86\u4e00\u5f20\u56fe\u7247\uff0c\u4f46\u81ea\u52a8\u5206\u6790\u5931\u8d25\u3002"
+                        f"\u4f60\u53ef\u4ee5\u5c1d\u8bd5\u4f7f\u7528 vision_analyze \u67e5\u770b\uff0cimage_url: {img_path}]"
                     )
                     if announce:
                         _cprint(f"  {_DIM}⚠ vision analysis failed — path included for retry{_RST}")
             except Exception as e:
                 enriched_parts.append(
-                    f"[The user attached an image but analysis failed ({e}). "
-                    f"You can try examining it with vision_analyze using "
-                    f"image_url: {img_path}]"
+                    f"[\u7528\u6237\u9644\u52a0\u4e86\u4e00\u5f20\u56fe\u7247\uff0c\u4f46\u5206\u6790\u5931\u8d25\uff08{e}\uff09\u3002"
+                    f"\u4f60\u53ef\u4ee5\u5c1d\u8bd5\u4f7f\u7528 vision_analyze \u67e5\u770b\uff0cimage_url: {img_path}]"
                 )
                 if announce:
                     _cprint(f"  {_DIM}⚠ vision analysis error — path included for retry{_RST}")
@@ -7566,7 +7563,7 @@ class HermesCLI:
             change_detail = ". ".join(change_parts) + ". " if change_parts else ""
             self.conversation_history.append({
                 "role": "user",
-                "content": f"[IMPORTANT: MCP servers have been reloaded. {change_detail}{tool_summary}. The tool list for this conversation has been updated accordingly.]",
+                "content": f"[\u91cd\u8981\uff1aMCP \u670d\u52a1\u5668\u5df2\u91cd\u65b0\u52a0\u8f7d\u3002{change_detail}{tool_summary}\u3002\u672c\u4f1a\u8bdd\u7684\u5de5\u5177\u5217\u8868\u5df2\u540c\u6b65\u66f4\u65b0\u3002]",
             })
 
             # Persist session immediately so the session log reflects the
@@ -11519,11 +11516,11 @@ def main(
     # Inject worktree context into agent's system prompt
     if wt_info:
         wt_note = (
-            f"\n\n[System note: You are working in an isolated git worktree at "
-            f"{wt_info['path']}. Your branch is `{wt_info['branch']}`. "
-            f"Changes here do not affect the main working tree or other agents. "
-            f"Remember to commit and push your changes, and create a PR if appropriate. "
-            f"The original repo is at {wt_info['repo_root']}.]"
+            f"\n\n[\u7cfb\u7edf\u63d0\u793a\uff1a\u4f60\u6b63\u5728\u9694\u79bb\u7684 git worktree \u4e2d\u5de5\u4f5c\uff0c\u8def\u5f84\u4e3a "
+            f"{wt_info['path']}\uff0c\u5206\u652f\u4e3a `{wt_info['branch']}`\u3002"
+            f"\u8fd9\u91cc\u7684\u6539\u52a8\u4e0d\u4f1a\u5f71\u54cd\u4e3b\u5de5\u4f5c\u6811\u6216\u5176\u4ed6 agent\u3002"
+            f"\u8bf7\u8bb0\u5f97\u5728\u5408\u9002\u65f6\u63d0\u4ea4\u5e76\u63a8\u9001\u6539\u52a8\uff0c\u5fc5\u8981\u65f6\u521b\u5efa PR\u3002"
+            f"\u539f\u59cb\u4ed3\u5e93\u8def\u5f84\u4e3a {wt_info['repo_root']}\u3002]"
         )
         cli.system_prompt = (cli.system_prompt or "") + wt_note
     

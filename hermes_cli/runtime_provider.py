@@ -27,7 +27,7 @@ from hermes_cli.auth import (
     resolve_external_process_provider_credentials,
     has_usable_secret,
 )
-from hermes_cli.config import get_compatible_custom_providers, load_config
+from hermes_cli.config import DEFAULT_CONFIG, get_compatible_custom_providers, load_config
 from hermes_constants import OPENROUTER_BASE_URL
 from utils import base_url_host_matches, base_url_hostname
 
@@ -124,8 +124,15 @@ def _get_model_config() -> Dict[str, Any]:
             if detected:
                 cfg["default"] = detected
         return cfg
-    if isinstance(model_cfg, str) and model_cfg.strip():
-        return {"default": model_cfg.strip()}
+    if isinstance(model_cfg, str):
+        model_name = model_cfg.strip()
+        if model_name:
+            return {"default": model_name}
+
+        default_cfg = DEFAULT_CONFIG.get("model")
+        if isinstance(default_cfg, dict):
+            return dict(default_cfg)
+        return {}
     return {}
 
 

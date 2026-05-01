@@ -686,7 +686,7 @@ stt:
   # provider: "local"          # auto-detected if omitted
   local:
     model: "base"              # tiny | base | small | medium | large-v3 | turbo
-    # language: ""             # auto-detect; set to "en", "es", "fr", etc. to force
+    language: "zh"             # default Chinese; set to "" for auto-detect or another ISO language code
   openai:
     model: "whisper-1"         # whisper-1 | gpt-4o-mini-transcribe | gpt-4o-transcribe
   # mistral:

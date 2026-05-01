@@ -149,6 +149,33 @@ class TestHandleFunctionCall:
             ),
         ]
 
+    def test_skip_pre_tool_call_hook_is_accepted(self):
+        with (
+            patch("model_tools.registry.dispatch", return_value='{"ok":true}'),
+            patch("hermes_cli.plugins.invoke_hook") as mock_invoke_hook,
+        ):
+            result = handle_function_call(
+                "web_search",
+                {"q": "test"},
+                task_id="task-1",
+                tool_call_id="call-1",
+                session_id="session-1",
+                skip_pre_tool_call_hook=True,
+            )
+
+        assert result == '{"ok":true}'
+        assert mock_invoke_hook.call_args_list == [
+            call(
+                "post_tool_call",
+                tool_name="web_search",
+                args={"q": "test"},
+                result='{"ok":true}',
+                task_id="task-1",
+                session_id="session-1",
+                tool_call_id="call-1",
+            ),
+        ]
+
 
 # =========================================================================
 # Agent loop tools

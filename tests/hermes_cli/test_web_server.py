@@ -389,6 +389,8 @@ class TestBuildSchemaFromConfig:
         """Top-level scalar fields should be in 'general' category."""
         from hermes_cli.web_server import CONFIG_SCHEMA
         assert CONFIG_SCHEMA["model"]["category"] == "general"
+        assert "model.provider" not in CONFIG_SCHEMA
+        assert "model.base_url" not in CONFIG_SCHEMA
 
     def test_nested_keys_get_parent_category(self):
         """Nested fields should use the top-level parent as their category."""
@@ -937,6 +939,125 @@ class TestModelContextLength:
             "model_context_length": 0,
         })
         assert result["model"] == "anthropic/claude-sonnet-4"
+
+    def test_cpa_model_config_forces_clipoxyapi_boundary(self):
+        """CPA helper should preserve the model name but force Hermes through CPA."""
+        from hermes_cli.web_server import _cpa_model_config
+
+        result = _cpa_model_config({
+            "model": {
+                "default": "my-model",
+                "provider": "openrouter",
+                "base_url": "https://example.invalid/v1",
+            }
+        })
+
+        assert result["default"] == "my-model"
+        assert result["provider"] == "cliproxyapi"
+        assert result["base_url"] == "https://example.invalid/v1"
+
+
+class TestCPAConfigAPI:
+    """Tests for the CPA-only WebUI configuration endpoints."""
+
+    def setup_method(self):
+        from starlette.testclient import TestClient
+        from hermes_cli.web_server import app, _SESSION_HEADER_NAME, _SESSION_TOKEN
+        self.client = TestClient(app)
+        self.client.headers[_SESSION_HEADER_NAME] = _SESSION_TOKEN
+
+    def test_get_cpa_config_defaults(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        resp = self.client.get("/api/cpa/config")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["provider"] == "cliproxyapi"
+        assert data["model"] == "gpt-5(8192)"
+        assert data["base_url"] == "http://127.0.0.1:8080/v1"
+
+    def test_put_cpa_config_forces_model_provider(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        resp = self.client.put(
+            "/api/cpa/config",
+            json={"model": "claude-sonnet-4.5", "base_url": "http://localhost:9000/v1"},
+        )
+        assert resp.status_code == 200
+
+        from hermes_cli.config import load_config
+        model_cfg = load_config()["model"]
+        assert model_cfg["default"] == "claude-sonnet-4.5"
+        assert model_cfg["provider"] == "cliproxyapi"
+        assert model_cfg["base_url"] == "http://localhost:9000/v1"
+
+    def test_cpa_management_base_strips_v1(self, monkeypatch):
+        from hermes_cli import web_server
+
+        monkeypatch.setattr(web_server, "load_config", lambda: {
+            "model": {"default": "x", "base_url": "http://127.0.0.1:8080/v1"}
+        })
+
+        assert web_server._cpa_management_base_url() == "http://127.0.0.1:8080"
+
+    def test_cpa_provider_proxy_targets_management_endpoint(self, monkeypatch):
+        from hermes_cli import web_server
+
+        captured = {}
+
+        class FakeResponse:
+            headers = {"Content-Type": "application/json"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b"[]"
+
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["method"] = request.get_method()
+            captured["auth"] = request.headers.get("Authorization")
+            return FakeResponse()
+
+        monkeypatch.setattr(web_server, "load_config", lambda: {
+            "model": {"default": "x", "base_url": "http://127.0.0.1:8080/v1"}
+        })
+        monkeypatch.setattr(web_server, "load_env", lambda: {"CLIPROXY_API_KEY": "secret"})
+        monkeypatch.setattr(web_server.urllib.request, "urlopen", fake_urlopen)
+
+        resp = self.client.get("/api/cpa/providers/gemini")
+
+        assert resp.status_code == 200
+        assert captured["url"] == "http://127.0.0.1:8080/gemini-api-key"
+        assert captured["method"] == "GET"
+        assert captured["auth"] == "Bearer secret"
+
+    def test_cpa_auth_files_proxy(self, monkeypatch):
+        from hermes_cli import web_server
+
+        class FakeResponse:
+            headers = {"Content-Type": "application/json"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b'{"files":[{"name":"codex.json","type":"codex","disabled":false}]}'
+
+        monkeypatch.setattr(web_server, "load_config", lambda: {
+            "model": {"default": "x", "base_url": "http://127.0.0.1:8080/v1"}
+        })
+        monkeypatch.setattr(web_server.urllib.request, "urlopen", lambda request, timeout: FakeResponse())
+
+        resp = self.client.get("/api/cpa/auth-files")
+
+        assert resp.status_code == 200
+        assert resp.json()["files"][0]["name"] == "codex.json"
 
     def test_denormalize_coerces_string_context_length(self):
         """denormalize should handle string model_context_length from frontend."""

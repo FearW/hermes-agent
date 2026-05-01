@@ -297,7 +297,7 @@ export default function SessionsPage() {
   const loadSessions = useCallback(() => {
     api
       .getSessions()
-      .then(setSessions)
+      .then((data) => setSessions(data.sessions))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);

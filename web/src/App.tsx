@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Activity, BarChart3, Clock, FileText, KeyRound, MessageSquare, Package, Settings } from "lucide-react";
+import { Activity, BarChart3, Clock, FileText, KeyRound, MessageSquare, Package, Server, Settings } from "lucide-react";
 import StatusPage from "@/pages/StatusPage";
 import ConfigPage from "@/pages/ConfigPage";
 import EnvPage from "@/pages/EnvPage";
@@ -8,11 +8,13 @@ import LogsPage from "@/pages/LogsPage";
 import AnalyticsPage from "@/pages/AnalyticsPage";
 import CronPage from "@/pages/CronPage";
 import SkillsPage from "@/pages/SkillsPage";
+import CPAPage from "@/pages/CPAPage";
 
 const NAV_ITEMS = [
   { id: "status", label: "Status", icon: Activity },
   { id: "sessions", label: "Sessions", icon: MessageSquare },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
+  { id: "cpa", label: "CPA", icon: Server },
   { id: "logs", label: "Logs", icon: FileText },
   { id: "cron", label: "Cron", icon: Clock },
   { id: "skills", label: "Skills", icon: Package },
@@ -26,6 +28,7 @@ const PAGE_COMPONENTS: Record<PageId, React.FC> = {
   status: StatusPage,
   sessions: SessionsPage,
   analytics: AnalyticsPage,
+  cpa: CPAPage,
   logs: LogsPage,
   cron: CronPage,
   skills: SkillsPage,

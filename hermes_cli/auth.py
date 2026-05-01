@@ -3440,8 +3440,10 @@ def get_api_key_provider_status(provider_id: str) -> Dict[str, Any]:
     api_key, key_source = _resolve_api_key_provider_secret(provider_id, pconfig)
 
     env_url = ""
+    if provider_id in ("cliproxyapi", "cpa"):
+        env_url = os.getenv("CLIPROXY_BASE_URL", "").strip() or os.getenv("CPA_BASE_URL", "").strip()
     if pconfig.base_url_env_var:
-        env_url = os.getenv(pconfig.base_url_env_var, "").strip()
+        env_url = env_url or os.getenv(pconfig.base_url_env_var, "").strip()
 
     if provider_id in ("kimi-coding", "kimi-coding-cn"):
         base_url = _resolve_kimi_base_url(api_key, pconfig.inference_base_url, env_url)
@@ -3544,8 +3546,10 @@ def resolve_api_key_provider_credentials(provider_id: str) -> Dict[str, Any]:
         key_source = key_source or "default"
 
     env_url = ""
+    if provider_id in ("cliproxyapi", "cpa"):
+        env_url = os.getenv("CLIPROXY_BASE_URL", "").strip() or os.getenv("CPA_BASE_URL", "").strip()
     if pconfig.base_url_env_var:
-        env_url = os.getenv(pconfig.base_url_env_var, "").strip()
+        env_url = env_url or os.getenv(pconfig.base_url_env_var, "").strip()
 
     if provider_id in ("kimi-coding", "kimi-coding-cn"):
         base_url = _resolve_kimi_base_url(api_key, pconfig.inference_base_url, env_url)

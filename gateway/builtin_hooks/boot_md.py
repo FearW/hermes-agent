@@ -1,30 +1,12 @@
-"""Built-in boot-md hook — run ~/.hermes/BOOT.md on gateway startup.
-
-This hook is always registered. It silently skips if no BOOT.md exists.
-To activate, create ``~/.hermes/BOOT.md`` with instructions for the
-agent to execute on every gateway restart.
-
-Example BOOT.md::
-
-    # Startup Checklist
-
-    1. Check if any cron jobs failed overnight
-    2. Send a status update to Discord #general
-    3. If there are errors in /opt/app/deploy.log, summarize them
-
-The agent runs in a background thread so it doesn't block gateway
-startup. If nothing needs attention, it replies with [SILENT] to
-suppress delivery.
-"""
+"""Built-in boot-md hook - run ~/.hermes/BOOT.md on gateway startup."""
 
 import logging
-import os
 import threading
-from pathlib import Path
 
 logger = logging.getLogger("hooks.boot-md")
 
 from hermes_constants import get_hermes_home
+
 HERMES_HOME = get_hermes_home()
 BOOT_FILE = HERMES_HOME / "BOOT.md"
 
@@ -32,15 +14,16 @@ BOOT_FILE = HERMES_HOME / "BOOT.md"
 def _build_boot_prompt(content: str) -> str:
     """Wrap BOOT.md content in a system-level instruction."""
     return (
-        "You are running a startup boot checklist. Follow the BOOT.md "
-        "instructions below exactly.\n\n"
+        "\u4f60\u6b63\u5728\u6267\u884c Hermes \u542f\u52a8\u68c0\u67e5\u6e05\u5355\u3002"
+        "\u8bf7\u4e25\u683c\u9075\u5faa\u4e0b\u9762 BOOT.md \u7684\u6307\u4ee4\u3002\n\n"
         "---\n"
         f"{content}\n"
         "---\n\n"
-        "Execute each instruction. If you need to send a message to a "
-        "platform, use the send_message tool.\n"
-        "If nothing needs attention and there is nothing to report, "
-        "reply with ONLY: [SILENT]"
+        "\u9010\u6761\u6267\u884c\u6307\u4ee4\u3002\u5982\u679c\u9700\u8981\u5411\u5e73\u53f0\u53d1\u9001\u6d88\u606f\uff0c"
+        "\u8bf7\u4f7f\u7528 send_message \u5de5\u5177\u3002\n"
+        "\u9ed8\u8ba4\u4f7f\u7528\u4e2d\u6587\u8f93\u51fa\uff1b\u53ea\u6709 BOOT.md \u660e\u786e\u8981\u6c42\u82f1\u6587\u65f6\u624d\u4f7f\u7528\u82f1\u6587\u3002\n"
+        "\u4e0d\u8981\u8f93\u51fa\u65e5\u8bed\u3001\u5fb7\u8bed\u3001\u6cd5\u8bed\u3001\u897f\u73ed\u7259\u8bed\u6216\u5176\u4ed6\u8bed\u8a00\u3002\n"
+        "\u5982\u679c\u6ca1\u6709\u9700\u8981\u5904\u7406\u6216\u6c47\u62a5\u7684\u4e8b\u9879\uff0c\u53ea\u56de\u590d\uff1a[SILENT]"
     )
 
 
@@ -67,7 +50,7 @@ def _run_boot_agent(content: str) -> None:
 
 
 async def handle(event_type: str, context: dict) -> None:
-    """Gateway startup handler — run BOOT.md if it exists."""
+    """Gateway startup handler - run BOOT.md if it exists."""
     if not BOOT_FILE.exists():
         return
 
@@ -77,7 +60,6 @@ async def handle(event_type: str, context: dict) -> None:
 
     logger.info("Running BOOT.md (%d chars)", len(content))
 
-    # Run in a background thread so we don't block gateway startup.
     thread = threading.Thread(
         target=_run_boot_agent,
         args=(content,),
