@@ -733,6 +733,7 @@ class SessionDB:
         limit: int = 20,
         offset: int = 0,
         include_children: bool = False,
+        order_by_last_active: bool = False,
     ) -> List[Dict[str, Any]]:
         """List sessions with preview (first user message) and last active timestamp.
 
@@ -744,6 +745,9 @@ class SessionDB:
 
         By default, child sessions (subagent runs, compression continuations)
         are excluded.  Pass ``include_children=True`` to include them.
+
+        Pass ``order_by_last_active=True`` to sort by the most recent
+        message timestamp instead of original session start time.
         """
         where_clauses = []
         params = []
@@ -775,7 +779,7 @@ class SessionDB:
                 ) AS last_active
             FROM sessions s
             {where_sql}
-            ORDER BY s.started_at DESC
+            ORDER BY {"last_active DESC, s.started_at DESC, s.id DESC" if order_by_last_active else "s.started_at DESC"}
             LIMIT ? OFFSET ?
         """
         params.extend([limit, offset])
