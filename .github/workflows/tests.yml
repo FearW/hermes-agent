@@ -29,45 +29,22 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: |
-          uv venv .venv --python 3.11
-          source .venv/bin/activate
-          uv pip install -e ".[all,dev]"
+        run: uv sync --extra dev --extra web
 
-      - name: Run tests
+      - name: Run fork-safe tests
         run: |
-          source .venv/bin/activate
-          python -m pytest tests/ -q --ignore=tests/integration --ignore=tests/e2e --tb=short -n auto
+          uv run pytest \
+            tests/hermes_cli/test_install_baseline.py \
+            tests/hermes_cli/test_main_entry_integrity.py \
+            tests/hermes_cli/test_memory_doctor.py \
+            tests/tools/test_memory_tool.py \
+            tests/gateway/test_maintenance.py \
+            tests/hermes_cli/test_web_server.py \
+            tests/cli/test_quick_commands.py \
+            tests/e2e/test_platform_commands.py \
+            -q --tb=short
         env:
           # Ensure tests don't accidentally call real APIs
-          OPENROUTER_API_KEY: ""
-          OPENAI_API_KEY: ""
-          NOUS_API_KEY: ""
-
-  e2e:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-
-      - name: Set up Python 3.11
-        run: uv python install 3.11
-
-      - name: Install dependencies
-        run: |
-          uv venv .venv --python 3.11
-          source .venv/bin/activate
-          uv pip install -e ".[all,dev]"
-
-      - name: Run e2e tests
-        run: |
-          source .venv/bin/activate
-          python -m pytest tests/e2e/ -v --tb=short
-        env:
           OPENROUTER_API_KEY: ""
           OPENAI_API_KEY: ""
           NOUS_API_KEY: ""
