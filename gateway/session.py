@@ -12,6 +12,7 @@ import hashlib
 import logging
 import os
 import json
+import time
 import threading
 import uuid
 from pathlib import Path
@@ -25,6 +26,81 @@ logger = logging.getLogger(__name__)
 def _now() -> datetime:
     """Return the current local time."""
     return datetime.now()
+
+
+def _sanitize_extra_content(extra_content: Any) -> Optional[Dict[str, Any]]:
+    """Keep only JSON-safe mapping payloads for replayable tool-call metadata."""
+    if extra_content is None or not isinstance(extra_content, dict):
+        return None
+    try:
+        json.dumps(extra_content, ensure_ascii=False)
+    except Exception:
+        return None
+    return extra_content
+
+
+def _normalize_tool_calls(tool_calls: Any) -> Optional[List[Dict[str, Any]]]:
+    """Normalize stored tool_calls so replayed sessions keep valid JSON arguments."""
+    if not isinstance(tool_calls, list):
+        return None
+
+    normalized: List[Dict[str, Any]] = []
+    for tool_call in tool_calls:
+        if not isinstance(tool_call, dict):
+            continue
+        function = tool_call.get("function")
+        if not isinstance(function, dict):
+            continue
+        name = function.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+
+        arguments = function.get("arguments")
+        if isinstance(arguments, dict):
+            arguments = json.dumps(arguments, ensure_ascii=False)
+        elif arguments is None:
+            arguments = "{}"
+        elif not isinstance(arguments, str):
+            arguments = str(arguments)
+
+        arguments = arguments.strip() if isinstance(arguments, str) else "{}"
+        if not arguments:
+            arguments = "{}"
+        else:
+            try:
+                json.loads(arguments)
+            except Exception:
+                try:
+                    decoder = json.JSONDecoder()
+                    idx = 0
+                    merged = {}
+                    parsed_any = False
+                    while idx < len(arguments):
+                        while idx < len(arguments) and arguments[idx].isspace():
+                            idx += 1
+                        if idx >= len(arguments):
+                            break
+                        obj, next_idx = decoder.raw_decode(arguments, idx)
+                        parsed_any = True
+                        if isinstance(obj, dict):
+                            merged.update(obj)
+                        idx = next_idx
+                    arguments = json.dumps(merged, ensure_ascii=False) if parsed_any and merged else "{}"
+                except Exception:
+                    arguments = "{}"
+
+        normalized_tool_call = {
+            **tool_call,
+            "function": {**function, "name": name.strip(), "arguments": arguments},
+        }
+        extra_content = _sanitize_extra_content(tool_call.get("extra_content"))
+        if extra_content is not None:
+            normalized_tool_call["extra_content"] = extra_content
+        else:
+            normalized_tool_call.pop("extra_content", None)
+        normalized.append(normalized_tool_call)
+
+    return normalized or None
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +246,8 @@ class SessionContext:
     connected_platforms: List[Platform]
     home_channels: Dict[Platform, HomeChannel]
     shared_multi_user_session: bool = False
+    project_tag: str = "global"
+    project_root: str = ""
     
     # Session metadata
     session_key: str = ""
@@ -185,6 +263,8 @@ class SessionContext:
                 p.value: hc.to_dict() for p, hc in self.home_channels.items()
             },
             "shared_multi_user_session": self.shared_multi_user_session,
+            "project_tag": self.project_tag,
+            "project_root": self.project_root,
             "session_key": self.session_key,
             "session_id": self.session_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -292,6 +372,11 @@ def build_session_context_prompt(
     # Channel topic (if available - provides context about the channel's purpose)
     if context.source.chat_topic:
         lines.append(f"**Channel Topic:** {context.source.chat_topic}")
+
+    if context.project_tag:
+        lines.append(f"**Project Tag:** {context.project_tag}")
+    if context.project_root:
+        lines.append(f"**Project Root:** {context.project_root}")
 
     # User identity.
     # In shared multi-user sessions (shared threads OR shared non-thread groups
@@ -464,6 +549,7 @@ class SessionEntry:
     # agent).  Persisted to sessions.json so the flag survives gateway
     # restarts — prevents redundant finalization runs.
     expiry_finalized: bool = False
+    model_signature: Optional[str] = None
 
     # When True the next call to get_or_create_session() will auto-reset
     # this session (create a new session_id) so the user starts fresh.
@@ -500,6 +586,7 @@ class SessionEntry:
             "estimated_cost_usd": self.estimated_cost_usd,
             "cost_status": self.cost_status,
             "expiry_finalized": self.expiry_finalized,
+            "model_signature": self.model_signature,
             "suspended": self.suspended,
             "resume_pending": self.resume_pending,
             "resume_reason": self.resume_reason,
@@ -552,6 +639,7 @@ class SessionEntry:
             estimated_cost_usd=data.get("estimated_cost_usd", 0.0),
             cost_status=data.get("cost_status", "unknown"),
             expiry_finalized=data.get("expiry_finalized", data.get("memory_flushed", False)),
+            model_signature=data.get("model_signature"),
             suspended=data.get("suspended", False),
             resume_pending=data.get("resume_pending", False),
             resume_reason=data.get("resume_reason"),
@@ -731,6 +819,30 @@ class SessionStore:
             group_sessions_per_user=getattr(self.config, "group_sessions_per_user", True),
             thread_sessions_per_user=getattr(self.config, "thread_sessions_per_user", False),
         )
+
+    def _build_model_signature(self) -> str:
+        """Return a stable hash of model/routing config that affects sessions."""
+        payload = {}
+        try:
+            import yaml as _yaml
+            from hermes_constants import get_hermes_home
+
+            config_path = get_hermes_home() / "config.yaml"
+            if config_path.exists():
+                with open(config_path, encoding="utf-8") as file:
+                    config = _yaml.safe_load(file) or {}
+                payload = {
+                    "model": config.get("model"),
+                    "fallback_providers": config.get("fallback_providers"),
+                    "fallback_model": config.get("fallback_model"),
+                    "smart_model_routing": config.get("smart_model_routing"),
+                    "context": config.get("context"),
+                    "compression": config.get("compression"),
+                }
+        except Exception:
+            payload = {}
+        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+        return hashlib.sha1(raw.encode("utf-8")).hexdigest()
     
     def _is_session_expired(self, entry: SessionEntry) -> bool:
         """Check if a session has expired based on its reset policy.
@@ -849,6 +961,7 @@ class SessionStore:
         """
         session_key = self._generate_session_key(source)
         now = _now()
+        current_model_signature = self._build_model_signature()
 
         # SQLite calls are made outside the lock to avoid holding it during I/O.
         # All _entries / _loaded mutations are protected by self._lock.
@@ -879,6 +992,8 @@ class SessionStore:
                     entry.updated_at = now
                     self._save()
                     return entry
+                elif entry.model_signature and entry.model_signature != current_model_signature:
+                    reset_reason = "model_config_changed"
                 else:
                     reset_reason = self._should_reset(entry, source)
                 if not reset_reason:
@@ -912,6 +1027,7 @@ class SessionStore:
                 was_auto_reset=was_auto_reset,
                 auto_reset_reason=auto_reset_reason,
                 reset_had_activity=reset_had_activity,
+                model_signature=current_model_signature,
             )
 
             self._entries[session_key] = entry
@@ -1238,21 +1354,28 @@ class SessionStore:
                      via its own _flush_messages_to_session_db(), preventing
                      the duplicate-write bug (#860).
         """
+        normalized_message = dict(message)
+        normalized_tool_calls = _normalize_tool_calls(message.get("tool_calls"))
+        if normalized_tool_calls:
+            normalized_message["tool_calls"] = normalized_tool_calls
+        else:
+            normalized_message.pop("tool_calls", None)
+
         # Write to SQLite (unless the agent already handled it)
         if self._db and not skip_db:
             try:
                 self._db.append_message(
                     session_id=session_id,
-                    role=message.get("role", "unknown"),
-                    content=message.get("content"),
-                    tool_name=message.get("tool_name"),
-                    tool_calls=message.get("tool_calls"),
-                    tool_call_id=message.get("tool_call_id"),
-                    reasoning=message.get("reasoning") if message.get("role") == "assistant" else None,
-                    reasoning_content=message.get("reasoning_content") if message.get("role") == "assistant" else None,
-                    reasoning_details=message.get("reasoning_details") if message.get("role") == "assistant" else None,
-                    codex_reasoning_items=message.get("codex_reasoning_items") if message.get("role") == "assistant" else None,
-                    codex_message_items=message.get("codex_message_items") if message.get("role") == "assistant" else None,
+                    role=normalized_message.get("role", "unknown"),
+                    content=normalized_message.get("content"),
+                    tool_name=normalized_message.get("tool_name"),
+                    tool_calls=normalized_message.get("tool_calls"),
+                    tool_call_id=normalized_message.get("tool_call_id"),
+                    reasoning=normalized_message.get("reasoning") if normalized_message.get("role") == "assistant" else None,
+                    reasoning_content=normalized_message.get("reasoning_content") if normalized_message.get("role") == "assistant" else None,
+                    reasoning_details=normalized_message.get("reasoning_details") if normalized_message.get("role") == "assistant" else None,
+                    codex_reasoning_items=normalized_message.get("codex_reasoning_items") if normalized_message.get("role") == "assistant" else None,
+                    codex_message_items=normalized_message.get("codex_message_items") if normalized_message.get("role") == "assistant" else None,
                 )
             except Exception as e:
                 logger.debug("Session DB operation failed: %s", e)
@@ -1260,7 +1383,7 @@ class SessionStore:
         # Also write legacy JSONL (keeps existing tooling working during transition)
         transcript_path = self.get_transcript_path(session_id)
         with open(transcript_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(message, ensure_ascii=False) + "\n")
+            f.write(json.dumps(normalized_message, ensure_ascii=False) + "\n")
     
     def rewrite_transcript(self, session_id: str, messages: List[Dict[str, Any]]) -> None:
         """Replace the entire transcript for a session with new messages.
@@ -1268,11 +1391,19 @@ class SessionStore:
         Used by /retry, /undo, and /compress to persist modified conversation history.
         Rewrites both SQLite and legacy JSONL storage.
         """
-        # SQLite: replace atomically so a mid-rewrite failure doesn't leave
-        # the session half-empty in the DB while JSONL still has history.
+        # SQLite: clear old messages and re-insert normalized messages.
         if self._db:
             try:
-                self._db.replace_messages(session_id, messages)
+                db_messages = []
+                for msg in messages:
+                    normalized_msg = dict(msg)
+                    normalized_tool_calls = _normalize_tool_calls(msg.get("tool_calls"))
+                    if normalized_tool_calls:
+                        normalized_msg["tool_calls"] = normalized_tool_calls
+                    else:
+                        normalized_msg.pop("tool_calls", None)
+                    db_messages.append(normalized_msg)
+                self._db.replace_messages(session_id, db_messages)
             except Exception as e:
                 logger.debug("Failed to rewrite transcript in DB: %s", e)
         
@@ -1280,7 +1411,13 @@ class SessionStore:
         transcript_path = self.get_transcript_path(session_id)
         with open(transcript_path, "w", encoding="utf-8") as f:
             for msg in messages:
-                f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+                normalized_msg = dict(msg)
+                normalized_tool_calls = _normalize_tool_calls(msg.get("tool_calls"))
+                if normalized_tool_calls:
+                    normalized_msg["tool_calls"] = normalized_tool_calls
+                else:
+                    normalized_msg.pop("tool_calls", None)
+                f.write(json.dumps(normalized_msg, ensure_ascii=False) + "\n")
 
     def load_transcript(self, session_id: str) -> List[Dict[str, Any]]:
         """Load all messages from a session's transcript."""
@@ -1330,6 +1467,39 @@ class SessionStore:
 
         return db_messages
 
+    def archive_and_prune_expired_transcripts(self, older_than_days: int = 14) -> int:
+        """Archive expired sessions into L4 memory, then delete raw transcript state."""
+        if not self._db:
+            return 0
+        from agent.l4_archive import archive_session_summary
+
+        cutoff = time.time() - (older_than_days * 86400)
+        with self._db._lock:
+            cursor = self._db._conn.execute(
+                "SELECT id, source FROM sessions WHERE started_at < ? AND ended_at IS NOT NULL",
+                (cutoff,),
+            )
+            rows = [dict(row) for row in cursor.fetchall()]
+
+        archived = 0
+        for row in rows:
+            session_id_to_archive = row["id"]
+            try:
+                messages = self._db.get_messages_as_conversation(session_id_to_archive)
+                archive_session_summary(
+                    session_id_to_archive,
+                    row.get("source") or "unknown",
+                    messages,
+                )
+                transcript_path = self.get_transcript_path(session_id_to_archive)
+                if transcript_path.exists():
+                    transcript_path.unlink()
+                self._db.delete_session(session_id_to_archive)
+                archived += 1
+            except Exception as exc:
+                logger.debug("Failed to archive/prune session %s: %s", session_id_to_archive, exc)
+        return archived
+
 
 def build_session_context(
     source: SessionSource,
@@ -1358,6 +1528,8 @@ def build_session_context(
             group_sessions_per_user=getattr(config, "group_sessions_per_user", True),
             thread_sessions_per_user=getattr(config, "thread_sessions_per_user", False),
         ),
+        project_tag=(Path(os.getenv("TERMINAL_CWD", "").strip()).name if os.getenv("TERMINAL_CWD", "").strip() else "global"),
+        project_root=os.getenv("TERMINAL_CWD", "").strip(),
     )
     
     if session_entry:

@@ -1183,6 +1183,67 @@ class SessionDB:
             )
         self._execute_write(_do)
 
+    def replace_messages(self, session_id: str, messages: List[Dict[str, Any]]) -> None:
+        """Atomically replace all messages for a session."""
+        serialized_messages = []
+        for message in messages:
+            role = message.get("role", "unknown")
+            tool_calls = message.get("tool_calls")
+            serialized_messages.append(
+                {
+                    "role": role,
+                    "content": message.get("content"),
+                    "tool_name": message.get("tool_name"),
+                    "tool_call_id": message.get("tool_call_id"),
+                    "tool_calls_json": json.dumps(tool_calls) if tool_calls else None,
+                    "tool_call_count": len(tool_calls) if isinstance(tool_calls, list) else (1 if tool_calls else 0),
+                    "reasoning": message.get("reasoning") if role == "assistant" else None,
+                    "reasoning_content": message.get("reasoning_content") if role == "assistant" else None,
+                    "reasoning_details_json": (
+                        json.dumps(message.get("reasoning_details"))
+                        if role == "assistant" and message.get("reasoning_details")
+                        else None
+                    ),
+                    "codex_items_json": (
+                        json.dumps(message.get("codex_reasoning_items"))
+                        if role == "assistant" and message.get("codex_reasoning_items")
+                        else None
+                    ),
+                }
+            )
+
+        def _do(conn):
+            conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+            total_tool_calls = 0
+            now = time.time()
+            for idx, message in enumerate(serialized_messages):
+                total_tool_calls += message["tool_call_count"]
+                conn.execute(
+                    """INSERT INTO messages (session_id, role, content, tool_call_id,
+                       tool_calls, tool_name, timestamp, reasoning, reasoning_content,
+                       reasoning_details, codex_reasoning_items)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        session_id,
+                        message["role"],
+                        message["content"],
+                        message["tool_call_id"],
+                        message["tool_calls_json"],
+                        message["tool_name"],
+                        now + (idx * 0.000001),
+                        message["reasoning"],
+                        message["reasoning_content"],
+                        message["reasoning_details_json"],
+                        message["codex_items_json"],
+                    ),
+                )
+            conn.execute(
+                "UPDATE sessions SET message_count = ?, tool_call_count = ? WHERE id = ?",
+                (len(serialized_messages), total_tool_calls, session_id),
+            )
+
+        self._execute_write(_do)
+
     def delete_session(self, session_id: str) -> bool:
         """Delete a session and all its messages.
 
