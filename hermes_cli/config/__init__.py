@@ -36,6 +36,10 @@ _EXTRA_ENV_KEYS = frozenset(
     {
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
+        "CLIPROXY_API_KEY",
+        "CPA_API_KEY",
+        "CLIPROXY_BASE_URL",
+        "CPA_BASE_URL",
         "ANTHROPIC_API_KEY",
         "ANTHROPIC_TOKEN",
         "DISCORD_HOME_CHANNEL",
@@ -530,7 +534,7 @@ DEFAULT_CONFIG = {
     },
     "display": {
         "compact": False,
-        "personality": "kawaii",
+        "personality": "helpful",
         "resume_display": "full",
         "busy_input_mode": "interrupt",
         "bell_on_complete": False,
@@ -2375,7 +2379,7 @@ def show_config():
     print()
     print(color("◆ Display", Colors.CYAN, Colors.BOLD))
     display = config.get("display", {})
-    print(f"  Personality:  {display.get('personality', 'kawaii')}")
+    print(f"  Personality:  {display.get('personality', 'helpful')}")
     print(f"  Reasoning:    {'on' if display.get('show_reasoning', False) else 'off'}")
     print(
         f"  Bell:         {'on' if display.get('bell_on_complete', False) else 'off'}"

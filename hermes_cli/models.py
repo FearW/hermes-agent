@@ -153,6 +153,20 @@ def _xai_curated_models() -> list[str]:
 
 
 _PROVIDER_MODELS: dict[str, list[str]] = {
+    "cliproxyapi": [
+        "gpt-5(8192)",
+        "gpt-5",
+        "claude-sonnet-4.5",
+        "gemini-2.5-pro",
+        "qwen3-coder-plus",
+    ],
+    "cpa": [
+        "gpt-5(8192)",
+        "gpt-5",
+        "claude-sonnet-4.5",
+        "gemini-2.5-pro",
+        "qwen3-coder-plus",
+    ],
     "nous": [
         "moonshotai/kimi-k2.6",
         "xiaomi/mimo-v2.5-pro",
@@ -796,6 +810,7 @@ class ProviderEntry(NamedTuple):
     tui_desc: str   # detailed description for `hermes model` TUI
 
 CANONICAL_PROVIDERS: list[ProviderEntry] = [
+    ProviderEntry("cliproxyapi",     "CLIProxyAPI",              "CLIProxyAPI / CPA (recommended: one OpenAI-compatible gateway for all models)"),
     ProviderEntry("nous",           "Nous Portal",              "Nous Portal (Nous Research subscription)"),
     ProviderEntry("openrouter",     "OpenRouter",               "OpenRouter (100+ models, pay-per-use)"),
     ProviderEntry("lmstudio",       "LM Studio",                "LM Studio (local desktop app with built-in model server)"),

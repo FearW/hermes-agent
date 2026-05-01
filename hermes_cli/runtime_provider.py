@@ -892,6 +892,35 @@ def resolve_runtime_provider(
     """
     requested_provider = resolve_requested_provider(requested)
 
+    if requested_provider in {"cliproxyapi", "cpa"}:
+        model_cfg = _get_model_config()
+        cfg_provider = str(model_cfg.get("provider") or "").strip().lower()
+        cfg_base_url = ""
+        if cfg_provider in {"cliproxyapi", "cpa"}:
+            cfg_base_url = str(model_cfg.get("base_url") or "").strip().rstrip("/")
+        base_url = (
+            (explicit_base_url or "").strip().rstrip("/")
+            or os.getenv("CLIPROXY_BASE_URL", "").strip().rstrip("/")
+            or os.getenv("CPA_BASE_URL", "").strip().rstrip("/")
+            or cfg_base_url
+            or "http://127.0.0.1:8080/v1"
+        )
+        api_key = (
+            (explicit_api_key or "").strip()
+            or os.getenv("CLIPROXY_API_KEY", "").strip()
+            or os.getenv("CPA_API_KEY", "").strip()
+            or os.getenv("OPENAI_API_KEY", "").strip()
+            or "no-key-required"
+        )
+        return {
+            "provider": "cliproxyapi",
+            "api_mode": "chat_completions",
+            "base_url": base_url,
+            "api_key": api_key,
+            "source": "cpa",
+            "requested_provider": requested_provider,
+        }
+
     # Azure Anthropic short-circuit: when explicitly targeting an Azure endpoint
     # with provider="anthropic", bypass _resolve_named_custom_runtime (which would
     # return provider="custom" with chat_completions api_mode and no valid key).

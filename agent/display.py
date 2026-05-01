@@ -1,4 +1,4 @@
-"""CLI presentation -- spinner, kawaii faces, tool preview formatting.
+"""CLI presentation -- spinner, Hermes status frames, tool preview formatting.
 
 Pure display functions and classes with no AIAgent dependency.
 Used by AIAgent._execute_tool_calls for CLI feedback.
@@ -571,41 +571,36 @@ def render_edit_diff_with_delta(
 
 
 # =========================================================================
-# KawaiiSpinner
+# HermesSpinner
 # =========================================================================
 
-class KawaiiSpinner:
-    """Animated spinner with kawaii faces for CLI feedback during tool execution."""
+class HermesSpinner:
+    """Animated spinner with neutral Hermes status frames for CLI feedback."""
 
     SPINNERS = {
-        'dots': ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'],
-        'bounce': ['⠁', '⠂', '⠄', '⡀', '⢀', '⠠', '⠐', '⠈'],
-        'grow': ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█', '▇', '▆', '▅', '▄', '▃', '▂'],
-        'arrows': ['←', '↖', '↑', '↗', '→', '↘', '↓', '↙'],
-        'star': ['✶', '✷', '✸', '✹', '✺', '✹', '✸', '✷'],
-        'moon': ['🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '🌘'],
-        'pulse': ['◜', '◠', '◝', '◞', '◡', '◟'],
-        'brain': ['🧠', '💭', '💡', '✨', '💫', '🌟', '💡', '💭'],
-        'sparkle': ['⁺', '˚', '*', '✧', '✦', '✧', '*', '˚'],
+        "dots": [".", "..", "...", "...."],
+        "bounce": ["-", "\\", "|", "/"],
+        "grow": [".", "o", "O", "o"],
+        "arrows": [">", ">>", ">>>", ">>"],
+        "star": ["*", "+", "x", "+"],
+        "moon": [".", "o", "O", "o"],
+        "pulse": ["[    ]", "[=   ]", "[==  ]", "[=== ]", "[====]"],
+        "brain": ["思考", "分析", "规划", "执行"],
+        "sparkle": ["*", "+", ".", "+"],
     }
 
-    KAWAII_WAITING = [
-        "(｡◕‿◕｡)", "(◕‿◕✿)", "٩(◕‿◕｡)۶", "(✿◠‿◠)", "( ˘▽˘)っ",
-        "♪(´ε` )", "(◕ᴗ◕✿)", "ヾ(＾∇＾)", "(≧◡≦)", "(★ω★)",
+    HERMES_WAITING = [
+        "Hermes", "准备中", "处理中", "执行中", "同步中",
     ]
 
-    KAWAII_THINKING = [
-        "(｡•́︿•̀｡)", "(◔_◔)", "(¬‿¬)", "( •_•)>⌐■-■", "(⌐■_■)",
-        "(´･_･`)", "◉_◉", "(°ロ°)", "( ˘⌣˘)♡", "ヽ(>∀<☆)☆",
-        "٩(๑❛ᴗ❛๑)۶", "(⊙_⊙)", "(¬_¬)", "( ͡° ͜ʖ ͡°)", "ಠ_ಠ",
+    HERMES_THINKING = [
+        "思考中", "分析中", "规划中", "推理中", "整理中",
     ]
 
     THINKING_VERBS = [
-        "pondering", "contemplating", "musing", "cogitating", "ruminating",
-        "deliberating", "mulling", "reflecting", "processing", "reasoning",
-        "analyzing", "computing", "synthesizing", "formulating", "brainstorming",
+        "思考", "分析", "规划", "推理", "整理",
+        "检索", "计算", "合并", "验证", "生成",
     ]
-
     @staticmethod
     def get_waiting_faces() -> list[str]:
         skin = _get_skin()
@@ -613,7 +608,7 @@ class KawaiiSpinner:
             faces = skin.get_spinner_list("waiting_faces")
             if faces:
                 return faces
-        return KawaiiSpinner.KAWAII_WAITING
+        return HermesSpinner.HERMES_WAITING
 
     @staticmethod
     def get_thinking_faces() -> list[str]:
@@ -622,7 +617,7 @@ class KawaiiSpinner:
             faces = skin.get_spinner_list("thinking_faces")
             if faces:
                 return faces
-        return KawaiiSpinner.KAWAII_THINKING
+        return HermesSpinner.HERMES_THINKING
 
     @staticmethod
     def get_thinking_verbs() -> list[str]:
@@ -631,7 +626,7 @@ class KawaiiSpinner:
             verbs = skin.get_spinner_list("thinking_verbs")
             if verbs:
                 return verbs
-        return KawaiiSpinner.THINKING_VERBS
+        return HermesSpinner.THINKING_VERBS
 
     def __init__(self, message: str = "", spinner_type: str = 'dots', print_fn=None):
         self.message = message
@@ -684,7 +679,7 @@ class KawaiiSpinner:
         the correct line — each spinner frame ends up on its own line.
 
         The CLI already drives a TUI widget (_spinner_text) for spinner display,
-        so KawaiiSpinner's \\r-based animation is redundant under StdoutProxy.
+        so HermesSpinner's \\r-based animation is redundant under StdoutProxy.
         """
         try:
             from prompt_toolkit.patch_stdout import StdoutProxy
@@ -790,8 +785,11 @@ class KawaiiSpinner:
 
 
 # =========================================================================
-# Cute tool message (completion line that replaces the spinner)
+# Tool message (completion line that replaces the spinner)
 # =========================================================================
+
+# Backward-compatible alias for older imports and tests.
+KawaiiSpinner = HermesSpinner
 
 def _detect_tool_failure(tool_name: str, result: str | None) -> tuple[bool, str]:
     """Inspect a tool result string for signs of failure.

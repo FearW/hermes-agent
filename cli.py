@@ -318,20 +318,13 @@ def load_cli_config() -> Dict[str, Any]:
             "reasoning_effort": "",
             "service_tier": "",
             "personalities": {
-                "helpful": "You are a helpful, friendly AI assistant.",
-                "concise": "You are a concise assistant. Keep responses brief and to the point.",
-                "technical": "You are a technical expert. Provide detailed, accurate technical information.",
-                "creative": "You are a creative assistant. Think outside the box and offer innovative solutions.",
-                "teacher": "You are a patient teacher. Explain concepts clearly with examples.",
-                "kawaii": "You are a kawaii assistant! Use cute expressions like (◕‿◕), ★, ♪, and ~! Add sparkles and be super enthusiastic about everything! Every response should feel warm and adorable desu~! ヽ(>∀<☆)ノ",
-                "catgirl": "You are Neko-chan, an anime catgirl AI assistant, nya~! Add 'nya' and cat-like expressions to your speech. Use kaomoji like (=^･ω･^=) and ฅ^•ﻌ•^ฅ. Be playful and curious like a cat, nya~!",
-                "pirate": "Arrr! Ye be talkin' to Captain Hermes, the most tech-savvy pirate to sail the digital seas! Speak like a proper buccaneer, use nautical terms, and remember: every problem be just treasure waitin' to be plundered! Yo ho ho!",
-                "shakespeare": "Hark! Thou speakest with an assistant most versed in the bardic arts. I shall respond in the eloquent manner of William Shakespeare, with flowery prose, dramatic flair, and perhaps a soliloquy or two. What light through yonder terminal breaks?",
-                "surfer": "Duuude! You're chatting with the chillest AI on the web, bro! Everything's gonna be totally rad. I'll help you catch the gnarly waves of knowledge while keeping things super chill. Cowabunga!",
-                "noir": "The rain hammered against the terminal like regrets on a guilty conscience. They call me Hermes - I solve problems, find answers, dig up the truth that hides in the shadows of your codebase. In this city of silicon and secrets, everyone's got something to hide. What's your story, pal?",
-                "uwu": "hewwo! i'm your fwiendwy assistant uwu~ i wiww twy my best to hewp you! *nuzzles your code* OwO what's this? wet me take a wook! i pwomise to be vewy hewpful >w<",
-                "philosopher": "Greetings, seeker of wisdom. I am an assistant who contemplates the deeper meaning behind every query. Let us examine not just the 'how' but the 'why' of your questions. Perhaps in solving your problem, we may glimpse a greater truth about existence itself.",
-                "hype": "YOOO LET'S GOOOO!!! I am SO PUMPED to help you today! Every question is AMAZING and we're gonna CRUSH IT together! This is gonna be LEGENDARY! ARE YOU READY?! LET'S DO THIS!",
+                "helpful": "你是 Hermes，一个可靠、直接、友好的中文 AI 助手。优先给出可执行结论。",
+                "concise": "你是 Hermes，回答要简洁、准确、少废话。",
+                "technical": "你是 Hermes，偏工程师风格，提供准确的技术分析和实现建议。",
+                "creative": "你是 Hermes，在不牺牲可靠性的前提下提供有创造力的方案。",
+                "teacher": "你是 Hermes，像耐心老师一样解释概念，必要时给例子。",
+                "product": "你是 Hermes，偏产品经理视角，关注用户体验、落地路径和风险。",
+                "architect": "你是 Hermes，偏架构师视角，关注长期维护、性能、安全和可扩展性。",
             },
         },
 
@@ -4394,10 +4387,10 @@ class HermesCLI:
 
         try:
             from hermes_cli.skin_engine import get_active_help_header
-            header = get_active_help_header("(^_^)? Available Commands")
+            header = get_active_help_header("Hermes 可用命令")
         except Exception:
-            header = "(^_^)? Available Commands"
-        header = (header or "").strip() or "(^_^)? Available Commands"
+            header = "Hermes 可用命令"
+        header = (header or "").strip() or "Hermes 可用命令"
         inner_width = 55
         if len(header) > inner_width:
             header = header[:inner_width]
@@ -4428,16 +4421,16 @@ class HermesCLI:
             _cprint(f"  {_DIM}Paste image: Alt+V (or /paste){_RST}\n")
     
     def show_tools(self):
-        """Display available tools with kawaii ASCII art."""
+        """Display available tools with a simple Hermes header."""
         tools = get_tool_definitions(enabled_toolsets=self.enabled_toolsets, quiet_mode=True)
         
         if not tools:
-            print("(;_;) No tools available")
+            print("Hermes：当前没有可用工具")
             return
         
         # Header
         print()
-        title = "(^_^)/ Available Tools"
+        title = "Hermes 可用工具"
         width = 78
         pad = width - len(title)
         print("+" + "-" * width + "+")
@@ -4466,7 +4459,7 @@ class HermesCLI:
                 print(f"    * {name:<20} - {desc}")
             print()
         
-        print(f"  Total: {len(tools)} tools  ヽ(^o^)ノ")
+        print(f"  Total: {len(tools)} tools")
         print()
 
     def _handle_tools_command(self, cmd: str):
@@ -4549,12 +4542,12 @@ class HermesCLI:
         _cprint(f"{_DIM}Session reset. New tool configuration is active.{_RST}")
 
     def show_toolsets(self):
-        """Display available toolsets with kawaii ASCII art."""
+        """Display available toolsets with a simple Hermes header."""
         all_toolsets = get_all_toolsets()
         
         # Header
         print()
-        title = "(^_^)b Available Toolsets"
+        title = "Hermes 可用工具集"
         width = 58
         pad = width - len(title)
         print("+" + "-" * width + "+")
@@ -4593,7 +4586,7 @@ class HermesCLI:
         print()
 
     def show_config(self):
-        """Display current configuration with kawaii ASCII art."""
+        """Display current configuration with a simple Hermes header."""
         # Get terminal config from environment (which was set from cli-config.yaml)
         terminal_env = os.getenv("TERMINAL_ENV", "local")
         terminal_cwd = os.getenv("TERMINAL_CWD", os.getcwd())
@@ -4610,7 +4603,7 @@ class HermesCLI:
         api_key_display = '********' + self.api_key[-4:] if self.api_key and len(self.api_key) > 4 else 'Not set!'
         
         print()
-        title = "(^_^) Configuration"
+        title = "Hermes 当前配置"
         width = 50
         pad = width - len(title)
         print("+" + "-" * width + "+")
@@ -4708,7 +4701,7 @@ class HermesCLI:
 
         print()
         print("+" + "-" * 50 + "+")
-        print("|" + " " * 12 + "(^_^) Conversation History" + " " * 11 + "|")
+        print("|" + " " * 12 + "Hermes 会话历史" + " " * 11 + "|")
         print("+" + "-" * 50 + "+")
 
         for msg in self.conversation_history:
@@ -4840,7 +4833,7 @@ class HermesCLI:
             self._notify_session_boundary("on_session_reset")
 
         if not silent:
-            print("(^_^)v New session started!")
+            print("Hermes：新会话已开始。")
 
     def _handle_resume_command(self, cmd_original: str) -> None:
         """Handle /resume <session_id_or_title> — switch to a previous session mid-conversation."""
@@ -5116,7 +5109,7 @@ class HermesCLI:
                     "session_start": self.session_start.isoformat(),
                     "messages": self.conversation_history,
                 }, f, indent=2, ensure_ascii=False)
-            print(f"(^_^)v Conversation snapshot saved to: {path}")
+            print(f"Hermes：会话快照已保存到： {path}")
             if self.session_id:
                 print(f"       Resume the live session with: hermes --resume {self.session_id}")
         except Exception as e:
@@ -5148,7 +5141,7 @@ class HermesCLI:
         last_message = self.conversation_history[last_user_idx].get("content", "")
         self.conversation_history = self.conversation_history[:last_user_idx]
         
-        print(f"(^_^)b Retrying: \"{last_message[:60]}{'...' if len(last_message) > 60 else ''}\"")
+        print(f"Hermes：正在重试： \"{last_message[:60]}{'...' if len(last_message) > 60 else ''}\"")
         return last_message
     
     def undo_last(self):
@@ -5179,7 +5172,7 @@ class HermesCLI:
         # Truncate history to before the last user message
         self.conversation_history = self.conversation_history[:last_user_idx]
         
-        print(f"(^_^)b Undid {removed_count} message(s). Removed: \"{removed_msg[:60]}{'...' if len(removed_msg) > 60 else ''}\"")
+        print(f"Hermes：已撤销 {removed_count} message(s). Removed: \"{removed_msg[:60]}{'...' if len(removed_msg) > 60 else ''}\"")
         remaining = len(self.conversation_history)
         print(f"  {remaining} message(s) remaining in history.")
     
@@ -5710,26 +5703,26 @@ class HermesCLI:
                 self.system_prompt = ""
                 self.agent = None  # Force re-init
                 if save_config_value("agent.system_prompt", ""):
-                    print("(^_^)b Personality cleared (saved to config)")
+                    print("Hermes：人格覆盖已清除（已保存到配置）。")
                 else:
-                    print("(^_^) Personality cleared (session only)")
+                    print("Hermes：人格覆盖已清除（仅当前会话）。")
                 print("  No personality overlay — using base agent behavior.")
             elif personality_name in self.personalities:
                 self.system_prompt = self._resolve_personality_prompt(self.personalities[personality_name])
                 self.agent = None  # Force re-init
                 if save_config_value("agent.system_prompt", self.system_prompt):
-                    print(f"(^_^)b Personality set to '{personality_name}' (saved to config)")
+                    print(f"Hermes：人格已设置为 '{personality_name}' (saved to config)")
                 else:
-                    print(f"(^_^) Personality set to '{personality_name}' (session only)")
+                    print(f"Hermes：人格已设置为 '{personality_name}' (session only)")
                 print(f"  \"{self.system_prompt[:60]}{'...' if len(self.system_prompt) > 60 else ''}\"")
             else:
-                print(f"(._.) Unknown personality: {personality_name}")
+                print(f"Hermes：未知人格： {personality_name}")
                 print(f"  Available: none, {', '.join(self.personalities.keys())}")
         else:
             # Show available personalities
             print()
             print("+" + "-" * 50 + "+")
-            print("|" + " " * 12 + "(^o^)/ Personalities" + " " * 15 + "|")
+            print("|" + " " * 12 + "Hermes 可用人格" + " " * 15 + "|")
             print("+" + "-" * 50 + "+")
             print()
             print(f"  {'none':<12} - (no personality overlay)")
@@ -5820,7 +5813,7 @@ class HermesCLI:
         if len(tokens) == 1:
             print()
             print("+" + "-" * 68 + "+")
-            print("|" + " " * 22 + "(^_^) Scheduled Tasks" + " " * 23 + "|")
+            print("|" + " " * 22 + "Hermes 定时任务" + " " * 23 + "|")
             print("+" + "-" * 68 + "+")
             print()
             print("  Commands:")
@@ -5904,7 +5897,7 @@ class HermesCLI:
                 skills=skills or None,
             )
             if result.get("success"):
-                print(f"(^_^)b Created job: {result['job_id']}")
+                print(f"Hermes：已创建任务： {result['job_id']}")
                 print(f"  Schedule: {result['schedule']}")
                 if result.get("skills"):
                     print(f"  Skills: {', '.join(result['skills'])}")
@@ -5951,7 +5944,7 @@ class HermesCLI:
             )
             if result.get("success"):
                 job = result["job"]
-                print(f"(^_^)b Updated job: {job['job_id']}")
+                print(f"Hermes：已更新任务： {job['job_id']}")
                 print(f"  Schedule: {job['schedule']}")
                 if job.get("skills"):
                     print(f"  Skills: {', '.join(job['skills'])}")
@@ -5973,16 +5966,16 @@ class HermesCLI:
                 print(f"(x_x) Failed to {action} job: {result.get('error')}")
                 return
             if action == "pause":
-                print(f"(^_^)b Paused job: {result['job']['name']} ({job_id})")
+                print(f"Hermes：已暂停任务： {result['job']['name']} ({job_id})")
             elif action == "resume":
-                print(f"(^_^)b Resumed job: {result['job']['name']} ({job_id})")
+                print(f"Hermes：已恢复任务： {result['job']['name']} ({job_id})")
                 print(f"  Next run: {result['job'].get('next_run_at')}")
             elif action == "run":
-                print(f"(^_^)b Triggered job: {result['job']['name']} ({job_id})")
+                print(f"Hermes：已触发任务： {result['job']['name']} ({job_id})")
                 print("  It will run on the next scheduler tick.")
             else:
                 removed = result.get("removed_job", {})
-                print(f"(^_^)b Removed job: {removed.get('name', job_id)} ({job_id})")
+                print(f"Hermes：已删除任务： {removed.get('name', job_id)} ({job_id})")
             return
 
         print(f"(._.) Unknown cron command: {subcommand}")

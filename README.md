@@ -1,36 +1,27 @@
-<p align="center">
-  <img src="assets/banner.png" alt="Hermes Agent" width="100%">
-</p>
-
 # Hermes Agent · FearW Fork
 
-<p align="center">
-  <a href="https://github.com/FearW/hermes-agent"><img src="https://img.shields.io/badge/Fork-FearW%2Fhermes--agent-FFD700?style=for-the-badge" alt="FearW fork"></a>
-  <a href="https://github.com/NousResearch/hermes-agent"><img src="https://img.shields.io/badge/Upstream-NousResearch%2Fhermes--agent-blueviolet?style=for-the-badge" alt="Upstream"></a>
-  <a href="https://github.com/NousResearch/hermes-agent/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
-</p>
+这是基于 `NousResearch/hermes-agent` 的增强 Fork。目标是：保留原版 Hermes Agent 的工具、网关、Skills、记忆、Web/TUI、ACP 等能力，同时让日常使用更轻量、更快、更稳定。
 
-这是基于 [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) 的个人增强版 Fork。
+## 这个 Fork 的重点
 
-目标很简单：**保留原版 Hermes Agent 的完整能力，同时把常用体验、网关稳定性、记忆维护和本地使用细节修到更顺手。**
-
----
-
-## 这个 Fork 改了什么
-
-- **保留原版功能**：CLI、Gateway、Tools、Skills、Memory、Cron、Web Server、ACP 等能力都继续保留。
-- **L4 记忆维护**：保留并启用更稳定的 L4 归档/遗忘维护循环，长期运行更干净。
-- **网关健康修复**：修复部分 Gateway、快捷命令、安全确认、后台维护任务相关兼容问题。
-- **配置路径修复**：减少硬编码路径，兼容 Hermes profiles 和不同运行环境。
-- **Web/CLI 兼容性修复**：补齐缺失兼容函数，修复部分测试和接口字段问题。
-- **记忆遗忘功能**：一个事情只执行过一次，或者非常久不执行的话，不如让空间留给后面的能力。
----
+- 保留原版功能：CLI、Gateway、Tools、Skills、Memory、Cron、Web Server、ACP 等能力继续存在。
+- 默认走 CPA：推荐通过 `CLIProxyAPI` 统一接入模型，Hermes 侧只需要 OpenAI-compatible `/v1` 接口。
+- 保护 L4 记忆：保留 L4 归档、遗忘、瘦身、相似记忆合并等长期运行优化。
+- 轻量高速：安装默认只拉基础依赖，重能力按需安装。
+- 傻瓜可用：新用户 clone 后少配置，启动 CPA 后即可运行 Hermes。
 
 ## 快速开始
 
-### 方式 0：一键安装器（最省心）
+### 1. 安装 Hermes
 
-Windows PowerShell：
+```bash
+git clone https://github.com/FearW/hermes-agent.git
+cd hermes-agent
+uv run hermes setup
+uv run hermes
+```
+
+Windows PowerShell 也可以使用一键安装器：
 
 ```powershell
 irm https://raw.githubusercontent.com/FearW/hermes-agent/main/scripts/install.ps1 | iex
@@ -42,101 +33,84 @@ Linux / macOS / WSL：
 curl -fsSL https://raw.githubusercontent.com/FearW/hermes-agent/main/scripts/install.sh | bash
 ```
 
-安装器会从 `FearW/hermes-agent` 拉取本 Fork，默认只安装轻量基础依赖；语音、消息网关、Web 等重能力后续按需安装。
-### 方式 A：最少命令直接运行（推荐）
+### 2. 启动 CPA
 
-适合新用户。`uv` 会自动创建项目环境并安装基础依赖：
+本 Fork 推荐把模型兼容交给 `CLIProxyAPI`，Hermes 只连一个 OpenAI-compatible 地址：
+
+```text
+http://127.0.0.1:8080/v1
+```
+
+Hermes 默认配置就是 CPA 简洁版：
+
+```yaml
+model:
+  default: "gpt-5(8192)"
+  provider: "cliproxyapi"
+  base_url: "http://127.0.0.1:8080/v1"
+```
+
+如果你的 CPA 需要 key，可以放到环境变量或 `~/.hermes/.env`：
 
 ```bash
-git clone https://github.com/FearW/hermes-agent.git
-cd hermes-agent
+CLIPROXY_API_KEY=your-key-if-needed
+```
+
+也支持别名：`provider: "cpa"`、`CPA_BASE_URL`、`CPA_API_KEY`。
+CPA 模型后缀（例如 `gpt-5(8192)`）会原样传给后端，Hermes 不会剥离。
+
+### 3. 运行 Hermes
+
+终端聊天：
+
+```bash
+uv run hermes
+```
+
+WebUI：
+
+```bash
+uv run hermes dashboard
+```
+
+默认打开：`http://127.0.0.1:9119`
+
+如果想在 WebUI 里打开内嵌聊天页：
+
+```bash
+uv run hermes dashboard --tui
+```
+
+## 常用命令
+
+```bash
+uv run hermes version
 uv run hermes setup
-uv run hermes
+uv run hermes dashboard
+uv run hermes dashboard --tui
+uv run hermes tools
+uv run hermes gateway
+uv run hermes memory doctor
+uv run hermes doctor
 ```
 
-如果已经配置过 API Key，也可以跳过 setup，直接：
-
-```bash
-uv run hermes
-```
-
-### 方式 B：手动创建虚拟环境
-
-适合开发者或想固定环境的人：
-
-```bash
-uv venv .venv --python 3.11
-source .venv/bin/activate
-uv pip install -e ".[dev,web]"
-hermes setup
-hermes
-```
-
-Windows PowerShell 激活命令：
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-```
-
-### 可选能力按需安装
-
-不要一开始就装 `[all]`，它会拉取语音、消息平台、浏览器等较重依赖。需要什么再装什么：
+## 可选能力按需安装
 
 ```bash
 uv pip install -e ".[messaging]"   # Telegram / Discord / Slack 等网关
 uv pip install -e ".[web]"         # Web Dashboard / TUI 网页服务
-uv pip install -e ".[voice]"       # 本地语音能力，依赖较重
+uv pip install -e ".[voice]"       # 本地语音能力
 uv pip install -e ".[all]"         # 全量安装，不建议新手第一步使用
 ```
 
-常用命令：
+## 原则
 
-```bash
-uv run hermes version        # 查看版本
-uv run hermes setup          # 初始化配置
-uv run hermes model          # 选择模型
-uv run hermes tools          # 管理工具
-uv run hermes gateway        # 启动 Telegram/Discord/Slack 等网关
-uv run hermes memory doctor  # 检查记忆健康
-uv run hermes doctor         # 检查环境问题
-```
-
----
-
-## 常用能力
-
-| 能力 | 说明 |
-| --- | --- |
-| CLI 对话 | 终端里直接和 Agent 对话，支持工具调用和历史会话 |
-| Messaging Gateway | 支持 Telegram、Discord、Slack、WhatsApp、Signal 等平台 |
-| Tools | 文件、终端、浏览器、搜索、代码执行、MCP 等工具能力 |
-| Skills | 可安装、调用和沉淀技能，让 Agent 越用越顺手 |
-| Memory / L4 | 支持长期记忆、会话搜索、L4 归档和遗忘维护 |
-| Cron | 可配置定时任务，例如日报、提醒、自动巡检 |
-
----
-
-## 开发与测试
-
-进入虚拟环境后运行：
-
-```bash
-python -m pytest tests/ -q
-```
-
-本 Fork 当前重点验证过的健康基线包括：
-
-```bash
-uv run --extra dev --extra web pytest tests/hermes_cli/test_web_server.py tests/cli/test_quick_commands.py -q
-uv run --extra dev --extra web pytest tests/gateway/test_maintenance.py -q -o addopts= --tb=short
-```
-
----
+- 不删除本 Fork 已有魔改功能。
+- 不整包合并上游大改，只做可验证、低风险同步。
+- 默认使用 CPA 简化模型接入；旧 provider 代码保留为兼容兜底。
 
 ## 上游项目
 
 - 原项目：<https://github.com/NousResearch/hermes-agent>
 - 原文档：<https://hermes-agent.nousresearch.com/docs/>
 - License：MIT
-
-本仓库会尽量参考上游最新代码做修复，但原则是：**不删除本 Fork 已有的自定义功能。**

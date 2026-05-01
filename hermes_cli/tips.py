@@ -28,7 +28,7 @@ TIPS = [
     "/yolo skips all dangerous command approval prompts for the rest of the session.",
     "/model lets you switch models mid-session — try /model sonnet or /model gpt-5.",
     "/model <name> changes your default model permanently.",
-    "/personality pirate sets a fun personality — 14 built-in options from kawaii to shakespeare.",
+    "/personality helpful、technical、architect 可以切换不同中文工作风格。",
     "/skin changes the CLI theme — try ares, mono, slate, poseidon, or charizard.",
     "/statusbar toggles a persistent bar showing model, tokens, context fill %, cost, and duration.",
     "/tools disable browser temporarily removes browser tools for the current session.",

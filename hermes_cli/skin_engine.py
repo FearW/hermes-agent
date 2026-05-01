@@ -52,10 +52,10 @@ All fields are optional. Missing values inherit from the ``default`` skin.
     branding:
       agent_name: "Hermes Agent"          # Banner title, status display
       welcome: "Welcome message"          # Shown at CLI startup
-      goodbye: "Goodbye! ⚕"              # Shown on exit
-      response_label: " ⚕ Hermes "       # Response box header label
+      goodbye: "再见，Hermes 已退出。"              # Shown on exit
+      response_label: " Hermes "       # Response box header label
       prompt_symbol: "❯ "                # Input prompt symbol
-      help_header: "(^_^)? Commands"      # /help header text
+      help_header: "Hermes 可用命令"      # /help header text
 
     # Tool prefix: character for tool output lines (default: ┊)
     tool_prefix: "┊"
@@ -83,7 +83,7 @@ USAGE
 BUILT-IN SKINS
 ==============
 
-- ``default`` — Classic Hermes gold/kawaii (the current look)
+- ``default`` — Classic Hermes gold (the current look)
 - ``ares``    — Crimson/bronze war-god theme with custom spinner wings
 - ``mono``    — Clean grayscale monochrome
 - ``slate``   — Cool blue developer-focused theme
@@ -151,7 +151,7 @@ class SkinConfig:
 _BUILTIN_SKINS: Dict[str, Dict[str, Any]] = {
     "default": {
         "name": "default",
-        "description": "Classic Hermes — gold and kawaii",
+        "description": "Classic Hermes — gold, clean, Chinese-friendly",
         "colors": {
             "banner_border": "#CD7F32",
             "banner_title": "#FFD700",
@@ -174,11 +174,11 @@ _BUILTIN_SKINS: Dict[str, Dict[str, Any]] = {
         },
         "branding": {
             "agent_name": "Hermes Agent",
-            "welcome": "Welcome to Hermes Agent! Type your message or /help for commands.",
-            "goodbye": "Goodbye! ⚕",
-            "response_label": " ⚕ Hermes ",
+            "welcome": "欢迎使用 Hermes。输入消息开始对话，或输入 /help 查看命令。",
+            "goodbye": "再见，Hermes 已退出。",
+            "response_label": " Hermes ",
             "prompt_symbol": "❯ ",
-            "help_header": "(^_^)? Available Commands",
+            "help_header": "Hermes 可用命令",
         },
         "tool_prefix": "┊",
     },
@@ -269,11 +269,11 @@ _BUILTIN_SKINS: Dict[str, Dict[str, Any]] = {
         "spinner": {},
         "branding": {
             "agent_name": "Hermes Agent",
-            "welcome": "Welcome to Hermes Agent! Type your message or /help for commands.",
-            "goodbye": "Goodbye! ⚕",
-            "response_label": " ⚕ Hermes ",
+            "welcome": "欢迎使用 Hermes。输入消息开始对话，或输入 /help 查看命令。",
+            "goodbye": "再见，Hermes 已退出。",
+            "response_label": " Hermes ",
             "prompt_symbol": "❯ ",
-            "help_header": "[?] Available Commands",
+            "help_header": "Hermes 可用命令",
         },
         "tool_prefix": "┊",
     },
@@ -300,11 +300,11 @@ _BUILTIN_SKINS: Dict[str, Dict[str, Any]] = {
         "spinner": {},
         "branding": {
             "agent_name": "Hermes Agent",
-            "welcome": "Welcome to Hermes Agent! Type your message or /help for commands.",
-            "goodbye": "Goodbye! ⚕",
-            "response_label": " ⚕ Hermes ",
+            "welcome": "欢迎使用 Hermes。输入消息开始对话，或输入 /help 查看命令。",
+            "goodbye": "再见，Hermes 已退出。",
+            "response_label": " Hermes ",
             "prompt_symbol": "❯ ",
-            "help_header": "(^_^)? Available Commands",
+            "help_header": "Hermes 可用命令",
         },
         "tool_prefix": "┊",
     },
@@ -652,7 +652,7 @@ def get_active_prompt_symbol(fallback: str = "❯ ") -> str:
 
 
 
-def get_active_help_header(fallback: str = "(^_^)? Available Commands") -> str:
+def get_active_help_header(fallback: str = "Hermes 可用命令") -> str:
     """Get the /help header from the active skin."""
     try:
         return get_active_skin().get_branding("help_header", fallback)
@@ -661,7 +661,7 @@ def get_active_help_header(fallback: str = "(^_^)? Available Commands") -> str:
 
 
 
-def get_active_goodbye(fallback: str = "Goodbye! ⚕") -> str:
+def get_active_goodbye(fallback: str = "再见，Hermes 已退出。") -> str:
     """Get the goodbye line from the active skin."""
     try:
         return get_active_skin().get_branding("goodbye", fallback)

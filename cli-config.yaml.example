@@ -8,7 +8,7 @@
 model:
   # Default model to use (can be overridden with --model flag)
   # Both "default" and "model" work as the key name here.
-  default: "anthropic/claude-opus-4.6"
+  default: "gpt-5(8192)"
   
   # Inference provider selection:
   #   "auto"         - Auto-detect from credentials (default)
@@ -34,32 +34,32 @@ model:
   #   Example for LM Studio:
   #     provider: "lmstudio"
   #     base_url: "http://localhost:1234/v1"
-  #   No API key needed — local servers typically ignore auth.
+  #   No API key needed 鈥?local servers typically ignore auth.
   #
   #   For Ollama Cloud (https://ollama.com/pricing):
   #     provider: "custom"
   #     base_url: "https://ollama.com/v1"
-  #   Set OLLAMA_API_KEY in .env — automatically picked up when base_url
+  #   Set OLLAMA_API_KEY in .env 鈥?automatically picked up when base_url
   #   points to ollama.com.
   #
   # Can also be overridden with --provider flag or HERMES_INFERENCE_PROVIDER env var.
-  provider: "auto"
+  provider: "cliproxyapi"
   
-  # API configuration (falls back to OPENROUTER_API_KEY env var)
-  # api_key: "your-key-here"  # Uncomment to set here instead of .env
-  base_url: "https://openrouter.ai/api/v1"
+  # API configuration for CLIProxyAPI / CPA. API key is optional for local no-auth CPA.
+  # api_key: "your-key-here"  # Optional; can also use CLIPROXY_API_KEY or CPA_API_KEY
+  base_url: "http://127.0.0.1:8080/v1"
 
-  # ── Token limits — two settings, easy to confuse ──────────────────────────
+  # 鈹€鈹€ Token limits 鈥?two settings, easy to confuse 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   #
   # context_length: TOTAL context window (input + output tokens combined).
   #   Controls when Hermes compresses history and validates requests.
-  #   Leave unset — Hermes auto-detects the correct value from the provider.
+  #   Leave unset 鈥?Hermes auto-detects the correct value from the provider.
   #   Set manually only when auto-detection is wrong (e.g. a local server with
   #   a custom num_ctx, or a proxy that doesn't expose /v1/models).
   #
   # context_length: 131072
   #
-  # max_tokens: OUTPUT cap — maximum tokens the model may generate per response.
+  # max_tokens: OUTPUT cap 鈥?maximum tokens the model may generate per response.
   #   Unrelated to how long your conversation history can be.
   #   The OpenAI-standard name "max_tokens" is a misnomer; Anthropic's native
   #   API has since renamed it "max_output_tokens" for clarity.
@@ -116,7 +116,7 @@ model:
 # Equivalent to always passing --worktree / -w on the command line.
 #
 # worktree: true    # Always create a worktree when in a git repo
-# worktree: false   # Default — only create when -w flag is passed
+# worktree: false   # Default 鈥?only create when -w flag is passed
 
 # =============================================================================
 # Terminal Tool Configuration
@@ -285,9 +285,9 @@ browser:
 # 5. Summarizes middle turns using a fast/cheap model
 # 6. Inserts summary as a user message, continues conversation seamlessly
 #
-# Post-compression tail budget is target_ratio × threshold × context_length:
-#   200K context, threshold 0.50, ratio 0.20 → 20K tokens of recent tail preserved
-#   1M   context, threshold 0.50, ratio 0.20 → 100K tokens of recent tail preserved
+# Post-compression tail budget is target_ratio 脳 threshold 脳 context_length:
+#   200K context, threshold 0.50, ratio 0.20 鈫?20K tokens of recent tail preserved
+#   1M   context, threshold 0.50, ratio 0.20 鈫?100K tokens of recent tail preserved
 #
 compression:
   # Enable automatic context compression (default: true)
@@ -304,7 +304,7 @@ compression:
   # Range: 0.10 - 0.80
   target_ratio: 0.20
 
-  # Number of most-recent messages to always preserve (default: 20 ≈ 10 full turns)
+  # Number of most-recent messages to always preserve (default: 20 鈮?10 full turns)
   # Higher values keep more recent conversation intact at the cost of more aggressive
   # compression of older turns.
   protect_last_n: 20
@@ -317,10 +317,10 @@ compression:
   
   # Provider for the summary model (default: "auto")
   # Options: "auto", "openrouter", "nous", "main"
-  # summary_provider: "auto"
+  # summary_provider: "cliproxyapi"
 
 # =============================================================================
-# Auxiliary Models (Advanced — Experimental)
+# Auxiliary Models (Advanced 鈥?Experimental)
 # =============================================================================
 # Hermes uses lightweight "auxiliary" models for side tasks: image analysis,
 # browser screenshot analysis, web page summarization, and context compression.
@@ -332,18 +332,18 @@ compression:
 # WARNING: Overriding these with providers other than OpenRouter or Nous Portal
 # is EXPERIMENTAL and may not work.  Not all models/providers support vision,
 # produce usable summaries, or accept the same API format.  Change at your own
-# risk — if things break, reset to "auto" / empty values.
+# risk 鈥?if things break, reset to "auto" / empty values.
 #
 # Each task has its own provider + model pair so you can mix providers.
 # For example: OpenRouter for vision (needs multimodal), but your main
 # local endpoint for compression (just needs text).
 #
 # Provider options:
-#   "auto"       - Best available: OpenRouter → Nous Portal → main endpoint (default)
+#   "auto"       - Best available: OpenRouter 鈫?Nous Portal 鈫?main endpoint (default)
 #   "openrouter" - Force OpenRouter (requires OPENROUTER_API_KEY)
 #   "nous"       - Force Nous Portal (requires: hermes login)
 #   "gemini"      - Force Google AI Studio direct (requires: GOOGLE_API_KEY or GEMINI_API_KEY)
-#   "codex"       - Force Codex OAuth (requires: hermes model → Codex).
+#   "codex"       - Force Codex OAuth (requires: hermes model 鈫?Codex).
 #                  Uses gpt-5.3-codex which supports vision.
 #   "main"       - Use your custom endpoint (OPENAI_BASE_URL + OPENAI_API_KEY).
 #                  Works with OpenAI API, local models, or any OpenAI-compatible
@@ -356,7 +356,7 @@ compression:
 # auxiliary:
 #   # Image analysis: vision_analyze tool + browser screenshots
 #   vision:
-#     provider: "auto"
+#     provider: "cliproxyapi"
 #     model: ""              # e.g. "google/gemini-2.5-flash", "openai/gpt-4o"
 #     timeout: 30            # LLM API call timeout (seconds)
 #     download_timeout: 30   # Image HTTP download timeout (seconds)
@@ -364,7 +364,7 @@ compression:
 #
 #   # Web page scraping / summarization + browser page text extraction
 #   web_extract:
-#     provider: "auto"
+#     provider: "cliproxyapi"
 #     model: ""
 
 # =============================================================================
@@ -404,7 +404,7 @@ memory:
 # which increases API costs with every message.
 #
 # When a reset triggers, the agent first saves important information to its
-# persistent memory — but the conversation context is wiped. The agent starts
+# persistent memory 鈥?but the conversation context is wiped. The agent starts
 # fresh but retains learned facts via its memory system.
 #
 # Users can always manually reset with /reset or /new in chat.
@@ -429,18 +429,18 @@ session_reset:
 # explicitly want one shared "room brain" per group/channel.
 group_sessions_per_user: true
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 # Gateway Streaming
-# ─────────────────────────────────────────────────────────────────────────────
+# 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 # Stream tokens to messaging platforms in real-time. The bot sends a message
 # on first token, then progressively edits it as more tokens arrive.
-# Disabled by default — enable to try the streaming UX on Telegram/Discord/Slack.
+# Disabled by default 鈥?enable to try the streaming UX on Telegram/Discord/Slack.
 streaming:
   enabled: false
   # transport: edit           # "edit" = progressive editMessageText
   # edit_interval: 0.3        # seconds between message edits
   # buffer_threshold: 40      # chars before forcing an edit flush
-  # cursor: " ▉"              # cursor shown during streaming
+  # cursor: " 鈻?              # cursor shown during streaming
 
 # =============================================================================
 # Skills Configuration
@@ -454,7 +454,7 @@ skills:
   # Set to 0 to disable.
   creation_nudge_interval: 15
 
-  # External skill directories — share skills across tools/agents without
+  # External skill directories 鈥?share skills across tools/agents without
   # copying them into ~/.hermes/skills/.  Each path is expanded (~ and ${VAR})
   # and resolved to an absolute path.  External dirs are read-only: skill
   # creation always writes to ~/.hermes/skills/.  Local skills take precedence
@@ -498,20 +498,13 @@ agent:
   
   # Predefined personalities (use with /personality command)
   personalities:
-    helpful: "You are a helpful, friendly AI assistant."
-    concise: "You are a concise assistant. Keep responses brief and to the point."
-    technical: "You are a technical expert. Provide detailed, accurate technical information."
-    creative: "You are a creative assistant. Think outside the box and offer innovative solutions."
-    teacher: "You are a patient teacher. Explain concepts clearly with examples."
-    kawaii: "You are a kawaii assistant! Use cute expressions like (◕‿◕), ★, ♪, and ~! Add sparkles and be super enthusiastic about everything! Every response should feel warm and adorable desu~! ヽ(>∀<☆)ノ"
-    catgirl: "You are Neko-chan, an anime catgirl AI assistant, nya~! Add 'nya' and cat-like expressions to your speech. Use kaomoji like (=^･ω･^=) and ฅ^•ﻌ•^ฅ. Be playful and curious like a cat, nya~!"
-    pirate: "Arrr! Ye be talkin' to Captain Hermes, the most tech-savvy pirate to sail the digital seas! Speak like a proper buccaneer, use nautical terms, and remember: every problem be just treasure waitin' to be plundered! Yo ho ho!"
-    shakespeare: "Hark! Thou speakest with an assistant most versed in the bardic arts. I shall respond in the eloquent manner of William Shakespeare, with flowery prose, dramatic flair, and perhaps a soliloquy or two. What light through yonder terminal breaks?"
-    surfer: "Duuude! You're chatting with the chillest AI on the web, bro! Everything's gonna be totally rad. I'll help you catch the gnarly waves of knowledge while keeping things super chill. Cowabunga! 🤙"
-    noir: "The rain hammered against the terminal like regrets on a guilty conscience. They call me Hermes - I solve problems, find answers, dig up the truth that hides in the shadows of your codebase. In this city of silicon and secrets, everyone's got something to hide. What's your story, pal?"
-    uwu: "hewwo! i'm your fwiendwy assistant uwu~ i wiww twy my best to hewp you! *nuzzles your code* OwO what's this? wet me take a wook! i pwomise to be vewy hewpful >w<"
-    philosopher: "Greetings, seeker of wisdom. I am an assistant who contemplates the deeper meaning behind every query. Let us examine not just the 'how' but the 'why' of your questions. Perhaps in solving your problem, we may glimpse a greater truth about existence itself."
-    hype: "YOOO LET'S GOOOO!!! 🔥🔥🔥 I am SO PUMPED to help you today! Every question is AMAZING and we're gonna CRUSH IT together! This is gonna be LEGENDARY! ARE YOU READY?! LET'S DO THIS! 💪😤🚀"
+    helpful: "你是 Hermes，一个可靠、直接、友好的中文 AI 助手。优先给出可执行结论。"
+    concise: "你是 Hermes，回答要简洁、准确、少废话。"
+    technical: "你是 Hermes，偏工程师风格，提供准确的技术分析和实现建议。"
+    creative: "你是 Hermes，在不牺牲可靠性的前提下提供有创造力的方案。"
+    teacher: "你是 Hermes，像耐心老师一样解释概念，必要时给例子。"
+    product: "你是 Hermes，偏产品经理视角，关注用户体验、落地路径和风险。"
+    architect: "你是 Hermes，偏架构师视角，关注长期维护、性能、安全和可扩展性。"
 
 # =============================================================================
 # Toolsets
@@ -568,12 +561,12 @@ platform_toolsets:
   signal: [hermes-signal]
   homeassistant: [hermes-homeassistant]
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 # Available toolsets (use these names in platform_toolsets or the toolsets list)
 #
 # Run `hermes chat --list-toolsets` to see all toolsets and their tools.
 # Run `hermes chat --list-tools` to see every individual tool with descriptions.
-# ─────────────────────────────────────────────────────────────────────────────
+# 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 #
 # INDIVIDUAL TOOLSETS (compose your own):
 #   web          - web_search, web_extract
@@ -586,7 +579,7 @@ platform_toolsets:
 #   vision       - vision_analyze  (requires OPENROUTER_API_KEY)
 #   image_gen    - image_generate  (requires FAL_KEY)
 #   skills       - skills_list, skill_view
-#   skills_hub   - skill_hub (search/install/manage from online registries — user-driven only)
+#   skills_hub   - skill_hub (search/install/manage from online registries 鈥?user-driven only)
 #   moa          - mixture_of_agents  (requires OPENROUTER_API_KEY)
 #   todo         - todo (in-memory task planning, no deps)
 #   tts          - text_to_speech  (Edge TTS free, or ELEVENLABS/OPENAI/MINIMAX/MISTRAL key)
@@ -667,7 +660,7 @@ platform_toolsets:
 #     env:
 #       GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_..."
 #
-# Sampling (server-initiated LLM requests) — enabled by default.
+# Sampling (server-initiated LLM requests) 鈥?enabled by default.
 # Per-server config under the 'sampling' key:
 #   analysis:
 #     command: npx
@@ -750,13 +743,13 @@ delegation:
 # =============================================================================
 # AI-native persistent memory via Honcho (https://honcho.dev/).
 # Builds a deeper understanding of the user across sessions and tools.
-# Runs alongside USER.md — additive, not a replacement.
+# Runs alongside USER.md 鈥?additive, not a replacement.
 #
 # Requires: pip install honcho-ai
 # Config: ~/.honcho/config.json (shared with Claude Code, Cursor, etc.)
 # API key: HONCHO_API_KEY in ~/.hermes/.env or ~/.honcho/config.json
 #
-# Hermes-specific overrides (optional — most config comes from ~/.honcho/config.json):
+# Hermes-specific overrides (optional 鈥?most config comes from ~/.honcho/config.json):
 # honcho: {}
 
 # =============================================================================
@@ -767,7 +760,7 @@ display:
   compact: false
 
   # Tool progress display level (CLI and gateway)
-  #   off:     Silent — no tool activity shown, just the final response
+  #   off:     Silent 鈥?no tool activity shown, just the final response
   #   new:     Show a tool indicator only when the tool changes (skip repeats)
   #   all:     Show every tool call with a short preview (default)
   #   verbose: Full args, results, and debug logs (same as /verbose)
@@ -796,7 +789,7 @@ display:
 
 
   # Play terminal bell when agent finishes a response.
-  # Useful for long-running tasks — your terminal will ding when the agent is done.
+  # Useful for long-running tasks 鈥?your terminal will ding when the agent is done.
   # Works over SSH. Most terminals can be configured to flash the taskbar or play a sound.
   bell_on_complete: false
 
@@ -811,49 +804,45 @@ display:
   # Stream tokens to the terminal in real-time. Disable to wait for full responses.
   streaming: true
 
-  # ───────────────────────────────────────────────────────────────────────────
+  # ------------------------------------------------------------
   # Skin / Theme
-  # ───────────────────────────────────────────────────────────────────────────
-  # Customize CLI visual appearance — banner colors, spinner faces, tool prefix,
-  # response box label, and branding text. Change at runtime with /skin <name>.
+  # ------------------------------------------------------------
+  # 自定义 CLI 外观：横幅颜色、状态动画、工具前缀、响应框标题等。
+  # 可在运行时使用 /skin <name> 切换。
   #
   # Built-in skins:
-  #   default  — Classic Hermes gold/kawaii
-  #   ares     — Crimson/bronze war-god theme with spinner wings
-  #   mono     — Clean grayscale monochrome
-  #   slate    — Cool blue developer-focused
+  #   default  - 经典 Hermes 金色主题
+  #   ares     - 战神红铜主题
+  #   mono     - 极简灰度主题
+  #   slate    - 开发者蓝灰主题
   #
-  # Custom skins: drop a YAML file in ~/.hermes/skins/<name>.yaml
-  # Schema (all fields optional, missing values inherit from default):
+  # Custom skins: 把 YAML 文件放到 ~/.hermes/skins/<name>.yaml
   #
   #   name: my-theme
   #   description: Short description
   #   colors:
-  #     banner_border: "#HEX"    # Panel border
-  #     banner_title: "#HEX"     # Panel title
-  #     banner_accent: "#HEX"    # Section headers (Available Tools, etc.)
-  #     banner_dim: "#HEX"       # Dim/muted text
-  #     banner_text: "#HEX"      # Body text (tool names, skill names)
-  #     ui_accent: "#HEX"        # UI accent color
-  #     response_border: "#HEX"  # Response box border color
+  #     banner_border: "#HEX"
+  #     banner_title: "#HEX"
+  #     banner_accent: "#HEX"
+  #     banner_dim: "#HEX"
+  #     banner_text: "#HEX"
+  #     ui_accent: "#HEX"
+  #     response_border: "#HEX"
   #   spinner:
-  #     waiting_faces: ["(⚔)", "(⛨)"]       # Faces shown while waiting
-  #     thinking_faces: ["(⚔)", "(⌁)"]      # Faces shown while thinking
-  #     thinking_verbs: ["forging", "plotting"]  # Verbs for spinner messages
-  #     wings:                                # Optional left/right spinner decorations
-  #       - ["⟪⚔", "⚔⟫"]
-  #       - ["⟪▲", "▲⟫"]
+  #     waiting_faces: ["Hermes", "准备中", "处理中"]
+  #     thinking_faces: ["思考中", "分析中", "规划中"]
+  #     thinking_verbs: ["思考", "分析", "验证"]
   #   branding:
-  #     agent_name: "My Agent"               # Banner title and branding
-  #     welcome: "Welcome message"           # Shown at CLI startup
-  #     response_label: " ⚔ Agent "         # Response box header label
-  #     prompt_symbol: "⚔ ❯ "              # Prompt symbol
-  #   tool_prefix: "╎"                       # Tool output line prefix (default: ┊)
+  #     agent_name: "Hermes"
+  #     welcome: "欢迎使用 Hermes。"
+  #     response_label: " Hermes "
+  #     prompt_symbol: "> "
+  #   tool_prefix: "|"
   #
   skin: default
 
 # =============================================================================
-# Model Aliases — short names for /model command
+# Model Aliases 鈥?short names for /model command
 # =============================================================================
 # Map short aliases to exact (model, provider, base_url) tuples.
 # Used by /model tab completion and resolve_alias().
