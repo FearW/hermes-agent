@@ -35,7 +35,7 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv sync --extra dev --extra web
+        run: uv sync --extra dev --extra web --extra pty
 
       - name: Compile critical modules
         run: |
