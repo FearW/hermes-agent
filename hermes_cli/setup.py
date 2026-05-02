@@ -1833,7 +1833,94 @@ def setup_agent_settings(config: dict):
 
 
 # =============================================================================
-# Section 4: Messaging Platforms (Gateway)
+# Section 4: WebUI / CPA Public Entry
+# =============================================================================
+
+
+def setup_webui(config: dict):
+    """Configure WebUI binding, password, and CPA API proxy exposure."""
+
+    print_header("WebUI / CPA Public Entry")
+    print_info("Configure the dashboard port and optional public CPA-compatible API.")
+    print_info("When enabled, the same password protects the WebUI and acts as the API key.")
+    print()
+
+    dashboard = config.setdefault("dashboard", {})
+    if not isinstance(dashboard, dict):
+        dashboard = {}
+        config["dashboard"] = dashboard
+
+    current_host = str(dashboard.get("host") or "127.0.0.1")
+    current_port = str(dashboard.get("port") or 9119)
+    current_public = bool(dashboard.get("public", False))
+    current_proxy = bool(dashboard.get("cpa_api_proxy", False))
+    current_password = str(dashboard.get("password") or "")
+
+    port_str = prompt("WebUI port", current_port)
+    fallback_port = 9119
+    try:
+        fallback_port = int(current_port)
+    except ValueError:
+        current_port = str(fallback_port)
+    try:
+        port = int(port_str)
+        if not (1 <= port <= 65535):
+            raise ValueError
+    except ValueError:
+        print_warning(f"Invalid port '{port_str}', keeping {current_port}")
+        port = fallback_port
+
+    expose_public = prompt_yes_no(
+        "Expose WebUI on public network (0.0.0.0)?",
+        current_public,
+    )
+
+    password_value = current_password
+    if expose_public:
+        while not password_value:
+            password_value = prompt("WebUI/API password", "", password=True)
+            if not password_value:
+                print_warning("Public WebUI requires a password.")
+        cpa_proxy = prompt_yes_no(
+            "Expose CPA API on the same port (/v1 and /anthropic)?",
+            True if not current_proxy else current_proxy,
+        )
+    else:
+        set_local_password = bool(current_password) or prompt_yes_no(
+            "Set a local WebUI password?",
+            False,
+        )
+        if set_local_password:
+            entered = prompt(
+                "WebUI/API password",
+                "********" if current_password else "",
+                password=True,
+            )
+            if entered and entered != "********":
+                password_value = entered
+        cpa_proxy = bool(password_value) and prompt_yes_no(
+            "Expose local CPA API on the WebUI port (/v1 and /anthropic)?",
+            current_proxy,
+        )
+
+    dashboard.update({
+        "host": "0.0.0.0" if expose_public else current_host if current_host != "0.0.0.0" else "127.0.0.1",
+        "port": port,
+        "public": expose_public,
+        "password": password_value,
+        "cpa_api_proxy": bool(cpa_proxy),
+    })
+
+    save_config(config)
+    print_success("WebUI settings saved!")
+    print_info(f"  Dashboard: http://{dashboard['host']}:{port}/")
+    if dashboard["cpa_api_proxy"]:
+        print_info(f"  CPA API:   http://{dashboard['host']}:{port}/v1")
+        print_info("  API key:   same as WebUI password")
+
+
+# =============================================================================
+# Section 5: Messaging Platforms (Gateway)
 # =============================================================================
 
 
@@ -2944,6 +3031,7 @@ SETUP_SECTIONS = [
     ("model", "CPA Model & Channel", setup_model_provider),
     ("tts", "Text-to-Speech", setup_tts),
     ("terminal", "Terminal Backend", setup_terminal_backend),
+    ("webui", "WebUI / CPA Public Entry", setup_webui),
     ("gateway", "Messaging Platforms (Gateway)", setup_gateway),
     ("tools", "Tools", setup_tools),
     ("agent", "Agent Settings", setup_agent_settings),
@@ -2958,6 +3046,7 @@ def run_setup_wizard(args):
       hermes setup model     — just model/provider
       hermes setup tts       — just text-to-speech
       hermes setup terminal  — just terminal backend
+      hermes setup webui     — just WebUI / CPA public entry
       hermes setup gateway   — just messaging platforms
       hermes setup tools     — just tool configuration
       hermes setup agent     — just agent settings
@@ -3082,8 +3171,8 @@ def run_setup_wizard(args):
         print_info("Running the full wizard — each prompt shows your current value.")
         print_info("Press Enter to keep it, or type a new value to change it.")
         print_info("")
-        print_info("Tip: jump straight to a section with 'hermes setup model|terminal|")
-        print_info("     gateway|tools|agent', or fill only missing items with --quick.")
+        print_info("Tip: jump straight to a section with 'hermes setup model|tts|terminal|")
+        print_info("     webui|gateway|tools|agent', or fill only missing items with --quick.")
         # Fall through to the "Full Setup — run all sections" block below.
         # --reconfigure is now the default on existing installs; the flag
         # is preserved for backwards compatibility but is a no-op here.
@@ -3138,11 +3227,15 @@ def run_setup_wizard(args):
     if not (migration_ran and _skip_configured_section(config, "agent", "Agent Settings")):
         setup_agent_settings(config)
 
-    # Section 4: Messaging Platforms
+    # Section 4: WebUI / CPA Public Entry
+    if not (migration_ran and _skip_configured_section(config, "dashboard", "WebUI / CPA Public Entry")):
+        setup_webui(config)
+
+    # Section 5: Messaging Platforms
     if not (migration_ran and _skip_configured_section(config, "gateway", "Messaging Platforms")):
         setup_gateway(config)
 
-    # Section 5: Tools
+    # Section 6: Tools
     if not (migration_ran and _skip_configured_section(config, "tools", "Tools")):
         setup_tools(config, first_install=not is_existing)
 
@@ -3176,6 +3269,10 @@ def _run_first_time_quick_setup(config: dict, hermes_home, is_existing: bool):
     # Step 2: Apply defaults for everything else
     _apply_default_agent_settings(config)
     config.setdefault("terminal", {}).setdefault("backend", "local")
+
+    # Step 2.5: WebUI / CPA public entry (kept optional for local-first installs)
+    if prompt_yes_no("Configure WebUI port/password now?", True):
+        setup_webui(config)
 
     save_config(config)
 

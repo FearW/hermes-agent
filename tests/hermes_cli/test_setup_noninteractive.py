@@ -153,6 +153,7 @@ class TestNonInteractiveSetup:
         model_section = MagicMock()
         tts_section = MagicMock()
         terminal_section = MagicMock()
+        webui_section = MagicMock()
         gateway_section = MagicMock()
         tools_section = MagicMock()
         agent_section = MagicMock()
@@ -176,6 +177,7 @@ class TestNonInteractiveSetup:
                     ("model", "Model & Provider", model_section),
                     ("tts", "Text-to-Speech", tts_section),
                     ("terminal", "Terminal Backend", terminal_section),
+                    ("webui", "WebUI / CPA Public Entry", webui_section),
                     ("gateway", "Messaging Platforms (Gateway)", gateway_section),
                     ("tools", "Tools", tools_section),
                     ("agent", "Agent Settings", agent_section),
@@ -223,6 +225,7 @@ class TestNonInteractiveSetup:
             "Full Setup - reconfigure everything",
             "Model & Provider",
             "Terminal Backend",
+            "WebUI / CPA Public Entry",
             "Messaging Platforms (Gateway)",
             "Tools",
             "Agent Settings",
@@ -244,3 +247,19 @@ class TestNonInteractiveSetup:
         main_mod.main()
 
         assert received["section"] == "tts"
+
+    def test_main_accepts_webui_setup_section(self, monkeypatch):
+        """`hermes setup webui` should parse and dispatch like other setup sections."""
+        from hermes_cli import main as main_mod
+
+        received = {}
+
+        def fake_cmd_setup(args):
+            received["section"] = args.section
+
+        monkeypatch.setattr(main_mod, "cmd_setup", fake_cmd_setup)
+        monkeypatch.setattr("sys.argv", ["hermes", "setup", "webui"])
+
+        main_mod.main()
+
+        assert received["section"] == "webui"

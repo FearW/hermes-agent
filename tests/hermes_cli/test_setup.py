@@ -53,6 +53,25 @@ def _write_model_config(tmp_path, provider, base_url="", model_name="test-model"
     save_config(cfg)
 
 
+def test_setup_webui_saves_public_port_password_and_cpa_proxy(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    config = load_config()
+
+    prompts = iter(["9123", "secret-panel-key"])
+    yes_no = iter([True, True])
+    monkeypatch.setattr(setup_mod, "prompt", lambda *args, **kwargs: next(prompts))
+    monkeypatch.setattr(setup_mod, "prompt_yes_no", lambda *args, **kwargs: next(yes_no))
+
+    setup_mod.setup_webui(config)
+
+    dashboard = config["dashboard"]
+    assert dashboard["host"] == "0.0.0.0"
+    assert dashboard["port"] == 9123
+    assert dashboard["public"] is True
+    assert dashboard["password"] == "secret-panel-key"
+    assert dashboard["cpa_api_proxy"] is True
+
+
 def test_setup_delegates_to_select_provider_and_model(tmp_path, monkeypatch):
     """setup_model_provider calls select_provider_and_model and syncs config."""
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
