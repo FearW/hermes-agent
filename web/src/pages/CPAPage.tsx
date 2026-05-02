@@ -220,33 +220,55 @@ export default function CPAPage() {
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-6">
       <Toast toast={toast} />
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="font-expanded text-xl font-bold tracking-[0.08em] uppercase blend-lighter">CPA 管理中心</h1>
-          <p className="mt-1 font-display text-xs text-muted-foreground">
-            借鉴 CPA management 页面，只保留 AI 提供商、OAuth 登录、认证文件；Hermes 只连接 CPA。
-          </p>
+      <div className="overflow-hidden rounded-3xl border border-border/80 bg-card/75 shadow-[0_24px_90px_rgba(0,0,0,0.28)] backdrop-blur-sm">
+        <div className="flex flex-col gap-5 p-6 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-3xl">
+            <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/40 px-3 py-1 text-xs text-muted-foreground">
+              <ShieldCheck className="h-3.5 w-3.5 text-success" />
+              Hermes CPA-only 控制台
+            </div>
+            <h1 className="text-3xl font-semibold tracking-tight text-foreground">CPA 管理中心</h1>
+            <p className="mt-3 text-sm leading-7 text-muted-foreground">
+              集中管理 AI 提供商、OAuth 登录和认证文件。Hermes 只连接 CPA，由 CPA 接管所有上游渠道与兼容协议。
+            </p>
+          </div>
+          <Button variant="outline" onClick={refreshAll} disabled={busy === "refresh"}>
+            <RefreshCcw className="h-4 w-4" />刷新状态
+          </Button>
         </div>
-        <Button variant="outline" size="sm" onClick={refreshAll} disabled={busy === "refresh"}>
-          <RefreshCcw className="h-3.5 w-3.5" />刷新
-        </Button>
+        <div className="grid border-t border-border/70 bg-background/20 md:grid-cols-3">
+          <div className="border-b border-border/70 p-4 md:border-b-0 md:border-r">
+            <p className="text-xs text-muted-foreground">当前 Provider</p>
+            <p className="mt-1 font-mono-ui text-sm text-foreground">{config.provider}</p>
+          </div>
+          <div className="border-b border-border/70 p-4 md:border-b-0 md:border-r">
+            <p className="text-xs text-muted-foreground">模型入口</p>
+            <p className="mt-1 truncate font-mono-ui text-sm text-foreground">{model || "未设置"}</p>
+          </div>
+          <div className="p-4">
+            <p className="text-xs text-muted-foreground">管理地址</p>
+            <p className="mt-1 truncate font-mono-ui text-sm text-foreground">{managementBase || "未配置"}</p>
+          </div>
+        </div>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><Server className="h-4 w-4" />Hermes → CPA</CardTitle>
-          <CardDescription>这里是 Hermes 唯一模型入口；上游渠道全部交给内置 CPA 管理。</CardDescription>
+          <CardTitle className="flex items-center gap-2"><Server className="h-5 w-5" />Hermes → CPA 连接</CardTitle>
+          <CardDescription>
+            这里是 Hermes 唯一模型入口；上游渠道全部交给内置 CPA 管理。保存后 Hermes 会请求 CPA 的 OpenAI-compatible /v1。
+          </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-3">
+        <CardContent className="grid gap-5 md:grid-cols-3">
           <div className="grid gap-2"><Label>模型名</Label><Input value={model} onChange={(event) => setModel(event.target.value)} placeholder="gpt-5(8192)" /></div>
           <div className="grid gap-2"><Label>CPA /v1 地址</Label><Input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="http://127.0.0.1:8080/v1" /></div>
           <div className="grid gap-2"><Label>CPA API Key</Label><Input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={config.api_key_set ? config.api_key_preview ?? "已设置" : "本地无鉴权可留空"} /></div>
-          <div className="flex items-center gap-2 md:col-span-3">
-            <Button onClick={saveTransport} disabled={busy === "transport"}><Save className="h-3.5 w-3.5" />保存连接</Button>
+          <div className="flex flex-wrap items-center gap-3 md:col-span-3">
+            <Button onClick={saveTransport} disabled={busy === "transport"}><Save className="h-4 w-4" />保存连接</Button>
             <Badge variant="success">{config.provider}</Badge>
-            <span className="text-xs text-muted-foreground">管理地址：{managementBase || "未配置"}</span>
+            <span className="font-mono-ui text-xs text-muted-foreground">{managementBase || "未配置"}</span>
           </div>
         </CardContent>
       </Card>
@@ -260,47 +282,48 @@ export default function CPAPage() {
               <TabsTrigger value="auth-files" active={active === "auth-files"} onClick={() => setActive("auth-files")}>认证文件</TabsTrigger>
             </TabsList>
 
-            {active === "providers" && <div className="grid gap-4 lg:grid-cols-2">
+            {active === "providers" && <div className="grid gap-5 lg:grid-cols-2">
               {PROVIDERS.map(({ kind, label, hint }) => (
                 <Card key={kind}>
                   <CardHeader>
                     <CardTitle className="flex items-center justify-between gap-2">
-                      <span className="flex items-center gap-2"><KeyRound className="h-4 w-4" />{label}</span>
+                      <span className="flex items-center gap-2"><KeyRound className="h-5 w-5" />{label}</span>
                       <Badge variant={providerCounts[kind] ? "success" : "outline"}>{providerCounts[kind] ?? 0} 项</Badge>
                     </CardTitle>
                     <CardDescription>{hint}</CardDescription>
                   </CardHeader>
-                  <CardContent className="grid gap-3">
+                  <CardContent className="grid gap-4">
                     <textarea
-                      className="min-h-48 rounded-none border border-border bg-background/70 p-3 font-mono text-xs outline-none focus:ring-1 focus:ring-ring"
+                      className="min-h-52 rounded-2xl border border-border/80 bg-background/60 p-4 font-mono-ui text-sm leading-6 outline-none transition-colors placeholder:text-muted-foreground focus:border-foreground/25 focus:ring-1 focus:ring-foreground/30"
                       value={providerEdits[kind] ?? providerRaw[kind] ?? ""}
                       onChange={(event) => setProviderEdits((prev) => ({ ...prev, [kind]: event.target.value }))}
+                      placeholder="粘贴或编辑该提供商的 CPA 配置 JSON / Key 列表"
                       spellCheck={false}
                     />
-                    <Button size="sm" className="w-fit" onClick={() => saveProvider(kind)} disabled={busy === `provider-${kind}`}><Save className="h-3.5 w-3.5" />保存到 CPA</Button>
+                    <Button size="sm" className="w-fit" onClick={() => saveProvider(kind)} disabled={busy === `provider-${kind}`}><Save className="h-4 w-4" />保存到 CPA</Button>
                   </CardContent>
                 </Card>
               ))}
             </div>}
 
-            {active === "oauth" && <div className="grid gap-4 lg:grid-cols-2">
+            {active === "oauth" && <div className="grid gap-5 lg:grid-cols-2">
               {OAUTH_PROVIDERS.map(({ provider, label, hint, needsCallback }) => (
                 <Card key={provider}>
                   <CardHeader>
-                    <CardTitle className="flex items-center gap-2"><Link2 className="h-4 w-4" />{label}</CardTitle>
+                    <CardTitle className="flex items-center gap-2"><Link2 className="h-5 w-5" />{label}</CardTitle>
                     <CardDescription>{hint}</CardDescription>
                   </CardHeader>
-                  <CardContent className="grid gap-3">
-                    <div className="flex flex-wrap gap-2">
-                      <Button size="sm" onClick={() => startOAuth(provider)} disabled={busy === `oauth-${provider}`}><ExternalLink className="h-3.5 w-3.5" />开始登录</Button>
+                  <CardContent className="grid gap-4">
+                    <div className="flex flex-wrap gap-3">
+                      <Button size="sm" onClick={() => startOAuth(provider)} disabled={busy === `oauth-${provider}`}><ExternalLink className="h-4 w-4" />开始登录</Button>
                       <Button size="sm" variant="outline" onClick={() => pollOAuth(provider)} disabled={!oauthStarts[provider]?.state || busy === `poll-${provider}`}>查询状态</Button>
                     </div>
                     {oauthStarts[provider]?.url && <Input readOnly value={oauthStarts[provider]?.url ?? ""} />}
-                    {oauthStarts[provider]?.state && <div className="text-xs text-muted-foreground">state: {oauthStarts[provider]?.state}</div>}
+                    {oauthStarts[provider]?.state && <div className="rounded-xl border border-border/60 bg-background/35 px-3 py-2 font-mono-ui text-xs text-muted-foreground">state: {oauthStarts[provider]?.state}</div>}
                     {oauthStatuses[provider] && <Badge variant={oauthStatuses[provider]?.status === "ok" ? "success" : oauthStatuses[provider]?.status === "error" ? "destructive" : "warning"}>{oauthStatuses[provider]?.status}</Badge>}
                     {needsCallback && <div className="grid gap-2">
                       <Label>回调 URL</Label>
-                      <div className="flex gap-2">
+                      <div className="flex flex-col gap-2 sm:flex-row">
                         <Input value={callbackUrls[provider] ?? ""} onChange={(event) => setCallbackUrls((prev) => ({ ...prev, [provider]: event.target.value }))} placeholder="粘贴浏览器最终跳转 URL" />
                         <Button variant="outline" onClick={() => submitCallback(provider)} disabled={busy === `callback-${provider}`}>提交</Button>
                       </div>
@@ -312,26 +335,26 @@ export default function CPAPage() {
 
             {active === "auth-files" && <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2"><FileKey2 className="h-4 w-4" />认证文件</CardTitle>
+                <CardTitle className="flex items-center gap-2"><FileKey2 className="h-5 w-5" />认证文件</CardTitle>
                 <CardDescription>只管理 CPA 认证文件池，不接管 Hermes 原有 OAuth 兼容逻辑。</CardDescription>
               </CardHeader>
-              <CardContent className="grid gap-4">
-                <div className="flex flex-wrap items-center gap-2">
+              <CardContent className="grid gap-5">
+                <div className="flex flex-wrap items-center gap-3">
                   <Input type="file" multiple className="max-w-sm" onChange={(event) => uploadAuthFiles(event.target.files)} />
-                  <Button variant="outline" size="sm" onClick={loadAuthFiles}><RefreshCcw className="h-3.5 w-3.5" />刷新文件</Button>
+                  <Button variant="outline" size="sm" onClick={loadAuthFiles}><RefreshCcw className="h-4 w-4" />刷新文件</Button>
                   <Badge variant="outline">{authFiles.length} 个文件</Badge>
                 </div>
-                <div className="overflow-hidden border border-border">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-muted/40 text-muted-foreground"><tr><th className="p-2">名称</th><th className="p-2">类型</th><th className="p-2">渠道</th><th className="p-2">状态</th><th className="p-2">更新时间</th></tr></thead>
+                <div className="overflow-hidden rounded-2xl border border-border/80">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-muted/45 text-xs text-muted-foreground"><tr><th className="p-3">名称</th><th className="p-3">类型</th><th className="p-3">渠道</th><th className="p-3">状态</th><th className="p-3">更新时间</th></tr></thead>
                     <tbody>
                       {authFiles.map((file) => (
-                        <tr key={file.name} className="border-t border-border">
-                          <td className="p-2 font-mono">{file.name}</td>
-                          <td className="p-2">{file.type ?? "-"}</td>
-                          <td className="p-2">{file.channel ?? file.provider ?? "-"}</td>
-                          <td className="p-2"><Badge variant={file.disabled ? "outline" : "success"}>{file.disabled ? "停用" : "启用"}</Badge></td>
-                          <td className="p-2 text-muted-foreground">{file.modified ?? file.mtime ?? "-"}</td>
+                        <tr key={file.name} className="border-t border-border/70 transition-colors hover:bg-foreground/5">
+                          <td className="p-3 font-mono-ui">{file.name}</td>
+                          <td className="p-3">{file.type ?? "-"}</td>
+                          <td className="p-3">{file.channel ?? file.provider ?? "-"}</td>
+                          <td className="p-3"><Badge variant={file.disabled ? "outline" : "success"}>{file.disabled ? "停用" : "启用"}</Badge></td>
+                          <td className="p-3 text-muted-foreground">{file.modified ?? file.mtime ?? "-"}</td>
                         </tr>
                       ))}
                       {authFiles.length === 0 && <tr><td className="p-4 text-center text-muted-foreground" colSpan={5}><Upload className="mx-auto mb-2 h-4 w-4" />暂无认证文件</td></tr>}

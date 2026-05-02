@@ -41,7 +41,7 @@
   --color-popover-foreground: #ffe6cb;
 
   /* ---- Font stacks ---- */
-  --font-sans: "Mondwest", Arial, sans-serif;
+  --font-sans: Inter, "Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", Arial, sans-serif;
   --font-mono: "Courier Prime", "Courier New", monospace;
   --font-display: "Mondwest", Arial, sans-serif;
   --font-expanded: "RulesExpanded", Arial, sans-serif;
@@ -51,12 +51,16 @@
 /* ---- Global body ---- */
 body {
   margin: 0;
-  font-family: "Mondwest", Arial, sans-serif;
+  font-family: Inter, "Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", Arial, sans-serif;
   background: var(--color-background);
   color: var(--color-foreground);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+}
+
+p, label, input, textarea, button, table, span {
+  letter-spacing: 0.01em;
 }
 
 /* ---- Selection ---- */
