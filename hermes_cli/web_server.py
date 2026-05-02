@@ -48,6 +48,7 @@ from hermes_cli.config import (
     check_config_version,
     redact_key,
 )
+from hermes_cli.runtime_provider import normalize_cpa_base_url
 from gateway.status import get_running_pid, read_runtime_status
 
 try:
@@ -1082,7 +1083,9 @@ def _cpa_model_config(config: Dict[str, Any]) -> Dict[str, Any]:
             merged["default"] = model_cfg.strip()
     merged["provider"] = "cliproxyapi"
     merged.setdefault("default", "gpt-5(8192)")
-    merged.setdefault("base_url", "http://127.0.0.1:8080/v1")
+    merged["base_url"] = normalize_cpa_base_url(
+        str(merged.get("base_url") or "http://127.0.0.1:8080/v1")
+    )
     return merged
 
 
@@ -1115,7 +1118,7 @@ async def update_cpa_config(body: CPAConfigUpdate):
     if body.model is not None and body.model.strip():
         model_cfg["default"] = body.model.strip()
     if body.base_url is not None and body.base_url.strip():
-        model_cfg["base_url"] = body.base_url.strip().rstrip("/")
+        model_cfg["base_url"] = normalize_cpa_base_url(body.base_url)
     config["model"] = model_cfg
     save_config(config)
     if body.api_key is not None:

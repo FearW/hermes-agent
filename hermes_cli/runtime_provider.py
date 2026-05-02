@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import urllib.parse
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,31 @@ def _normalize_custom_provider_name(value: str) -> str:
 def _loopback_hostname(host: str) -> bool:
     h = (host or "").lower().rstrip(".")
     return h in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+
+
+def is_cpa_provider(provider: str) -> bool:
+    """Return True for Hermes' built-in CLIProxyAPI aliases."""
+    return (provider or "").strip().lower() in {"cliproxyapi", "cpa", "cliproxy", "cli-proxy-api"}
+
+
+def normalize_cpa_base_url(base_url: str) -> str:
+    """Normalize CPA inference base URL to its OpenAI-compatible /v1 surface.
+
+    Users often paste the WebUI/management root (``http://host:8080``). Hermes
+    should still talk to CPA via ``/v1``.  Leave explicit protocol surfaces such
+    as ``/v1`` and ``/anthropic`` unchanged.
+    """
+    value = (base_url or "").strip().rstrip("/")
+    if not value:
+        return ""
+    parsed = urllib.parse.urlsplit(value)
+    path = parsed.path.rstrip("/")
+    if path.endswith("/v1") or path.endswith("/anthropic"):
+        return value
+    if path.endswith("/v0/management"):
+        path = path[: -len("/v0/management")].rstrip("/")
+    path = f"{path}/v1" if path else "/v1"
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path, "", "")).rstrip("/")
 
 
 def _config_base_url_trustworthy_for_bare_custom(cfg_base_url: str, cfg_provider: str) -> bool:
@@ -899,13 +925,13 @@ def resolve_runtime_provider(
     """
     requested_provider = resolve_requested_provider(requested)
 
-    if requested_provider in {"cliproxyapi", "cpa"}:
+    if is_cpa_provider(requested_provider):
         model_cfg = _get_model_config()
         cfg_provider = str(model_cfg.get("provider") or "").strip().lower()
         cfg_base_url = ""
-        if cfg_provider in {"cliproxyapi", "cpa"}:
+        if is_cpa_provider(cfg_provider):
             cfg_base_url = str(model_cfg.get("base_url") or "").strip().rstrip("/")
-        base_url = (
+        base_url = normalize_cpa_base_url(
             (explicit_base_url or "").strip().rstrip("/")
             or os.getenv("CLIPROXY_BASE_URL", "").strip().rstrip("/")
             or os.getenv("CPA_BASE_URL", "").strip().rstrip("/")

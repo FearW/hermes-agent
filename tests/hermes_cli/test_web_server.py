@@ -979,7 +979,7 @@ class TestCPAConfigAPI:
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
         resp = self.client.put(
             "/api/cpa/config",
-            json={"model": "claude-sonnet-4.5", "base_url": "http://localhost:9000/v1"},
+            json={"model": "claude-sonnet-4.5", "base_url": "http://localhost:9000"},
         )
         assert resp.status_code == 200
 

@@ -3,6 +3,35 @@ import pytest
 from hermes_cli import runtime_provider as rp
 
 
+def test_normalize_cpa_base_url_appends_v1():
+    assert rp.normalize_cpa_base_url("http://127.0.0.1:8080") == "http://127.0.0.1:8080/v1"
+
+
+def test_normalize_cpa_base_url_converts_management_surface():
+    assert rp.normalize_cpa_base_url("http://localhost:8080/v0/management") == "http://localhost:8080/v1"
+
+
+def test_resolve_runtime_provider_cpa_aliases_normalize_to_clipoxyapi(monkeypatch):
+    monkeypatch.setattr(
+        rp,
+        "_get_model_config",
+        lambda: {"provider": "cli-proxy-api", "base_url": "http://localhost:8080/v0/management"},
+    )
+    monkeypatch.delenv("CLIPROXY_BASE_URL", raising=False)
+    monkeypatch.delenv("CPA_BASE_URL", raising=False)
+    monkeypatch.delenv("CLIPROXY_API_KEY", raising=False)
+    monkeypatch.delenv("CPA_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    resolved = rp.resolve_runtime_provider(requested="cliproxy")
+
+    assert resolved["provider"] == "cliproxyapi"
+    assert resolved["requested_provider"] == "cliproxy"
+    assert resolved["api_mode"] == "chat_completions"
+    assert resolved["base_url"] == "http://localhost:8080/v1"
+    assert resolved["api_key"] == "no-key-required"
+
+
 def test_resolve_runtime_provider_uses_credential_pool(monkeypatch):
     class _Entry:
         access_token = "pool-token"
