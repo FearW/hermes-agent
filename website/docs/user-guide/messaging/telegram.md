@@ -393,7 +393,7 @@ When you send `/model` with no arguments in a Telegram chat, Hermes shows an int
 The current model and provider are displayed at the top. All navigation happens by editing the same message in-place (no chat clutter).
 
 :::tip
-If you know the exact model name, type `/model <name>` directly to skip the picker. You can also type `/model <name> --global` to persist the change across sessions.
+If you know the exact model name, type `/model <name>` directly to skip the picker.
 :::
 
 ## Webhook Mode

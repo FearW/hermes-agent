@@ -264,30 +264,24 @@ class CustomAutoResult:
 # ---------------------------------------------------------------------------
 
 def parse_model_flags(raw_args: str) -> tuple[str, str, bool]:
-    """Parse --provider and --global flags from /model command args.
+    """Parse --provider from /model command args.
 
-    Returns (model_input, explicit_provider, is_global).
+    Returns (model_input, explicit_provider, persist_config).
+    ``persist_config`` is retained for internal API compatibility and is always False.
 
     Examples::
 
         "sonnet"                         -> ("sonnet", "", False)
-        "sonnet --global"                -> ("sonnet", "", True)
         "sonnet --provider anthropic"    -> ("sonnet", "anthropic", False)
         "--provider my-ollama"           -> ("", "my-ollama", False)
-        "sonnet --provider anthropic --global" -> ("sonnet", "anthropic", True)
     """
-    is_global = False
+    persist_config = False
     explicit_provider = ""
 
     # Normalize Unicode dashes (Telegram/iOS auto-converts -- to em/en dash)
     # A single Unicode dash before a flag keyword becomes "--"
     import re as _re
-    raw_args = _re.sub(r'[\u2012\u2013\u2014\u2015](provider|global)', r'--\1', raw_args)
-
-    # Extract --global
-    if "--global" in raw_args:
-        is_global = True
-        raw_args = raw_args.replace("--global", "").strip()
+    raw_args = _re.sub(r'[\u2012\u2013\u2014\u2015](provider)', r'--\1', raw_args)
 
     # Extract --provider <name>
     parts = raw_args.split()
@@ -302,7 +296,7 @@ def parse_model_flags(raw_args: str) -> tuple[str, str, bool]:
             i += 1
 
     model_input = " ".join(filtered).strip()
-    return (model_input, explicit_provider, is_global)
+    return (model_input, explicit_provider, persist_config)
 
 
 # ---------------------------------------------------------------------------
@@ -619,7 +613,7 @@ def switch_model(
         current_model: The currently active model name.
         current_base_url: The currently active base URL.
         current_api_key: The currently active API key.
-        is_global: Whether to persist the switch.
+        is_global: Deprecated compatibility flag; model slash-command switches are session-scoped.
         explicit_provider: From --provider flag (empty = no explicit provider).
         user_providers: The ``providers:`` dict from config.yaml (for user endpoints).
         custom_providers: The ``custom_providers:`` list from config.yaml.

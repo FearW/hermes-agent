@@ -77,9 +77,9 @@ class TestReasoningCommand:
         source = inspect.getsource(gateway_run.GatewayRunner._handle_message)
         assert '"reasoning"' in source
 
-    def test_parse_reasoning_command_args_accepts_ascii_and_smart_global_flags(self):
-        assert gateway_run.GatewayRunner._parse_reasoning_command_args("high --global") == ("high", True)
-        assert gateway_run.GatewayRunner._parse_reasoning_command_args("—global xhigh") == ("xhigh", True)
+    def test_parse_reasoning_command_args_is_session_scoped(self):
+        assert gateway_run.GatewayRunner._parse_reasoning_command_args("high") == ("high", False)
+        assert gateway_run.GatewayRunner._parse_reasoning_command_args("xhigh") == ("xhigh", False)
 
     @pytest.mark.asyncio
     async def test_reasoning_command_reloads_current_state_from_config(self, tmp_path, monkeypatch):
@@ -105,7 +105,7 @@ class TestReasoningCommand:
         assert runner._show_reasoning is True
 
     @pytest.mark.asyncio
-    async def test_handle_reasoning_command_updates_config_and_cache(self, tmp_path, monkeypatch):
+    async def test_handle_reasoning_command_updates_session_only(self, tmp_path, monkeypatch):
         hermes_home = tmp_path / "hermes"
         hermes_home.mkdir()
         config_path = hermes_home / "config.yaml"
@@ -116,10 +116,14 @@ class TestReasoningCommand:
         runner = _make_runner()
         runner._reasoning_config = {"enabled": True, "effort": "medium"}
 
-        result = await runner._handle_reasoning_command(_make_event("/reasoning low --global"))
+        event = _make_event("/reasoning low")
+        session_key = runner._session_key_for_source(event.source)
+
+        result = await runner._handle_reasoning_command(event)
 
         saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-        assert saved["agent"]["reasoning_effort"] == "low"
+        assert saved["agent"]["reasoning_effort"] == "medium"
+        assert runner._session_reasoning_overrides[session_key] == {"enabled": True, "effort": "low"}
         assert runner._reasoning_config == {"enabled": True, "effort": "low"}
         assert "takes effect on next message" in result
 
@@ -145,7 +149,7 @@ class TestReasoningCommand:
         assert "session only" in result
 
     @pytest.mark.asyncio
-    async def test_reasoning_global_clears_existing_session_override(self, tmp_path, monkeypatch):
+    async def test_reasoning_level_replaces_existing_session_override(self, tmp_path, monkeypatch):
         hermes_home = tmp_path / "hermes"
         hermes_home.mkdir()
         config_path = hermes_home / "config.yaml"
@@ -154,16 +158,16 @@ class TestReasoningCommand:
         monkeypatch.setattr(gateway_run, "_hermes_home", hermes_home)
 
         runner = _make_runner()
-        event = _make_event("/reasoning low --global")
+        event = _make_event("/reasoning low")
         session_key = runner._session_key_for_source(event.source)
         runner._session_reasoning_overrides[session_key] = {"enabled": True, "effort": "xhigh"}
 
         result = await runner._handle_reasoning_command(event)
 
         saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-        assert saved["agent"]["reasoning_effort"] == "low"
-        assert session_key not in runner._session_reasoning_overrides
-        assert "saved to config" in result
+        assert saved["agent"]["reasoning_effort"] == "medium"
+        assert runner._session_reasoning_overrides[session_key] == {"enabled": True, "effort": "low"}
+        assert "session only" in result
 
     @pytest.mark.asyncio
     async def test_reasoning_reset_clears_session_override_without_config_write(self, tmp_path, monkeypatch):

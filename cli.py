@@ -5275,7 +5275,7 @@ class HermesCLI:
         scroll_offset = max(0, min(scroll_offset, n - visible))
         return scroll_offset, visible
 
-    def _apply_model_switch_result(self, result, persist_global: bool) -> None:
+    def _apply_model_switch_result(self, result, persist_global: bool = False) -> None:
         if not result.success:
             _cprint(f"  ✗ {result.error_message}")
             return
@@ -5347,13 +5347,7 @@ class HermesCLI:
             _cprint("    Prompt caching: enabled")
         if result.warning_message:
             _cprint(f"    ⚠ {result.warning_message}")
-        if persist_global:
-            save_config_value("model.default", result.new_model)
-            if result.provider_changed:
-                save_config_value("model.provider", result.target_provider)
-            _cprint("    Saved to config.yaml (--global)")
-        else:
-            _cprint("    (session only — add --global to persist)")
+        _cprint("    Applies to this session")
 
     def _handle_model_picker_selection(self, persist_global: bool = False) -> None:
         state = self._model_picker_state
@@ -5424,7 +5418,6 @@ class HermesCLI:
         Supports:
           /model                              — show current model + usage hints
           /model <name>                       — switch for this session only
-          /model <name> --global              — switch and persist to config.yaml
           /model <name> --provider <provider> — switch provider + model
           /model --provider <provider>        — switch to provider, auto-detect model
         """
@@ -5435,7 +5428,7 @@ class HermesCLI:
         parts = cmd_original.split(None, 1)  # split off '/model'
         raw_args = parts[1].strip() if len(parts) > 1 else ""
 
-        # Parse --provider and --global flags
+        # Parse --provider flag
         model_input, explicit_provider, persist_global = parse_model_flags(raw_args)
 
         # Load providers for switch_model (picker path needs them below)
@@ -5575,14 +5568,7 @@ class HermesCLI:
         if result.warning_message:
             _cprint(f"    ⚠ {result.warning_message}")
 
-        # Persistence
-        if persist_global:
-            save_config_value("model.default", result.new_model)
-            if result.provider_changed:
-                save_config_value("model.provider", result.target_provider)
-            _cprint("    Saved to config.yaml (--global)")
-        else:
-            _cprint("    (session only — add --global to persist)")
+        _cprint("    Applies to this session")
 
     def _should_handle_model_command_inline(self, text: str, has_images: bool = False) -> bool:
         """Return True when /model should be handled immediately on the UI thread."""

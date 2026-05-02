@@ -1646,27 +1646,10 @@ class GatewayRunner:
     def _parse_reasoning_command_args(raw_args: str) -> tuple[str, bool]:
         """Parse `/reasoning` args into `(value, persist_global)`.
 
-        `/reasoning <level>` is session-scoped by default. `--global` may be
-        supplied in any position to persist the change to config.yaml.
+        Reasoning changes are session-scoped. ``persist_global`` is retained
+        for internal API compatibility and is always False.
         """
-        import shlex
-
-        text = str(raw_args or "").strip().replace("—", "--")
-        if not text:
-            return "", False
-        try:
-            tokens = shlex.split(text)
-        except ValueError:
-            tokens = text.split()
-
-        persist_global = False
-        value_tokens = []
-        for token in tokens:
-            if token == "--global":
-                persist_global = True
-            else:
-                value_tokens.append(token)
-        return " ".join(value_tokens).strip().lower(), persist_global
+        return str(raw_args or "").strip().lower(), False
 
     def _resolve_session_reasoning_config(
         self,
@@ -6358,7 +6341,6 @@ class GatewayRunner:
         Supports:
           /model                              — interactive picker (Telegram/Discord) or text list
           /model <name>                       — switch for this session only
-          /model <name> --global              — switch and persist to config.yaml
           /model <name> --provider <provider> — switch provider + model
           /model --provider <provider>        — switch to provider, auto-detect model
         """
@@ -6371,7 +6353,7 @@ class GatewayRunner:
 
         raw_args = event.get_command_args().strip()
 
-        # Parse --provider and --global flags
+        # Parse --provider flag
         model_input, explicit_provider, persist_global = parse_model_flags(raw_args)
 
         # Read current model/provider from config
@@ -6521,7 +6503,7 @@ class GatewayRunner:
                             if mi.has_cost_data():
                                 lines.append(f"Cost: {mi.format_cost()}")
                             lines.append(f"Capabilities: {mi.format_capabilities()}")
-                        lines.append("_(session only — use `/model <name> --global` to persist)_")
+                        lines.append("_(applies to this session)_")
                         return "\n".join(lines)
 
                     metadata = {"thread_id": source.thread_id} if source.thread_id else None
@@ -6565,7 +6547,6 @@ class GatewayRunner:
 
             lines.append("`/model <name>` — switch model")
             lines.append("`/model <name> --provider <slug>` — switch provider")
-            lines.append("`/model <name> --global` — persist")
             return "\n".join(lines)
 
         # Perform the switch
@@ -6627,24 +6608,6 @@ class GatewayRunner:
         # override rather than relying on cache signature mismatch detection.
         self._evict_cached_agent(session_key)
 
-        # Persist to config if --global
-        if persist_global:
-            try:
-                if config_path.exists():
-                    with open(config_path, encoding="utf-8") as f:
-                        cfg = yaml.safe_load(f) or {}
-                else:
-                    cfg = {}
-                model_cfg = cfg.setdefault("model", {})
-                model_cfg["default"] = result.new_model
-                model_cfg["provider"] = result.target_provider
-                if result.base_url:
-                    model_cfg["base_url"] = result.base_url
-                from hermes_cli.config import save_config
-                save_config(cfg)
-            except Exception as e:
-                logger.warning("Failed to persist model switch: %s", e)
-
         # Build confirmation message with full metadata
         provider_label = result.provider_label or result.target_provider
         lines = [f"Model switched to `{result.new_model}`"]
@@ -6682,10 +6645,7 @@ class GatewayRunner:
         if result.warning_message:
             lines.append(f"Warning: {result.warning_message}")
 
-        if persist_global:
-            lines.append("Saved to config.yaml (`--global`)")
-        else:
-            lines.append("_(session only -- add `--global` to persist)_")
+        lines.append("_(applies to this session)_")
 
         return "\n".join(lines)
 
@@ -7499,7 +7459,6 @@ class GatewayRunner:
         Usage:
             /reasoning                       Show current effort level and display state
             /reasoning <level>               Set reasoning effort for this session only
-            /reasoning <level> --global      Persist reasoning effort to config.yaml
             /reasoning reset                 Clear this session's reasoning override
             /reasoning show|on               Show model reasoning in responses
             /reasoning hide|off              Hide model reasoning from responses
@@ -7553,7 +7512,7 @@ class GatewayRunner:
                 f"**Effort:** `{level}`\n"
                 f"**Scope:** {scope}\n"
                 f"**Display:** {display_state}\n\n"
-                "_Usage:_ `/reasoning <none|minimal|low|medium|high|xhigh|reset|show|hide> [--global]`"
+                "_Usage:_ `/reasoning <none|minimal|low|medium|high|xhigh|reset|show|hide>`"
             )
 
         # Display toggle (per-platform)
@@ -7574,8 +7533,6 @@ class GatewayRunner:
         # Effort level change
         effort = args.strip()
         if effort == "reset":
-            if persist_global:
-                return "⚠️ `/reasoning reset --global` is not supported. Use `/reasoning <level> --global` to change the global default."
             self._set_session_reasoning_override(session_key, None)
             self._reasoning_config = self._load_reasoning_config()
             self._evict_cached_agent(session_key)
@@ -7588,23 +7545,13 @@ class GatewayRunner:
             return (
                 f"⚠️ Unknown argument: `{effort or raw_args.lower()}`\n\n"
                 "**Valid levels:** none, minimal, low, medium, high, xhigh\n"
-                "**Display:** show, hide\n"
-                "**Persist:** add `--global` to save beyond this session"
+                "**Display:** show, hide"
             )
 
         self._reasoning_config = parsed
-        if persist_global:
-            if _save_config_key("agent.reasoning_effort", effort):
-                self._set_session_reasoning_override(session_key, None)
-                self._evict_cached_agent(session_key)
-                return f"🧠 ✓ Reasoning effort set to `{effort}` (saved to config)\n_(takes effect on next message)_"
-            self._set_session_reasoning_override(session_key, parsed)
-            self._evict_cached_agent(session_key)
-            return f"🧠 ✓ Reasoning effort set to `{effort}` (session only — config save failed)\n_(takes effect on next message)_"
-
         self._set_session_reasoning_override(session_key, parsed)
         self._evict_cached_agent(session_key)
-        return f"🧠 ✓ Reasoning effort set to `{effort}` (session only — add `--global` to persist)\n_(takes effect on next message)_"
+        return f"🧠 ✓ Reasoning effort set to `{effort}` (session only)\n_(takes effect on next message)_"
 
     async def _handle_fast_command(self, event: MessageEvent) -> str:
         """Handle /fast — mirror the CLI Priority Processing toggle in gateway chats."""
