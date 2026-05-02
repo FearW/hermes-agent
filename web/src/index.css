@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 /* ------------------------------------------------------------------ */
-/* Hermes Agent — Design tokens                                        */
-/* Matched to hermes-agent.nousresearch.com (dark teal theme)          */
+/* Hermes Agent — CPA-inspired design tokens                           */
+/* Warm gray, calm surfaces, rounded cards, sidebar-first dashboard.    */
 /* ------------------------------------------------------------------ */
 
 /* --- Font faces --- */
@@ -17,28 +17,28 @@
 @font-face { font-family: "Mondwest"; src: url("/fonts/Mondwest-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
 
 @theme {
-  /* ---- Hermes palette (dark teal, from live site) ---- */
-  --color-background: #041C1C;
-  --color-foreground: #ffe6cb;
-  --color-card: #062424;
-  --color-card-foreground: #ffe6cb;
-  --color-primary: #ffe6cb;
-  --color-primary-foreground: #041C1C;
-  --color-secondary: #0a2e2e;
-  --color-secondary-foreground: #ffe6cb;
-  --color-muted: #083030;
-  --color-muted-foreground: #8aaa9a;
-  --color-accent: #0c3838;
-  --color-accent-foreground: #ffe6cb;
+  /* ---- CLIProxyAPI Management Center palette (warm minimal) ---- */
+  --color-background: #faf9f5;
+  --color-foreground: #2d2a26;
+  --color-card: #fffdf9;
+  --color-card-foreground: #2d2a26;
+  --color-primary: #8b8680;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #f0eee8;
+  --color-secondary-foreground: #2d2a26;
+  --color-muted: #f0eee8;
+  --color-muted-foreground: #6d6760;
+  --color-accent: #e9e6df;
+  --color-accent-foreground: #2d2a26;
   --color-destructive: #fb2c36;
   --color-destructive-foreground: #fff;
-  --color-success: #4ade80;
-  --color-warning: #ffbd38;
-  --color-border: color-mix(in srgb, #ffe6cb 15%, transparent);
-  --color-input: color-mix(in srgb, #ffe6cb 15%, transparent);
-  --color-ring: #ffe6cb;
-  --color-popover: #062424;
-  --color-popover-foreground: #ffe6cb;
+  --color-success: #10b981;
+  --color-warning: #c65746;
+  --color-border: #e3e1db;
+  --color-input: #d8d3ca;
+  --color-ring: #8b8680;
+  --color-popover: #fffdf9;
+  --color-popover-foreground: #2d2a26;
 
   /* ---- Font stacks ---- */
   --font-sans: Inter, "Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", Arial, sans-serif;
@@ -57,6 +57,21 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+}
+
+:root {
+  --cpa-bg-secondary: #faf9f5;
+  --cpa-bg-primary: #fffdf9;
+  --cpa-bg-tertiary: #f0eee8;
+  --cpa-bg-hover: #e9e6df;
+  --cpa-text-primary: #2d2a26;
+  --cpa-text-secondary: #6d6760;
+  --cpa-text-tertiary: #a29c95;
+  --cpa-border: #e3e1db;
+  --cpa-border-strong: #d5d2cb;
+  --cpa-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+  --cpa-shadow-lg: 0 14px 30px rgb(45 42 38 / 0.10);
+  --cpa-radius: 14px;
 }
 
 p, label, input, textarea, button, table, span {
@@ -172,8 +187,8 @@ code {
   position: fixed;
   inset: 0;
   z-index: 101;
-  mix-blend-mode: color-dodge;
-  opacity: 0.10;
+  mix-blend-mode: multiply;
+  opacity: 0.035;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' fill='%23eaeaea' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E");
   background-size: 512px 512px;
 }
@@ -184,9 +199,53 @@ code {
   position: fixed;
   inset: 0;
   z-index: 99;
-  mix-blend-mode: lighten;
-  opacity: 0.22;
-  background: radial-gradient(ellipse at 0% 0%, rgba(255,189,56,0.35) 0%, rgba(255,189,56,0) 60%);
+  mix-blend-mode: multiply;
+  opacity: 0.18;
+  background:
+    radial-gradient(ellipse at 8% 0%, rgba(139, 134, 128, 0.16) 0%, rgba(139, 134, 128, 0) 48%),
+    radial-gradient(ellipse at 100% 0%, rgba(198, 87, 70, 0.08) 0%, rgba(198, 87, 70, 0) 44%);
+}
+
+.cpa-shell {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.7), rgba(250,249,245,0.8)),
+    var(--cpa-bg-secondary);
+}
+
+.cpa-sidebar {
+  background: color-mix(in srgb, var(--cpa-bg-primary) 92%, transparent);
+  border-color: var(--cpa-border);
+  box-shadow: 8px 0 28px rgb(45 42 38 / 0.04);
+}
+
+.cpa-brand-mark {
+  background: linear-gradient(135deg, #2d2a26, #8b8680);
+  color: #fffdf9;
+  box-shadow: var(--cpa-shadow-lg);
+}
+
+.cpa-nav-item {
+  border: 1px solid transparent;
+  border-radius: 12px;
+  color: var(--cpa-text-secondary);
+}
+
+.cpa-nav-item:hover {
+  background: var(--cpa-bg-tertiary);
+  color: var(--cpa-text-primary);
+}
+
+.cpa-nav-item.active {
+  background: var(--cpa-bg-hover);
+  border-color: var(--cpa-border-strong);
+  color: var(--cpa-text-primary);
+  box-shadow: var(--cpa-shadow);
+}
+
+.cpa-topbar {
+  background: color-mix(in srgb, var(--cpa-bg-secondary) 82%, transparent);
+  border-color: var(--cpa-border);
+  backdrop-filter: blur(14px);
 }
 
 /* ---- Reduced motion ---- */
