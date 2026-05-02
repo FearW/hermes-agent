@@ -1643,6 +1643,11 @@ class AIAgent:
             _agent_cfg = _load_agent_config()
         except Exception:
             _agent_cfg = {}
+        try:
+            from agent.sleep_mode import resolve_sleep_mode as _resolve_sleep_mode
+            self._sleep_mode = _resolve_sleep_mode(_agent_cfg)
+        except Exception:
+            self._sleep_mode = {"enabled": True}
         # Cache only the derived auxiliary compression context override that is
         # needed later by the startup feasibility check.  Avoid exposing a
         # broad pseudo-public config object on the agent instance.
@@ -1661,6 +1666,9 @@ class AIAgent:
                 self._memory_enabled = mem_config.get("memory_enabled", False)
                 self._user_profile_enabled = mem_config.get("user_profile_enabled", False)
                 self._memory_nudge_interval = int(mem_config.get("nudge_interval", 10))
+                sleep_interval = self._sleep_mode.get("memory_review_interval")
+                if sleep_interval is not None:
+                    self._memory_nudge_interval = int(sleep_interval)
                 if self._memory_enabled or self._user_profile_enabled:
                     from tools.memory_tool import MemoryStore
                     self._memory_store = MemoryStore(
@@ -1763,6 +1771,9 @@ class AIAgent:
         try:
             skills_config = _agent_cfg.get("skills", {})
             self._skill_nudge_interval = int(skills_config.get("creation_nudge_interval", 10))
+            sleep_interval = self._sleep_mode.get("skill_review_interval")
+            if sleep_interval is not None:
+                self._skill_nudge_interval = int(sleep_interval)
         except Exception:
             pass
 
@@ -13606,15 +13617,18 @@ class AIAgent:
             self._iters_since_skill = 0
 
         # External memory provider: sync the completed turn + queue next prefetch.
-        self._sync_external_memory_for_turn(
-            original_user_message=original_user_message,
-            final_response=final_response,
-            interrupted=interrupted,
-        )
+        if self._sleep_mode.get("external_memory_sync", True):
+            self._sync_external_memory_for_turn(
+                original_user_message=original_user_message,
+                final_response=final_response,
+                interrupted=interrupted,
+            )
 
         # Background memory/skill review — runs AFTER the response is delivered
         # so it never competes with the user's task for model attention.
-        if final_response and not interrupted and (_should_review_memory or _should_review_skills):
+        if (self._sleep_mode.get("background_review", True)
+                and final_response and not interrupted
+                and (_should_review_memory or _should_review_skills)):
             try:
                 self._spawn_background_review(
                     messages_snapshot=list(messages),

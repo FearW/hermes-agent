@@ -414,6 +414,33 @@ memory:
   flush_min_turns: 6        # Min user turns to trigger flush on exit/reset (0 = disabled)
 
 # =============================================================================
+# Sleep Mode
+# =============================================================================
+# Unified background learning/maintenance policy. Sleep mode does not add a
+# second memory system; it coordinates existing Hermes mechanisms:
+# memory review, skill/workflow review, external memory sync/prefetch, and L4
+# archive/compaction. Keep it on for "chat normally, Hermes improves quietly".
+#
+# Profiles:
+#   off      - Disable background review/sync/L4 maintenance
+#   light    - Lowest overhead, best for small VPS or expensive models
+#   balanced - Default: automatic but conservative
+#   deep     - More frequent consolidation for heavy long-running agents
+#
+sleep_mode:
+  enabled: true
+  profile: balanced
+  memory_review_interval: 8       # User turns between background memory review
+  skill_review_interval: 12       # Tool iterations between skill/workflow review
+  background_review: true         # Run review agent after user response is delivered
+  external_memory_sync: true      # Sync completed turns to external memory providers
+  l4_periodic_archive: true       # Archive idle sessions into L4 memory
+  l4_compaction: true             # Prune old low-priority L4 rows
+  maintenance_interval_seconds: 14400
+  l4_interval_seconds: 5400
+  report_actions: true            # Print compact "memory updated" summaries
+
+# =============================================================================
 # Session Reset Policy (Messaging Platforms)
 # =============================================================================
 # Controls when messaging sessions (Telegram, Discord, WhatsApp, Slack) are

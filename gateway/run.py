@@ -12681,8 +12681,9 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
     try:
         from gateway.maintenance import retention_loop, l4_periodic_archive_loop
         from hermes_cli.config import load_config as _load_full_config
+        from agent.sleep_mode import apply_sleep_mode_to_maintenance_config
 
-        _maintenance_cfg = (_load_full_config().get("maintenance") or {})
+        _maintenance_cfg = apply_sleep_mode_to_maintenance_config(_load_full_config())
         if _maintenance_cfg.get("enabled", True):
             if _maintenance_cfg.get("retention_loop", True):
                 maintenance_tasks.append(asyncio.create_task(

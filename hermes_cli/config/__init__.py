@@ -640,6 +640,22 @@ DEFAULT_CONFIG = {
         # Only ONE external provider is allowed at a time.
         "provider": "",
     },
+    # Sleep mode -- unified background learning/maintenance policy.
+    # This controls existing mechanisms: memory review, skill review,
+    # external memory sync/prefetch, and L4 archive/compaction cadence.
+    "sleep_mode": {
+        "enabled": True,
+        "profile": "balanced",  # off, light, balanced, deep
+        "memory_review_interval": 8,  # user turns between background memory review
+        "skill_review_interval": 12,  # tool iterations between skill/workflow review
+        "background_review": True,
+        "external_memory_sync": True,
+        "l4_periodic_archive": True,
+        "l4_compaction": True,
+        "maintenance_interval_seconds": 14400,
+        "l4_interval_seconds": 5400,
+        "report_actions": True,
+    },
     # Subagent delegation — override the provider:model used by delegate_task
     # so child agents can run on a different (cheaper/faster) provider and model.
     # Uses the same runtime provider resolution as CLI/gateway startup, so all
@@ -751,7 +767,7 @@ DEFAULT_CONFIG = {
         "force_ipv4": False,
     },
     # Config schema version - bump this when adding new required fields
-    "_config_version": 17,
+    "_config_version": 18,
 }
 
 # =============================================================================
