@@ -85,12 +85,12 @@ function TokenBarChart({ daily }: { daily: AnalyticsDailyEntry[] }) {
         </div>
           <div className="flex items-center gap-4 text-xs text-muted-foreground">
           <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-sm bg-[#ffe6cb]" />
-            Input
+            <div className="h-2.5 w-2.5 rounded-sm bg-[#8b8680]" />
+            输入
           </div>
           <div className="flex items-center gap-1.5">
-            <div className="h-2.5 w-2.5 rounded-sm bg-emerald-500" />
-            Output
+            <div className="h-2.5 w-2.5 rounded-sm bg-[#c65746]" />
+            输出
           </div>
         </div>
       </CardHeader>
@@ -113,21 +113,21 @@ function TokenBarChart({ daily }: { daily: AnalyticsDailyEntry[] }) {
                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-10 pointer-events-none">
                   <div className="rounded-md bg-card border border-border px-2.5 py-1.5 text-[10px] text-foreground shadow-lg whitespace-nowrap">
                     <div className="font-medium">{formatDate(d.day)}</div>
-                    <div>Input: {formatTokens(d.input_tokens)}</div>
-                    <div>Output: {formatTokens(d.output_tokens)}</div>
-                    {cacheReadPct > 0 && <div>Cache hit: {cacheReadPct}%</div>}
-                    <div>Total: {formatTokens(total)}</div>
-                    {bestCost(d) > 0 && <div>Cost: {formatCost(bestCost(d))}</div>}
+                    <div>输入：{formatTokens(d.input_tokens)}</div>
+                    <div>输出：{formatTokens(d.output_tokens)}</div>
+                    {cacheReadPct > 0 && <div>缓存命中：{cacheReadPct}%</div>}
+                    <div>总量：{formatTokens(total)}</div>
+                    {bestCost(d) > 0 && <div>成本：{formatCost(bestCost(d))}</div>}
                   </div>
                 </div>
                 {/* Input bar */}
                 <div
-                  className="w-full bg-[#ffe6cb]/70"
+                  className="w-full bg-[#8b8680]/70"
                   style={{ height: Math.max(inputH, total > 0 ? 1 : 0) }}
                 />
                 {/* Output bar */}
                 <div
-                  className="w-full bg-emerald-500/70"
+                  className="w-full bg-[#c65746]/70"
                   style={{ height: Math.max(outputH, d.output_tokens > 0 ? 1 : 0) }}
                 />
               </div>
@@ -184,10 +184,10 @@ function DailyTable({ daily }: { daily: AnalyticsDailyEntry[] }) {
                     <td className="py-2 pr-4 font-medium">{formatDate(d.day)}</td>
                     <td className="text-right py-2 px-4 text-muted-foreground">{d.sessions}</td>
                     <td className="text-right py-2 px-4">
-                      <span className="text-[#ffe6cb]">{formatTokens(d.input_tokens)}</span>
+                      <span className="text-[#8b8680]">{formatTokens(d.input_tokens)}</span>
                     </td>
                     <td className="text-right py-2 px-4">
-                      <span className="text-emerald-400">{formatTokens(d.output_tokens)}</span>
+                      <span className="text-[#c65746]">{formatTokens(d.output_tokens)}</span>
                     </td>
                     <td className="text-right py-2 px-4 text-muted-foreground">
                       {cacheHitPct > 0 ? `${cacheHitPct}%` : "—"}
@@ -240,9 +240,9 @@ function ModelTable({ models }: { models: AnalyticsModelEntry[] }) {
                   </td>
                   <td className="text-right py-2 px-4 text-muted-foreground">{m.sessions}</td>
                   <td className="text-right py-2 px-4">
-                    <span className="text-[#ffe6cb]">{formatTokens(m.input_tokens)}</span>
+                    <span className="text-[#8b8680]">{formatTokens(m.input_tokens)}</span>
                     {" / "}
-                    <span className="text-emerald-400">{formatTokens(m.output_tokens)}</span>
+                    <span className="text-[#c65746]">{formatTokens(m.output_tokens)}</span>
                   </td>
                   <td className="text-right py-2 pl-4 text-muted-foreground">
                     {m.estimated_cost > 0 ? formatCost(m.estimated_cost) : "—"}

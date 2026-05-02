@@ -548,12 +548,10 @@ function Install-Dependencies {
         $env:VIRTUAL_ENV = "$InstallDir\venv"
     }
     
-    # Keep first-run installs lightweight and reliable. Heavy optional extras
-    # (voice, messaging, browser/RL integrations) can be installed later.
-    & $UvCmd pip install -e "." | Out-Null
+    # Hermes FearW fork defaults to a complete local install.
+    & $UvCmd pip install -e ".[all]" | Out-Null
     
-    Write-Success "Main package installed"
-    Write-Info "Optional extras can be installed later, for example: uv pip install -e '.[messaging,web]'"
+    Write-Success "All Python extras installed"
     
     # RL training backend is optional; do not make the default install depend on it.
     if (Test-Path "tinker-atropos\pyproject.toml") {
@@ -566,6 +564,39 @@ function Install-Dependencies {
     Pop-Location
     
     Write-Success "All dependencies installed"
+}
+
+function Install-CPA {
+    Write-Info "Installing CLIProxyAPI (CPA)..."
+    $cpaDir = Join-Path $HermesHome "cpa"
+    New-Item -ItemType Directory -Force -Path $cpaDir | Out-Null
+    $exe = Join-Path $cpaDir "CLIProxyAPI.exe"
+    if (Test-Path $exe) {
+        Write-Success "CPA already installed: $exe"
+        return
+    }
+    $asset = "CLIProxyAPI_6.9.49_windows_amd64.zip"
+    $url = "https://github.com/Fwindy/CLIProxyAPI/releases/download/v6.9.49/$asset"
+    $zip = Join-Path $env:TEMP $asset
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+        Expand-Archive -Path $zip -DestinationPath $cpaDir -Force
+        $found = Get-ChildItem -Path $cpaDir -Recurse -Filter "CLIProxyAPI*.exe" | Select-Object -First 1
+        if ($found -and $found.FullName -ne $exe) {
+            Copy-Item $found.FullName $exe -Force
+        }
+        if (Test-Path $exe) {
+            Write-Success "CPA installed: $exe"
+            Write-Info "Run CPA: $exe --config `"$HermesHome\cpa\config.yaml`""
+        } else {
+            Write-Warn "CPA archive downloaded but executable was not found. Check: $cpaDir"
+        }
+    } catch {
+        Write-Warn "CPA install failed: $_"
+        Write-Info "You can install manually from https://github.com/Fwindy/CLIProxyAPI/releases"
+    } finally {
+        Remove-Item $zip -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Set-PathVariable {
@@ -885,6 +916,7 @@ function Main {
     Install-Repository
     Install-Venv
     Install-Dependencies
+    Install-CPA
     Install-NodeDeps
     Set-PathVariable
     Copy-ConfigTemplates

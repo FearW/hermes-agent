@@ -1148,6 +1148,11 @@ def _cpa_management_base_url() -> str:
     return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path, "", "")).rstrip("/")
 
 
+def _cpa_inference_base_url() -> str:
+    model_cfg = _cpa_model_config(load_config())
+    return str(model_cfg.get("base_url") or "http://127.0.0.1:8080/v1").strip().rstrip("/")
+
+
 def _cpa_api_key() -> str:
     env_on_disk = load_env()
     return (
@@ -1189,7 +1194,16 @@ def _cpa_url(path: str, query: str = "") -> str:
 
 def _cpa_public_url(path: str, query: str = "") -> str:
     clean_path = path.strip("/")
-    url = f"{_cpa_management_base_url()}/{clean_path}"
+    inference_base = _cpa_inference_base_url()
+    management_base = _cpa_management_base_url()
+    if clean_path == "v1" or clean_path.startswith("v1/"):
+        suffix = clean_path[2:].lstrip("/")
+        url = f"{inference_base}/{suffix}" if suffix else inference_base
+    elif clean_path == "anthropic" or clean_path.startswith("anthropic/"):
+        suffix = clean_path[len("anthropic"):].lstrip("/")
+        url = f"{management_base}/anthropic/{suffix}" if suffix else f"{management_base}/anthropic"
+    else:
+        url = f"{management_base}/{clean_path}"
     return f"{url}?{query}" if query else url
 
 
@@ -1253,9 +1267,13 @@ def _copy_proxy_headers(request: Request) -> dict[str, str]:
         for key, value in request.headers.items()
         if key.lower() not in excluded
     }
-    api_key = _cpa_api_key() or _DASHBOARD_PASSWORD
+    incoming_auth = request.headers.get("authorization", "")
+    dashboard_bearer = f"Bearer {_DASHBOARD_PASSWORD}" if _DASHBOARD_PASSWORD else ""
+    api_key = _cpa_api_key()
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
+    elif dashboard_bearer and hmac.compare_digest(incoming_auth.encode(), dashboard_bearer.encode()):
+        headers.pop("Authorization", None)
     return headers
 
 
@@ -1305,9 +1323,19 @@ async def proxy_cpa_v1(path: str, request: Request):
     return await _public_cpa_proxy(request, f"v1/{path}")
 
 
+@app.api_route("/v1", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def proxy_cpa_v1_root(request: Request):
+    return await _public_cpa_proxy(request, "v1")
+
+
 @app.api_route("/anthropic/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
 async def proxy_cpa_anthropic(path: str, request: Request):
     return await _public_cpa_proxy(request, f"anthropic/{path}")
+
+
+@app.api_route("/anthropic", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def proxy_cpa_anthropic_root(request: Request):
+    return await _public_cpa_proxy(request, "anthropic")
 
 
 @app.get("/api/cpa/providers")

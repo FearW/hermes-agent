@@ -380,7 +380,7 @@ export default function CPAPage() {
       <Card>
         <CardContent className="flex items-start gap-2 pt-4 text-xs text-muted-foreground">
           <ShieldCheck className="mt-0.5 h-4 w-4 text-foreground" />
-          <span>无损边界：Hermes 保留旧 provider / OAuth 代码作为兼容兜底；默认路径只通过 CPA。</span>
+          <span>CPA-only 边界：Hermes 不再直连旧 provider；所有上游渠道、OAuth 和路由都在 CPA 内管理。</span>
         </CardContent>
       </Card>
     </div>

@@ -866,17 +866,15 @@ install_deps() {
         fi
     fi
 
-    # Keep first-run installs lightweight and reliable. Heavy optional extras
-    # (voice, messaging, browser/RL integrations) can be installed later.
-    if ! $UV_CMD pip install -e "."; then
+    # Hermes FearW fork defaults to a complete local install.
+    if ! $UV_CMD pip install -e ".[all]"; then
         log_error "Package installation failed."
         log_info "Check that build tools are installed: sudo apt install build-essential python3-dev"
-        log_info "Then re-run: cd $INSTALL_DIR && uv pip install -e '.'"
+        log_info "Then re-run: cd $INSTALL_DIR && uv pip install -e '.[all]'"
         exit 1
     fi
 
-    log_success "Main package installed"
-    log_info "Optional extras can be installed later, for example: uv pip install -e '.[messaging,web]'"
+    log_success "All Python extras installed"
 
     # tinker-atropos (RL training) is optional — skip by default.
     # To enable RL tools: git submodule update --init tinker-atropos && uv pip install -e "./tinker-atropos"
@@ -886,6 +884,51 @@ install_deps() {
     fi
 
     log_success "All dependencies installed"
+}
+
+install_cpa() {
+    log_info "Installing CLIProxyAPI (CPA)..."
+    mkdir -p "$HERMES_HOME/cpa"
+    local os arch asset archive url bin
+    case "$(uname -s)" in
+        Linux*) os="linux"; archive="tar.gz" ;;
+        Darwin*) os="darwin"; archive="tar.gz" ;;
+        *) log_warn "CPA auto-install unsupported on this OS; install from https://github.com/Fwindy/CLIProxyAPI/releases"; return 0 ;;
+    esac
+    case "$(uname -m)" in
+        x86_64|amd64) arch="amd64" ;;
+        arm64|aarch64) arch="aarch64" ;;
+        *) log_warn "CPA auto-install unsupported on this CPU; install from https://github.com/Fwindy/CLIProxyAPI/releases"; return 0 ;;
+    esac
+    bin="$HERMES_HOME/cpa/CLIProxyAPI"
+    if [ -x "$bin" ]; then
+        log_success "CPA already installed: $bin"
+        return 0
+    fi
+    asset="CLIProxyAPI_6.9.49_${os}_${arch}.${archive}"
+    url="https://github.com/Fwindy/CLIProxyAPI/releases/download/v6.9.49/$asset"
+    local tmp_dir="$HERMES_HOME/cpa/.download"
+    rm -rf "$tmp_dir" && mkdir -p "$tmp_dir"
+    if curl -fsSL "$url" -o "$tmp_dir/$asset"; then
+        tar -xzf "$tmp_dir/$asset" -C "$tmp_dir"
+        local found
+        found="$(find "$tmp_dir" -type f -name 'CLIProxyAPI*' -perm -u+x | head -n 1)"
+        if [ -z "$found" ]; then
+            found="$(find "$tmp_dir" -type f -name 'CLIProxyAPI*' | head -n 1)"
+        fi
+        if [ -n "$found" ]; then
+            cp "$found" "$bin"
+            chmod +x "$bin"
+            log_success "CPA installed: $bin"
+            log_info "Run CPA: $bin --config $HERMES_HOME/cpa/config.yaml"
+        else
+            log_warn "CPA archive downloaded but executable was not found. Check: $tmp_dir"
+        fi
+    else
+        log_warn "CPA download failed: $url"
+        log_info "Install manually from https://github.com/Fwindy/CLIProxyAPI/releases"
+    fi
+    rm -rf "$tmp_dir"
 }
 
 setup_path() {
@@ -1355,6 +1398,7 @@ main() {
     clone_repo
     setup_venv
     install_deps
+    install_cpa
     install_node_deps
     setup_path
     copy_config_templates

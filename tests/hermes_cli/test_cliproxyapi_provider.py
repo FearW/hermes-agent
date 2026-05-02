@@ -4,7 +4,9 @@ import json
 import urllib.request
 
 from hermes_cli.auth import PROVIDER_REGISTRY, resolve_provider
-from hermes_cli.runtime_provider import resolve_runtime_provider
+import pytest
+
+from hermes_cli.runtime_provider import LegacyProviderDisabledError, resolve_runtime_provider
 
 
 def test_cliproxyapi_provider_registered():
@@ -38,6 +40,14 @@ def test_runtime_provider_defaults_to_local_cpa(monkeypatch):
     assert runtime["api_mode"] == "chat_completions"
     assert runtime["base_url"] == "http://127.0.0.1:8080/v1"
     assert runtime["api_key"] == "no-key-required"
+
+
+def test_legacy_provider_runtime_is_disabled(monkeypatch):
+    monkeypatch.delenv("CLIPROXY_BASE_URL", raising=False)
+    monkeypatch.delenv("CPA_BASE_URL", raising=False)
+
+    with pytest.raises(LegacyProviderDisabledError):
+        resolve_runtime_provider(requested="openrouter")
 
 
 def test_default_config_is_cpa_first():
