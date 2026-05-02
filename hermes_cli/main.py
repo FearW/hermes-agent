@@ -10090,7 +10090,7 @@ Examples:
     dashboard_parser.add_argument(
         "--cpa-api-proxy",
         action="store_true",
-        help="Expose CPA-compatible API routes on this dashboard port (/v1, /claude, /anthropic, /au)",
+        help="Expose CPA-compatible API routes on this dashboard port (/v1, /anthropic)",
     )
     dashboard_parser.add_argument(
         "--no-open", action="store_true", help="Don't open browser automatically"

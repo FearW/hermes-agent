@@ -1190,6 +1190,20 @@ class TestCPAConfigAPI:
 
         assert resp.status_code == 401
 
+    def test_public_cpa_proxy_does_not_expose_non_cpa_aliases(self, monkeypatch):
+        from hermes_cli import web_server
+
+        monkeypatch.setattr(web_server, "_DASHBOARD_PASSWORD", "panel-secret")
+        monkeypatch.setattr(web_server, "_DASHBOARD_PUBLIC_API_PROXY_ENABLED", True)
+
+        for path in ("/claude/messages", "/au/messages"):
+            resp = self.client.post(
+                path,
+                json={"model": "demo"},
+                headers={"Authorization": "Bearer panel-secret"},
+            )
+            assert resp.status_code in {404, 405}
+
     def test_public_cpa_proxy_supports_anthropic_path(self, monkeypatch):
         from hermes_cli import web_server
 

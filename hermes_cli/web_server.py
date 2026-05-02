@@ -3877,5 +3877,5 @@ def start_server(
 
     print(f"  Hermes Web UI → http://{host}:{port}")
     if _DASHBOARD_PUBLIC_API_PROXY_ENABLED:
-        print(f"  CPA API proxy 鈫?http://{host}:{port}/v1  (key = dashboard password)")
+        print(f"  CPA API proxy -> http://{host}:{port}/v1  (key = dashboard password)")
     uvicorn.run(app, host=host, port=port, log_level="warning")
