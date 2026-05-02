@@ -10655,6 +10655,7 @@ class AIAgent:
                 )
 
             api_messages = []
+            volatile_cache_indices = set()
             for idx, msg in enumerate(messages):
                 api_msg = msg.copy()
 
@@ -10675,6 +10676,7 @@ class AIAgent:
                         _base = api_msg.get("content", "")
                         if isinstance(_base, str):
                             api_msg["content"] = _base + "\n\n" + "\n\n".join(_injections)
+                            volatile_cache_indices.add(len(api_messages))
 
                 # For ALL assistant messages, pass reasoning back to the API
                 # This ensures multi-turn reasoning context is preserved
@@ -10732,6 +10734,7 @@ class AIAgent:
                     api_messages,
                     cache_ttl=self._cache_ttl,
                     native_anthropic=self._use_native_cache_layout,
+                    volatile_message_indices=volatile_cache_indices,
                 )
 
             # Safety net: strip orphaned tool results / add stubs for missing

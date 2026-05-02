@@ -1,9 +1,9 @@
-"""Anthropic prompt caching (system_and_3 strategy).
+"""Anthropic prompt caching (stable system_and_3 strategy).
 
 Reduces input token costs by ~75% on multi-turn conversations by caching
 the conversation prefix. Uses 4 cache_control breakpoints (Anthropic max):
   1. System prompt (stable across all turns)
-  2-4. Last 3 non-system messages (rolling window)
+  2-4. Last 3 cacheable, stable non-system messages (rolling window)
 
 Pure functions -- no class state, no AIAgent dependency.
 """
@@ -42,10 +42,14 @@ def apply_anthropic_cache_control(
     api_messages: List[Dict[str, Any]],
     cache_ttl: str = "5m",
     native_anthropic: bool = False,
+    volatile_message_indices: set[int] | None = None,
 ) -> List[Dict[str, Any]]:
     """Apply system_and_3 caching strategy to messages for Anthropic models.
 
-    Places up to 4 cache_control breakpoints: system prompt + last 3 non-system messages.
+    Places up to 4 cache_control breakpoints: system prompt + last 3 cacheable,
+    stable non-system messages. Volatile messages are skipped so dynamic
+    per-call context (memory recall, plugin injections, prefills) does not
+    consume a breakpoint that will miss on the next turn.
 
     Returns:
         Deep copy of messages with cache_control breakpoints injected.
@@ -65,7 +69,17 @@ def apply_anthropic_cache_control(
         breakpoints_used += 1
 
     remaining = 4 - breakpoints_used
-    non_sys = [i for i in range(len(messages)) if messages[i].get("role") != "system"]
+    volatile_message_indices = volatile_message_indices or set()
+    non_sys = []
+    for i in range(len(messages)):
+        if i in volatile_message_indices:
+            continue
+        role = messages[i].get("role")
+        if role == "system":
+            continue
+        if role == "tool" and not native_anthropic:
+            continue
+        non_sys.append(i)
     for idx in non_sys[-remaining:]:
         _apply_cache_marker(messages[idx], marker, native_anthropic=native_anthropic)
 

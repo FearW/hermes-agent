@@ -141,3 +141,32 @@ class TestApplyAnthropicCacheControl:
             elif "cache_control" in msg:
                 count += 1
         assert count <= 4
+
+    def test_volatile_messages_do_not_get_markers(self):
+        msgs = [
+            {"role": "system", "content": "System"},
+            {"role": "user", "content": "stable old user"},
+            {"role": "assistant", "content": "stable old assistant"},
+            {"role": "user", "content": "current turn with dynamic memory"},
+        ]
+        result = apply_anthropic_cache_control(msgs, volatile_message_indices={3})
+
+        assert isinstance(result[0]["content"], list)
+        assert isinstance(result[1]["content"], list)
+        assert isinstance(result[2]["content"], list)
+        assert isinstance(result[3]["content"], str)
+
+    def test_openrouter_tool_messages_do_not_consume_breakpoints(self):
+        msgs = [
+            {"role": "system", "content": "System"},
+            {"role": "user", "content": "msg1"},
+            {"role": "assistant", "content": "msg2"},
+            {"role": "tool", "content": "dynamic tool result"},
+            {"role": "user", "content": "msg3"},
+        ]
+        result = apply_anthropic_cache_control(msgs, native_anthropic=False)
+
+        assert "cache_control" not in result[3]
+        assert isinstance(result[1]["content"], list)
+        assert isinstance(result[2]["content"], list)
+        assert isinstance(result[4]["content"], list)
