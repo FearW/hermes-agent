@@ -366,6 +366,15 @@ DEFAULT_CONFIG = {
     "fallback_providers": [],
     "credential_pool_strategies": {},
     "toolsets": ["hermes-cli"],
+    "dashboard": {
+        "host": "127.0.0.1",
+        "port": 9119,
+        "public": False,
+        "password": "",
+        "cpa_api_proxy": False,
+        "theme": "default",
+        "tui": False,
+    },
     "agent": {
         "max_turns": 90,
         # Inactivity timeout for gateway agent execution (seconds).

@@ -449,9 +449,21 @@ class TestRunDebug:
 
 class TestArgparseIntegration:
     def test_module_imports_clean(self):
-        from hermes_cli.debug import run_debug, run_debug_share
+        from hermes_cli.debug import run_debug, run_debug_share, _sweep_expired_pastes
         assert callable(run_debug)
         assert callable(run_debug_share)
+        assert callable(_sweep_expired_pastes)
+
+    def test_sweep_expired_pastes_removes_deleted_records(self, hermes_home, monkeypatch):
+        from hermes_cli import debug
+
+        monkeypatch.setattr(debug, "_delete_paste_url", lambda url: True)
+        debug._schedule_auto_delete(["https://paste.rs/example"], ttl_seconds=-1)
+
+        deleted, remaining = debug._sweep_expired_pastes()
+
+        assert deleted == 1
+        assert remaining == 0
 
     def test_cmd_debug_dispatches(self):
         from hermes_cli.main import cmd_debug

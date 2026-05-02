@@ -7988,13 +7988,27 @@ def cmd_dashboard(args):
 
     from hermes_cli.web_server import start_server
 
-    embedded_chat = args.tui or os.environ.get("HERMES_DASHBOARD_TUI") == "1"
+    from hermes_cli.config import cfg_get, load_config
+
+    config = load_config()
+    host = args.host if args.host is not None else cfg_get(config, "dashboard", "host", default="127.0.0.1")
+    port = args.port if args.port is not None else int(cfg_get(config, "dashboard", "port", default=9119) or 9119)
+    password = args.password if args.password is not None else str(cfg_get(config, "dashboard", "password", default="") or "")
+    public_enabled = bool(args.public or cfg_get(config, "dashboard", "public", default=False))
+    cpa_api_proxy = bool(args.cpa_api_proxy or cfg_get(config, "dashboard", "cpa_api_proxy", default=False))
+    embedded_chat = bool(args.tui or cfg_get(config, "dashboard", "tui", default=False) or os.environ.get("HERMES_DASHBOARD_TUI") == "1")
+    if public_enabled and not password and not getattr(args, "insecure", False):
+        print("Error: public dashboard requires dashboard.password or --password.")
+        print("Set it in ~/.hermes/config.yaml or run: hermes dashboard --public --password <key>")
+        sys.exit(1)
     start_server(
-        host=args.host,
-        port=args.port,
+        host=host,
+        port=port,
         open_browser=not args.no_open,
-        allow_public=getattr(args, "insecure", False),
+        allow_public=public_enabled or getattr(args, "insecure", False),
         embedded_chat=embedded_chat,
+        password=password,
+        public_api_proxy=cpa_api_proxy,
     )
 
 
@@ -10058,10 +10072,25 @@ Examples:
         description="Launch the Hermes Agent web dashboard for managing config, API keys, and sessions",
     )
     dashboard_parser.add_argument(
-        "--port", type=int, default=9119, help="Port (default 9119)"
+        "--port", type=int, default=None, help="Port (default from dashboard.port or 9119)"
     )
     dashboard_parser.add_argument(
-        "--host", default="127.0.0.1", help="Host (default 127.0.0.1)"
+        "--host", default=None, help="Host (default from dashboard.host or 127.0.0.1)"
+    )
+    dashboard_parser.add_argument(
+        "--public",
+        action="store_true",
+        help="Bind dashboard to public interfaces using dashboard.password / --password",
+    )
+    dashboard_parser.add_argument(
+        "--password",
+        default=None,
+        help="Dashboard password; also used as the public CPA API key",
+    )
+    dashboard_parser.add_argument(
+        "--cpa-api-proxy",
+        action="store_true",
+        help="Expose CPA-compatible API routes on this dashboard port (/v1, /claude, /anthropic, /au)",
     )
     dashboard_parser.add_argument(
         "--no-open", action="store_true", help="Don't open browser automatically"

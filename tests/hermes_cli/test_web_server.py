@@ -1059,6 +1059,101 @@ class TestCPAConfigAPI:
         assert resp.status_code == 200
         assert resp.json()["files"][0]["name"] == "codex.json"
 
+    def test_public_cpa_proxy_reuses_dashboard_password_as_api_key(self, monkeypatch):
+        from hermes_cli import web_server
+
+        captured = {}
+
+        class FakeResponse:
+            status = 200
+            headers = {"Content-Type": "application/json"}
+
+            def read(self):
+                return b'{"ok":true}'
+
+            def close(self):
+                pass
+
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["method"] = request.get_method()
+            captured["auth"] = request.headers.get("Authorization")
+            captured["body"] = request.data
+            return FakeResponse()
+
+        monkeypatch.setattr(web_server, "load_config", lambda: {
+            "model": {"default": "x", "base_url": "http://127.0.0.1:8080/v1"}
+        })
+        monkeypatch.setattr(web_server, "load_env", lambda: {})
+        monkeypatch.setattr(web_server.urllib.request, "urlopen", fake_urlopen)
+        monkeypatch.setattr(web_server, "_DASHBOARD_PASSWORD", "panel-secret")
+        monkeypatch.setattr(web_server, "_DASHBOARD_PUBLIC_API_PROXY_ENABLED", True)
+
+        resp = self.client.post(
+            "/v1/chat/completions",
+            json={"model": "demo"},
+            headers={"Authorization": "Bearer panel-secret"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
+        assert captured["url"] == "http://127.0.0.1:8080/v1/chat/completions"
+        assert captured["method"] == "POST"
+        assert captured["auth"] == "Bearer panel-secret"
+        assert b'"model":"demo"' in captured["body"]
+
+    def test_public_cpa_proxy_rejects_wrong_dashboard_password(self, monkeypatch):
+        from hermes_cli import web_server
+
+        monkeypatch.setattr(web_server, "_DASHBOARD_PASSWORD", "panel-secret")
+        monkeypatch.setattr(web_server, "_DASHBOARD_PUBLIC_API_PROXY_ENABLED", True)
+
+        resp = self.client.post(
+            "/v1/chat/completions",
+            json={"model": "demo"},
+            headers={"Authorization": "Bearer wrong"},
+        )
+
+        assert resp.status_code == 401
+
+    def test_public_cpa_proxy_supports_anthropic_path(self, monkeypatch):
+        from hermes_cli import web_server
+
+        captured = {}
+
+        class FakeResponse:
+            status = 200
+            headers = {"Content-Type": "application/json"}
+
+            def read(self):
+                return b'{"type":"message"}'
+
+            def close(self):
+                pass
+
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["auth"] = request.headers.get("Authorization")
+            return FakeResponse()
+
+        monkeypatch.setattr(web_server, "load_config", lambda: {
+            "model": {"default": "x", "base_url": "http://127.0.0.1:8080/v1"}
+        })
+        monkeypatch.setattr(web_server, "load_env", lambda: {})
+        monkeypatch.setattr(web_server.urllib.request, "urlopen", fake_urlopen)
+        monkeypatch.setattr(web_server, "_DASHBOARD_PASSWORD", "panel-secret")
+        monkeypatch.setattr(web_server, "_DASHBOARD_PUBLIC_API_PROXY_ENABLED", True)
+
+        resp = self.client.post(
+            "/anthropic/v1/messages",
+            json={"model": "claude-demo"},
+            headers={"Authorization": "Bearer panel-secret"},
+        )
+
+        assert resp.status_code == 200
+        assert captured["url"] == "http://127.0.0.1:8080/anthropic/v1/messages"
+        assert captured["auth"] == "Bearer panel-secret"
+
     def test_denormalize_coerces_string_context_length(self):
         """denormalize should handle string model_context_length from frontend."""
         from hermes_cli.web_server import _denormalize_config_from_web

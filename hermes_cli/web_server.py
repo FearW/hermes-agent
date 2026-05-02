@@ -53,7 +53,7 @@ from gateway.status import get_running_pid, read_runtime_status
 try:
     from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
     from fastapi.staticfiles import StaticFiles
     from pydantic import BaseModel
 except ImportError:
@@ -74,6 +74,9 @@ app = FastAPI(title="Hermes Agent", version=__version__)
 # ---------------------------------------------------------------------------
 _SESSION_TOKEN = secrets.token_urlsafe(32)
 _SESSION_HEADER_NAME = "X-Hermes-Session-Token"
+_DASHBOARD_PASSWORD = ""
+_DASHBOARD_PUBLIC_API_PROXY_ENABLED = False
+_DASHBOARD_CPA_PROXY_PREFIXES = ("v1", "anthropic")
 
 # In-browser Chat tab (/chat, /api/pty, …).  Off unless ``hermes dashboard --tui``
 # or HERMES_DASHBOARD_TUI=1.  Set from :func:`start_server`.
@@ -131,10 +134,47 @@ def _has_valid_session_token(request: Request) -> bool:
     return hmac.compare_digest(auth.encode(), expected.encode())
 
 
+def _has_valid_dashboard_password(request: Request) -> bool:
+    """True when Basic/Bearer auth matches the configured dashboard password."""
+    if not _DASHBOARD_PASSWORD:
+        return False
+
+    auth = request.headers.get("authorization", "")
+    if auth.startswith("Bearer "):
+        provided = auth.removeprefix("Bearer ").strip()
+        return hmac.compare_digest(provided.encode(), _DASHBOARD_PASSWORD.encode())
+
+    if auth.startswith("Basic "):
+        import base64
+
+        try:
+            raw = base64.b64decode(auth.removeprefix("Basic ").strip()).decode("utf-8")
+        except Exception:
+            return False
+        password = raw.split(":", 1)[1] if ":" in raw else raw
+        return hmac.compare_digest(password.encode(), _DASHBOARD_PASSWORD.encode())
+
+    api_key = request.headers.get("x-api-key", "")
+    return bool(api_key) and hmac.compare_digest(api_key.encode(), _DASHBOARD_PASSWORD.encode())
+
+
 def _require_token(request: Request) -> None:
     """Validate the ephemeral session token.  Raises 401 on mismatch."""
     if not _has_valid_session_token(request):
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _is_public_cpa_proxy_path(path: str) -> bool:
+    first = path.strip("/").split("/", 1)[0]
+    return first in _DASHBOARD_CPA_PROXY_PREFIXES
+
+
+def _unauthorized_basic_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=401,
+        content={"detail": "Unauthorized"},
+        headers={"WWW-Authenticate": 'Basic realm="Hermes Dashboard"'},
+    )
 
 
 # Accepted Host header values for loopback binds. DNS rebinding attacks
@@ -219,6 +259,20 @@ async def host_header_middleware(request: Request, call_next):
                     ),
                 },
             )
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def dashboard_password_middleware(request: Request, call_next):
+    """Protect public dashboard pages with the configured dashboard password."""
+    if _DASHBOARD_PASSWORD:
+        path = request.url.path
+        if path.startswith("/api/"):
+            return await call_next(request)
+        if _DASHBOARD_PUBLIC_API_PROXY_ENABLED and _is_public_cpa_proxy_path(path):
+            return await call_next(request)
+        if not _has_valid_session_token(request) and not _has_valid_dashboard_password(request):
+            return _unauthorized_basic_response()
     return await call_next(request)
 
 
@@ -1107,6 +1161,12 @@ def _cpa_url(path: str, query: str = "") -> str:
     return f"{url}?{query}" if query else url
 
 
+def _cpa_public_url(path: str, query: str = "") -> str:
+    clean_path = path.strip("/")
+    url = f"{_cpa_management_base_url()}/{clean_path}"
+    return f"{url}?{query}" if query else url
+
+
 def _jsonable_proxy_response(raw: bytes, content_type: str) -> Any:
     text = raw.decode("utf-8", errors="replace")
     if "application/json" in content_type.lower():
@@ -1146,6 +1206,81 @@ async def _request_body_and_type(request: Request) -> tuple[bytes | None, str | 
     body = await request.body()
     content_type = request.headers.get("content-type")
     return (body if body else None), content_type
+
+
+def _copy_proxy_headers(request: Request) -> dict[str, str]:
+    excluded = {
+        "host",
+        "content-length",
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "transfer-encoding",
+        "upgrade",
+    }
+    headers = {
+        key: value
+        for key, value in request.headers.items()
+        if key.lower() not in excluded
+    }
+    api_key = _cpa_api_key() or _DASHBOARD_PASSWORD
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    return headers
+
+
+async def _public_cpa_proxy(request: Request, path: str) -> Response:
+    if not _DASHBOARD_PUBLIC_API_PROXY_ENABLED:
+        raise HTTPException(status_code=404, detail="CPA public proxy is disabled")
+    if _DASHBOARD_PASSWORD and not _has_valid_dashboard_password(request):
+        return _unauthorized_basic_response()
+
+    body = await request.body()
+    target = _cpa_public_url(path, request.url.query)
+    upstream_request = urllib.request.Request(
+        target,
+        data=body if body else None,
+        headers=_copy_proxy_headers(request),
+        method=request.method,
+    )
+    try:
+        upstream = await asyncio.to_thread(urllib.request.urlopen, upstream_request, timeout=300)
+    except urllib.error.HTTPError as exc:
+        error_body = exc.read()
+        return Response(
+            content=error_body,
+            status_code=exc.code,
+            media_type=exc.headers.get("Content-Type"),
+        )
+    except urllib.error.URLError as exc:
+        raise HTTPException(status_code=502, detail=f"CPA is unreachable: {exc.reason}") from exc
+
+    response_headers = {
+        key: value
+        for key, value in upstream.headers.items()
+        if key.lower() not in {"content-length", "transfer-encoding", "connection"}
+    }
+    content = await asyncio.to_thread(upstream.read)
+    upstream.close()
+    return Response(
+        content=content,
+        status_code=upstream.status,
+        headers=response_headers,
+        media_type=upstream.headers.get("Content-Type"),
+    )
+
+
+@app.api_route("/v1/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def proxy_cpa_v1(path: str, request: Request):
+    return await _public_cpa_proxy(request, f"v1/{path}")
+
+
+@app.api_route("/anthropic/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def proxy_cpa_anthropic(path: str, request: Request):
+    return await _public_cpa_proxy(request, f"anthropic/{path}")
 
 
 @app.get("/api/cpa/providers")
@@ -3604,21 +3739,28 @@ def start_server(
     allow_public: bool = False,
     *,
     embedded_chat: bool = False,
+    password: str = "",
+    public_api_proxy: bool = False,
 ):
     """Start the web UI server."""
     import uvicorn
 
-    global _DASHBOARD_EMBEDDED_CHAT_ENABLED
+    global _DASHBOARD_EMBEDDED_CHAT_ENABLED, _DASHBOARD_PASSWORD, _DASHBOARD_PUBLIC_API_PROXY_ENABLED
     _DASHBOARD_EMBEDDED_CHAT_ENABLED = embedded_chat
+    _DASHBOARD_PASSWORD = (password or os.getenv("HERMES_DASHBOARD_PASSWORD", "")).strip()
+    _DASHBOARD_PUBLIC_API_PROXY_ENABLED = bool(public_api_proxy)
+    if _DASHBOARD_PUBLIC_API_PROXY_ENABLED and not _DASHBOARD_PASSWORD:
+        raise SystemExit("dashboard.cpa_api_proxy requires dashboard.password or --password")
 
     _LOCALHOST = ("127.0.0.1", "localhost", "::1")
     if host not in _LOCALHOST and not allow_public:
         raise SystemExit(
             f"Refusing to bind to {host} — the dashboard exposes API keys "
             f"and config without robust authentication.\n"
-            f"Use --insecure to override (NOT recommended on untrusted networks)."
+            f"Set dashboard.public=true and dashboard.password, or use --insecure "
+            f"to override (NOT recommended on untrusted networks)."
         )
-    if host not in _LOCALHOST:
+    if host not in _LOCALHOST and not _DASHBOARD_PASSWORD:
         _log.warning(
             "Binding to %s with --insecure — the dashboard has no robust "
             "authentication. Only use on trusted networks.", host,
@@ -3641,4 +3783,6 @@ def start_server(
         threading.Thread(target=_open, daemon=True).start()
 
     print(f"  Hermes Web UI → http://{host}:{port}")
+    if _DASHBOARD_PUBLIC_API_PROXY_ENABLED:
+        print(f"  CPA API proxy 鈫?http://{host}:{port}/v1  (key = dashboard password)")
     uvicorn.run(app, host=host, port=port, log_level="warning")

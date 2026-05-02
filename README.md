@@ -75,6 +75,24 @@ uv run hermes dashboard
 
 默认打开：`http://127.0.0.1:9119`
 
+公网 WebUI + CPA API 同端口入口：
+
+```yaml
+dashboard:
+  host: "0.0.0.0"
+  port: 9119
+  public: true
+  password: "换成你的强密码"
+  cpa_api_proxy: true
+```
+
+启动后：
+
+- 面板：`http://你的服务器IP:9119/`
+- OpenAI/CPA 接口：`http://你的服务器IP:9119/v1`
+- Anthropic/CPA 接口：`http://你的服务器IP:9119/anthropic`
+- 接口 Key：就是 `dashboard.password`，用 `Authorization: Bearer 换成你的强密码`
+
 如果想在 WebUI 里打开内嵌聊天页：
 
 ```bash

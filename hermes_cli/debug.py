@@ -6,7 +6,9 @@ Currently supports:
 """
 
 import io
+import json
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -26,6 +28,87 @@ _DPASTE_COM_URL = "https://dpaste.com/api/"
 # Maximum bytes to read from a single log file for upload.
 # paste.rs caps at ~1 MB; we stay under that with headroom.
 _MAX_LOG_BYTES = 512_000
+_PASTE_RECORD_FILE = "debug_pastes.json"
+_DEFAULT_AUTO_DELETE_SECONDS = 6 * 60 * 60
+_GATEWAY_PRIVACY_NOTICE = (
+    "Gateway debug upload includes only a summary report with recent log tails; "
+    "full logs are not uploaded from messaging platforms."
+)
+
+
+def _paste_record_path() -> Path:
+    return get_hermes_home() / _PASTE_RECORD_FILE
+
+
+def _load_paste_records() -> list[dict]:
+    path = _paste_record_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _save_paste_records(records: list[dict]) -> None:
+    path = _paste_record_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(records, indent=2), encoding="utf-8")
+
+
+def _delete_paste_url(url: str) -> bool:
+    """Best-effort remote paste deletion.
+
+    paste.rs supports deleting by sending DELETE to the paste URL. Other
+    providers may ignore or reject deletion; callers treat failures as best
+    effort so debug cleanup never breaks gateway startup.
+    """
+    request = urllib.request.Request(url, method="DELETE", headers={"User-Agent": "hermes-agent/debug-share"})
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return 200 <= response.status < 300
+    except Exception:
+        return False
+
+
+def _schedule_auto_delete(urls: list[str], ttl_seconds: int = _DEFAULT_AUTO_DELETE_SECONDS) -> None:
+    """Record paste URLs for later best-effort cleanup."""
+    now = time.time()
+    records = _load_paste_records()
+    for url in urls:
+        if url:
+            records.append({"url": url, "delete_after": now + ttl_seconds, "created_at": now})
+    _save_paste_records(records)
+
+
+def _sweep_expired_pastes(now: Optional[float] = None) -> tuple[int, int]:
+    """Delete expired recorded paste URLs and return (deleted, remaining)."""
+    current = time.time() if now is None else now
+    deleted = 0
+    remaining: list[dict] = []
+    for record in _load_paste_records():
+        url = str(record.get("url") or "")
+        try:
+            delete_after = float(record.get("delete_after", 0))
+        except (TypeError, ValueError):
+            delete_after = 0
+        if not url:
+            continue
+        if delete_after and delete_after <= current:
+            if _delete_paste_url(url):
+                deleted += 1
+            else:
+                remaining.append(record)
+        else:
+            remaining.append(record)
+    _save_paste_records(remaining)
+    return deleted, len(remaining)
+
+
+def _best_effort_sweep_expired_pastes() -> tuple[int, int]:
+    try:
+        return _sweep_expired_pastes()
+    except Exception:
+        return 0, len(_load_paste_records())
 
 
 def _upload_paste_rs(content: str) -> str:
@@ -318,17 +401,41 @@ def run_debug_share(args):
     print(f"\nShare these links with the Hermes team for support.")
 
 
+def run_debug_delete(args):
+    """Delete recorded or explicit paste URLs best-effort."""
+    urls = list(getattr(args, "urls", []) or [])
+    if not urls:
+        records = _load_paste_records()
+        urls = [str(record.get("url") or "") for record in records if record.get("url")]
+    if not urls:
+        print("No paste URLs to delete.")
+        return
+
+    deleted = 0
+    for url in urls:
+        ok = _delete_paste_url(url)
+        print(f"{'Deleted' if ok else 'Could not delete'}: {url}")
+        deleted += 1 if ok else 0
+
+    if deleted:
+        remaining = [record for record in _load_paste_records() if record.get("url") not in set(urls)]
+        _save_paste_records(remaining)
+
+
 def run_debug(args):
     """Route debug subcommands."""
     subcmd = getattr(args, "debug_command", None)
     if subcmd == "share":
         run_debug_share(args)
+    elif subcmd == "delete":
+        run_debug_delete(args)
     else:
         # Default: show help
         print("Usage: hermes debug share [--lines N] [--expire N] [--local]")
         print()
         print("Commands:")
         print("  share    Upload debug report to a paste service and print URL")
+        print("  delete   Delete recorded or explicit paste URLs")
         print()
         print("Options:")
         print("  --lines N    Number of log lines to include (default: 200)")

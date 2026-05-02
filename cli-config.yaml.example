@@ -49,6 +49,23 @@ model:
   # api_key: "your-key-here"  # Optional; can also use CLIPROXY_API_KEY or CPA_API_KEY
   base_url: "http://127.0.0.1:8080/v1"
 
+# =============================================================================
+# WebUI / CPA Public Entry
+# =============================================================================
+# One public dashboard can also expose CPA-compatible API paths:
+#   http://YOUR_HOST:9119/          -> Hermes / CPA management WebUI
+#   http://YOUR_HOST:9119/v1        -> OpenAI-compatible CPA API
+#   http://YOUR_HOST:9119/anthropic -> Anthropic-compatible CPA API
+# The API key is the same value as dashboard.password.
+dashboard:
+  host: "127.0.0.1"
+  port: 9119
+  public: false
+  password: ""
+  cpa_api_proxy: false
+  tui: false
+  theme: "default"
+
   # 鈹€鈹€ Token limits 鈥?two settings, easy to confuse 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   #
   # context_length: TOTAL context window (input + output tokens combined).
