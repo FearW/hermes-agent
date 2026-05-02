@@ -517,6 +517,7 @@ class CPAConfigUpdate(BaseModel):
 class CPAOAuthCallback(BaseModel):
     provider: str
     redirect_url: str
+    state: Optional[str] = None
 
 
 class CPAAuthFileStatusUpdate(BaseModel):
@@ -1155,8 +1156,30 @@ def _cpa_api_key() -> str:
     )
 
 
+def _cpa_management_key() -> str:
+    env_on_disk = load_env()
+    dashboard_cfg = (load_config().get("dashboard") or {})
+    if not isinstance(dashboard_cfg, dict):
+        dashboard_cfg = {}
+    return (
+        env_on_disk.get("CPA_MANAGEMENT_KEY")
+        or env_on_disk.get("CLIPROXY_MANAGEMENT_KEY")
+        or env_on_disk.get("CLIPROXY_API_KEY")
+        or env_on_disk.get("CPA_API_KEY")
+        or os.getenv("CPA_MANAGEMENT_KEY")
+        or os.getenv("CLIPROXY_MANAGEMENT_KEY")
+        or os.getenv("CLIPROXY_API_KEY")
+        or os.getenv("CPA_API_KEY")
+        or _DASHBOARD_PASSWORD
+        or str(dashboard_cfg.get("password") or "")
+        or ""
+    ).strip()
+
+
 def _cpa_url(path: str, query: str = "") -> str:
     clean_path = path.strip("/")
+    if not clean_path.startswith("v0/management/"):
+        clean_path = f"v0/management/{clean_path}"
     url = f"{_cpa_management_base_url()}/{clean_path}"
     return f"{url}?{query}" if query else url
 
@@ -1186,9 +1209,10 @@ def _cpa_proxy(
     content_type: str | None = "application/json",
 ) -> Any:
     headers = {"Accept": "application/json"}
-    api_key = _cpa_api_key()
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+    management_key = _cpa_management_key()
+    if management_key:
+        headers["X-Management-Key"] = management_key
+        headers["Authorization"] = f"Bearer {management_key}"
     if content_type and body is not None:
         headers["Content-Type"] = content_type
     request = urllib.request.Request(_cpa_url(path, query), data=body, headers=headers, method=method)

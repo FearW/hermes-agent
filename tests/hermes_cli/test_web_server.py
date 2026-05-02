@@ -1030,9 +1030,47 @@ class TestCPAConfigAPI:
         resp = self.client.get("/api/cpa/providers/gemini")
 
         assert resp.status_code == 200
-        assert captured["url"] == "http://127.0.0.1:8080/gemini-api-key"
+        assert captured["url"] == "http://127.0.0.1:8080/v0/management/gemini-api-key"
         assert captured["method"] == "GET"
         assert captured["auth"] == "Bearer secret"
+
+    def test_cpa_oauth_start_uses_management_endpoint_and_key(self, monkeypatch):
+        from hermes_cli import web_server
+
+        captured = {}
+
+        class FakeResponse:
+            headers = {"Content-Type": "application/json"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b'{"authUrl":"https://example.test/oauth","state":"abc"}'
+
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["management_key"] = request.headers.get("X-management-key")
+            captured["auth"] = request.headers.get("Authorization")
+            return FakeResponse()
+
+        monkeypatch.setattr(web_server, "load_config", lambda: {
+            "model": {"default": "x", "base_url": "http://127.0.0.1:8080/v1"},
+            "dashboard": {"password": "panel-secret"},
+        })
+        monkeypatch.setattr(web_server, "load_env", lambda: {})
+        monkeypatch.setattr(web_server.urllib.request, "urlopen", fake_urlopen)
+
+        resp = self.client.get("/api/cpa/oauth/codex/start")
+
+        assert resp.status_code == 200
+        assert captured["url"] == "http://127.0.0.1:8080/v0/management/codex-auth-url?is_webui=true"
+        assert captured["management_key"] == "panel-secret"
+        assert captured["auth"] == "Bearer panel-secret"
+        assert resp.json()["authUrl"] == "https://example.test/oauth"
 
     def test_cpa_auth_files_proxy(self, monkeypatch):
         from hermes_cli import web_server

@@ -163,8 +163,13 @@ export default function CPAPage() {
     try {
       const data = await api.startCPAOAuth(provider);
       setOauthStarts((prev) => ({ ...prev, [provider]: data }));
-      if (data.url) window.open(data.url, "_blank", "noopener,noreferrer");
-      showToast("已向 CPA 请求 OAuth 授权链接", "success");
+      const authUrl = data.url || data.auth_url || data.authUrl || data.login_url || "";
+      if (authUrl) {
+        window.open(authUrl, "_blank", "noopener,noreferrer");
+        showToast("已打开 CPA OAuth 授权链接", "success");
+      } else {
+        showToast("CPA 已响应，但没有返回授权链接；请检查 CPA 管理端日志", "error");
+      }
     } catch (error) {
       showToast(error instanceof Error ? error.message : "启动 OAuth 失败", "error");
     } finally {
@@ -191,7 +196,7 @@ export default function CPAPage() {
     if (!redirectUrl) return;
     setBusy(`callback-${provider}`);
     try {
-      await api.submitCPAOAuthCallback(provider, redirectUrl);
+      await api.submitCPAOAuthCallback(provider, redirectUrl, oauthStarts[provider]?.state);
       showToast("OAuth 回调已提交给 CPA", "success");
       await loadAuthFiles();
     } catch (error) {
@@ -318,7 +323,12 @@ export default function CPAPage() {
                       <Button size="sm" onClick={() => startOAuth(provider)} disabled={busy === `oauth-${provider}`}><ExternalLink className="h-4 w-4" />开始登录</Button>
                       <Button size="sm" variant="outline" onClick={() => pollOAuth(provider)} disabled={!oauthStarts[provider]?.state || busy === `poll-${provider}`}>查询状态</Button>
                     </div>
-                    {oauthStarts[provider]?.url && <Input readOnly value={oauthStarts[provider]?.url ?? ""} />}
+                    {(oauthStarts[provider]?.url || oauthStarts[provider]?.auth_url || oauthStarts[provider]?.authUrl || oauthStarts[provider]?.login_url) && (
+                      <Input
+                        readOnly
+                        value={oauthStarts[provider]?.url || oauthStarts[provider]?.auth_url || oauthStarts[provider]?.authUrl || oauthStarts[provider]?.login_url || ""}
+                      />
+                    )}
                     {oauthStarts[provider]?.state && <div className="rounded-xl border border-border/60 bg-background/35 px-3 py-2 font-mono-ui text-xs text-muted-foreground">state: {oauthStarts[provider]?.state}</div>}
                     {oauthStatuses[provider] && <Badge variant={oauthStatuses[provider]?.status === "ok" ? "success" : oauthStatuses[provider]?.status === "error" ? "destructive" : "warning"}>{oauthStatuses[provider]?.status}</Badge>}
                     {needsCallback && <div className="grid gap-2">

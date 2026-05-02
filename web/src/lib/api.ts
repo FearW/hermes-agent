@@ -91,11 +91,11 @@ export const api = {
   },
   getCPAOAuthStatus: (state: string) =>
     fetchJSON<CPAOAuthStatusResponse>(`/api/cpa/oauth/status?state=${encodeURIComponent(state)}`),
-  submitCPAOAuthCallback: (provider: CPAOAuthProvider, redirectUrl: string) =>
+  submitCPAOAuthCallback: (provider: CPAOAuthProvider, redirectUrl: string, state?: string) =>
     fetchJSON<{ status: string }>("/api/cpa/oauth/callback", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider, redirect_url: redirectUrl }),
+      body: JSON.stringify({ provider, redirect_url: redirectUrl, state }),
     }),
   listCPAAuthFiles: () => fetchJSON<CPAAuthFilesResponse>("/api/cpa/auth-files"),
   setCPAAuthFileStatus: (name: string, disabled: boolean) =>
@@ -465,7 +465,10 @@ export type CPAProviderKind = "gemini" | "codex" | "claude" | "vertex" | "openai
 export type CPAOAuthProvider = "codex" | "anthropic" | "antigravity" | "gemini-cli" | "kimi";
 
 export interface CPAOAuthStartResponse {
-  url: string;
+  url?: string;
+  auth_url?: string;
+  authUrl?: string;
+  login_url?: string;
   state?: string;
 }
 
