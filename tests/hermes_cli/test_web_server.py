@@ -211,6 +211,42 @@ class TestWebServerEndpoints:
         defaults = resp.json()
         assert "model" in defaults
 
+    def test_dream_status_endpoint(self):
+        resp = self.client.get("/api/dream/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["enabled"] is True
+        assert data["profile"] in {"light", "balanced", "deep", "off"}
+        assert "builtin_memory_compaction" in data["actions"]
+        assert "state" in data
+
+    def test_dream_config_endpoint_persists_sleep_mode(self):
+        from hermes_cli.config import load_config
+
+        resp = self.client.put(
+            "/api/dream/config",
+            json={"enabled": False, "profile": "deep", "report_actions": False},
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["enabled"] is False
+        assert data["profile"] == "deep:disabled"
+        sleep_mode = load_config().get("sleep_mode") or {}
+        assert sleep_mode["enabled"] is False
+        assert sleep_mode["profile"] == "deep"
+        assert sleep_mode["report_actions"] is False
+
+    def test_dream_run_endpoint_records_disabled_cycle(self):
+        self.client.put("/api/dream/config", json={"enabled": False})
+
+        resp = self.client.post("/api/dream/run")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is False
+        assert data["skipped"] == "sleep mode is disabled"
+
     def test_get_env_vars(self):
         resp = self.client.get("/api/env")
         assert resp.status_code == 200

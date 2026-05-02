@@ -68,6 +68,14 @@ export const api = {
   getSchema: () => fetchJSON<{ fields: Record<string, unknown>; category_order: string[] }>("/api/config/schema"),
   getModelInfo: () => fetchJSON<ModelInfoResponse>("/api/model/info"),
   getCPAConfig: () => fetchJSON<CPAConfigResponse>("/api/cpa/config"),
+  getDreamStatus: () => fetchJSON<DreamStatusResponse>("/api/dream/status"),
+  runDreamNow: () => fetchJSON<DreamRunResult>("/api/dream/run", { method: "POST" }),
+  saveDreamConfig: (config: { enabled?: boolean; profile?: string; report_actions?: boolean }) =>
+    fetchJSON<DreamStatusResponse>("/api/dream/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(config),
+    }),
   saveCPAConfig: (config: { model?: string; base_url?: string; api_key?: string }) =>
     fetchJSON<{ ok: boolean; config: CPAConfigResponse }>("/api/cpa/config", {
       method: "PUT",
@@ -459,6 +467,31 @@ export interface CPAConfigResponse {
   api_key_set: boolean;
   api_key_preview: string | null;
   note: string;
+}
+
+export interface DreamRunResult {
+  ok: boolean;
+  reason?: string;
+  profile?: string;
+  started_at?: number;
+  finished_at?: number;
+  duration_seconds?: number;
+  actions?: Record<string, unknown>;
+  errors?: string[];
+  skipped?: string;
+}
+
+export interface DreamStatusResponse {
+  enabled: boolean;
+  profile: string;
+  sleep_mode: Record<string, unknown>;
+  state: {
+    last_run_at?: number | null;
+    last_duration_seconds?: number | null;
+    last_result?: DreamRunResult | null;
+    runs?: number;
+  };
+  actions: string[];
 }
 
 export type CPAProviderKind = "gemini" | "codex" | "claude" | "vertex" | "openai";

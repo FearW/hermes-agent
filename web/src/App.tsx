@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Activity, BarChart3, Clock, FileText, KeyRound, Menu, MessageSquare, Package, Server, Settings, X } from "lucide-react";
+import { Activity, BarChart3, Clock, FileText, KeyRound, Menu, MessageSquare, Moon, Package, Server, Settings, X } from "lucide-react";
 import StatusPage from "@/pages/StatusPage";
 import ConfigPage from "@/pages/ConfigPage";
 import EnvPage from "@/pages/EnvPage";
@@ -9,12 +9,14 @@ import AnalyticsPage from "@/pages/AnalyticsPage";
 import CronPage from "@/pages/CronPage";
 import SkillsPage from "@/pages/SkillsPage";
 import CPAPage from "@/pages/CPAPage";
+import DreamPage from "@/pages/DreamPage";
 
 const NAV_ITEMS = [
   { id: "status", label: "仪表盘", hint: "运行状态", icon: Activity },
   { id: "cpa", label: "CPA 管理", hint: "提供商 / OAuth", icon: Server },
   { id: "sessions", label: "会话", hint: "聊天记录", icon: MessageSquare },
   { id: "analytics", label: "分析", hint: "用量趋势", icon: BarChart3 },
+  { id: "dream", label: "梦境", hint: "睡眠整理", icon: Moon },
   { id: "logs", label: "日志", hint: "运行输出", icon: FileText },
   { id: "cron", label: "定时任务", hint: "后台计划", icon: Clock },
   { id: "skills", label: "技能", hint: "能力扩展", icon: Package },
@@ -29,6 +31,7 @@ const PAGE_COMPONENTS: Record<PageId, React.FC> = {
   sessions: SessionsPage,
   analytics: AnalyticsPage,
   cpa: CPAPage,
+  dream: DreamPage,
   logs: LogsPage,
   cron: CronPage,
   skills: SkillsPage,

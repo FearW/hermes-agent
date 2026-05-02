@@ -526,6 +526,12 @@ class CPAAuthFileStatusUpdate(BaseModel):
     disabled: bool
 
 
+class DreamConfigUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    profile: Optional[str] = None
+    report_actions: Optional[bool] = None
+
+
 class EnvVarUpdate(BaseModel):
     key: str
     value: str
@@ -1411,6 +1417,38 @@ async def upload_cpa_auth_files(request: Request):
 async def delete_cpa_auth_files(request: Request):
     body, content_type = await _request_body_and_type(request)
     return _cpa_proxy("DELETE", "auth-files", query=request.url.query, body=body, content_type=content_type)
+
+
+@app.get("/api/dream/status")
+async def get_dream_status():
+    from agent.dream_mode import dream_status
+
+    return dream_status(load_config())
+
+
+@app.post("/api/dream/run")
+async def run_dream_now():
+    from agent.dream_mode import run_dream_cycle
+
+    return await asyncio.to_thread(run_dream_cycle, load_config(), reason="manual:webui")
+
+
+@app.put("/api/dream/config")
+async def update_dream_config(body: DreamConfigUpdate):
+    config = load_config()
+    sleep = dict(config.get("sleep_mode") or {})
+    if body.enabled is not None:
+        sleep["enabled"] = bool(body.enabled)
+    if body.profile is not None and body.profile.strip():
+        profile = body.profile.strip().lower()
+        if profile not in {"off", "light", "balanced", "deep"}:
+            raise HTTPException(status_code=400, detail="Invalid dream profile")
+        sleep["profile"] = profile
+    if body.report_actions is not None:
+        sleep["report_actions"] = bool(body.report_actions)
+    config["sleep_mode"] = sleep
+    save_config(config)
+    return await get_dream_status()
 
 
 @app.put("/api/config")
