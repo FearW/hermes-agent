@@ -275,6 +275,12 @@ TOOLSETS = {
         "includes": []
     },
     
+    "hermes-cron": {
+        "description": "Cron execution toolset - core agent tools for scheduled jobs",
+        "tools": _HERMES_CORE_TOOLS,
+        "includes": []
+    },
+
     "hermes-cli": {
         "description": "Full interactive CLI toolset - all default tools plus cronjob management",
         "tools": _HERMES_CORE_TOOLS,

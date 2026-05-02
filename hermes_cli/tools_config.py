@@ -777,12 +777,16 @@ def _get_platform_tools(
     """Resolve which individual toolset names are enabled for a platform."""
     from toolsets import resolve_toolset, TOOLSETS
 
+    cron_default_ts = "hermes-cron" if platform == "cron" else None
+
     platform_toolsets = config.get("platform_toolsets") or {}
     toolset_names = platform_toolsets.get(platform)
 
     if toolset_names is None or not isinstance(toolset_names, list):
         plat_info = PLATFORMS.get(platform)
-        if plat_info:
+        if cron_default_ts:
+            default_ts = cron_default_ts
+        elif plat_info:
             default_ts = plat_info["default_toolset"]
         else:
             # Plugin platform — derive toolset name from platform key
@@ -849,7 +853,8 @@ def _get_platform_tools(
     # checklist or in a user-saved config.  Must run in BOTH branches —
     # otherwise saving via `hermes tools` (which flips has_explicit_config
     # to True) silently drops them.
-    platform_tool_universe = set(resolve_toolset(PLATFORMS[platform]["default_toolset"]))
+    platform_default_ts = cron_default_ts or PLATFORMS[platform]["default_toolset"]
+    platform_tool_universe = set(resolve_toolset(platform_default_ts))
     configurable_tool_universe = set()
     for ck in configurable_keys:
         configurable_tool_universe.update(resolve_toolset(ck))
