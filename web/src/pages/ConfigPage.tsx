@@ -95,7 +95,7 @@ export default function ConfigPage() {
       api
         .getConfigRaw()
         .then((resp) => setYamlText(resp.yaml))
-        .catch(() => showToast("Failed to load raw config", "error"))
+        .catch(() => showToast("加载原始配置失败", "error"))
         .finally(() => setYamlLoading(false));
     }
   }, [yamlMode]);
@@ -154,7 +154,7 @@ export default function ConfigPage() {
       await api.saveConfig(config);
       showToast("Configuration saved", "success");
     } catch (e) {
-      showToast(`Failed to save: ${e}`, "error");
+      showToast(`保存失败：${e}`, "error");
     } finally {
       setSaving(false);
     }
@@ -167,7 +167,7 @@ export default function ConfigPage() {
       showToast("YAML config saved", "success");
       api.getConfig().then(setConfig).catch(() => {});
     } catch (e) {
-      showToast(`Failed to save YAML: ${e}`, "error");
+      showToast(`保存 YAML 失败：${e}`, "error");
     } finally {
       setYamlSaving(false);
     }
@@ -196,7 +196,7 @@ export default function ConfigPage() {
       try {
         const imported = JSON.parse(reader.result as string);
         setConfig(imported);
-        showToast("Config imported — review and save", "success");
+        showToast("配置已导入，请检查后保存", "success");
       } catch {
         showToast("Invalid JSON file", "error");
       }
@@ -306,12 +306,12 @@ export default function ConfigPage() {
           {yamlMode ? (
             <Button size="sm" onClick={handleYamlSave} disabled={yamlSaving} className="gap-1.5">
               <Save className="h-3.5 w-3.5" />
-              {yamlSaving ? "Saving..." : "Save"}
+              {yamlSaving ? "保存中..." : "保存"}
             </Button>
           ) : (
             <Button size="sm" onClick={handleSave} disabled={saving} className="gap-1.5">
               <Save className="h-3.5 w-3.5" />
-              {saving ? "Saving..." : "Save"}
+              {saving ? "保存中..." : "保存"}
             </Button>
           )}
         </div>

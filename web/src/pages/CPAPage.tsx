@@ -245,7 +245,7 @@ export default function CPAPage() {
         </div>
         <div className="grid border-t border-border/70 bg-background/20 md:grid-cols-3">
           <div className="border-b border-border/70 p-4 md:border-b-0 md:border-r">
-            <p className="text-xs text-muted-foreground">当前 Provider</p>
+            <p className="text-xs text-muted-foreground">当前提供商</p>
             <p className="mt-1 font-mono-ui text-sm text-foreground">{config.provider}</p>
           </div>
           <div className="border-b border-border/70 p-4 md:border-b-0 md:border-r">

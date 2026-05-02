@@ -73,7 +73,7 @@ interface ProviderGroup {
 
 const CATEGORY_META: Record<string, { label: string; icon: typeof KeyRound }> = {
   provider: { label: "LLM Providers", icon: Zap },
-  tool: { label: "Tool API Keys", icon: KeyRound },
+  tool: { label: "工具 API 密钥", icon: KeyRound },
   messaging: { label: "Messaging Platforms", icon: MessageSquare },
   setting: { label: "Agent Settings", icon: Settings },
 };
@@ -233,7 +233,7 @@ function EnvVarRow({
           <Button size="sm" onClick={() => onSave(varKey)}
             disabled={saving === varKey || !edits[varKey]}>
             <Save className="h-3 w-3" />
-            {saving === varKey ? "..." : "Save"}
+            {saving === varKey ? "..." : "保存"}
           </Button>
           <Button size="sm" variant="ghost" onClick={() => onCancelEdit(varKey)}>
             <X className="h-3 w-3" /> Cancel
@@ -379,7 +379,7 @@ export default function EnvPage() {
       setRevealed((prev) => { const n = { ...prev }; delete n[key]; return n; });
       showToast(`${key} saved`, "success");
     } catch (e) {
-      showToast(`Failed to save ${key}: ${e}`, "error");
+      showToast(`保存 ${key} 失败：${e}`, "error");
     } finally {
       setSaving(null);
     }
@@ -398,7 +398,7 @@ export default function EnvPage() {
       setRevealed((prev) => { const n = { ...prev }; delete n[key]; return n; });
       showToast(`${key} removed`, "success");
     } catch (e) {
-      showToast(`Failed to remove ${key}: ${e}`, "error");
+      showToast(`删除 ${key} 失败：${e}`, "error");
     } finally {
       setSaving(null);
     }
@@ -413,7 +413,7 @@ export default function EnvPage() {
       const resp = await api.revealEnvVar(key);
       setRevealed((prev) => ({ ...prev, [key]: resp.value }));
     } catch {
-      showToast(`Failed to reveal ${key}`, "error");
+      showToast(`显示 ${key} 失败`, "error");
     }
   };
 
@@ -487,7 +487,7 @@ export default function EnvPage() {
             Manage API keys and secrets stored in <code>~/.hermes/.env</code>
           </p>
           <p className="text-[0.7rem] text-muted-foreground/70">
-            Changes are saved to disk immediately. Active sessions pick up new keys automatically.
+            修改会立即保存到磁盘。活跃会话会自动读取新的密钥。
           </p>
         </div>
         <Button variant="ghost" size="sm" onClick={() => setShowAdvanced(!showAdvanced)}>

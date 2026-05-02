@@ -115,7 +115,7 @@ export default function App() {
         </nav>
 
         <div className="mt-4 rounded-2xl border border-border bg-card p-3 text-xs text-muted-foreground shadow-sm">
-          <div className="font-semibold text-foreground">Web UI</div>
+          <div className="font-semibold text-foreground">控制台</div>
           <div className="mt-1">轻量、清晰、兼容 CPA 管理体验。</div>
         </div>
       </aside>

@@ -47,7 +47,7 @@ export default function CronPage() {
     api
       .getCronJobs()
       .then(setJobs)
-      .catch(() => showToast("Failed to load cron jobs", "error"))
+      .catch(() => showToast("加载定时任务失败", "error"))
       .finally(() => setLoading(false));
   };
 
@@ -57,7 +57,7 @@ export default function CronPage() {
 
   const handleCreate = async () => {
     if (!prompt.trim() || !schedule.trim()) {
-      showToast("Prompt and schedule are required", "error");
+      showToast("任务内容和计划时间不能为空", "error");
       return;
     }
     setCreating(true);
@@ -68,14 +68,14 @@ export default function CronPage() {
         name: name.trim() || undefined,
         deliver,
       });
-      showToast("Cron job created", "success");
+      showToast("定时任务已创建", "success");
       setPrompt("");
       setSchedule("");
       setName("");
       setDeliver("local");
       loadJobs();
     } catch (e) {
-      showToast(`Failed to create job: ${e}`, "error");
+      showToast(`创建任务失败：${e}`, "error");
     } finally {
       setCreating(false);
     }
@@ -85,34 +85,34 @@ export default function CronPage() {
     try {
       if (jobStatus(job) === "paused") {
         await api.resumeCronJob(job.id);
-        showToast(`Resumed "${job.name || job.prompt.slice(0, 30)}"`, "success");
+        showToast(`已恢复“${job.name || job.prompt.slice(0, 30)}”`, "success");
       } else {
         await api.pauseCronJob(job.id);
-        showToast(`Paused "${job.name || job.prompt.slice(0, 30)}"`, "success");
+        showToast(`已暂停“${job.name || job.prompt.slice(0, 30)}”`, "success");
       }
       loadJobs();
     } catch (e) {
-      showToast(`Action failed: ${e}`, "error");
+      showToast(`操作失败：${e}`, "error");
     }
   };
 
   const handleTrigger = async (job: CronJob) => {
     try {
       await api.triggerCronJob(job.id);
-      showToast(`Triggered "${job.name || job.prompt.slice(0, 30)}"`, "success");
+      showToast(`已触发“${job.name || job.prompt.slice(0, 30)}”`, "success");
       loadJobs();
     } catch (e) {
-      showToast(`Trigger failed: ${e}`, "error");
+      showToast(`触发失败：${e}`, "error");
     }
   };
 
   const handleDelete = async (job: CronJob) => {
     try {
       await api.deleteCronJob(job.id);
-      showToast(`Deleted "${job.name || job.prompt.slice(0, 30)}"`, "success");
+      showToast(`已删除“${job.name || job.prompt.slice(0, 30)}”`, "success");
       loadJobs();
     } catch (e) {
-      showToast(`Delete failed: ${e}`, "error");
+      showToast(`删除失败：${e}`, "error");
     }
   };
 
@@ -133,7 +133,7 @@ export default function CronPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Plus className="h-4 w-4" />
-            New Cron Job
+            新建定时任务
           </CardTitle>
         </CardHeader>
         <CardContent>

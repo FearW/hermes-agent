@@ -77,7 +77,7 @@ export default function SkillsPage() {
         setSkills(s);
         setToolsets(t);
       })
-      .catch(() => showToast("Failed to load skills/toolsets", "error"))
+      .catch(() => showToast("加载技能/工具集失败", "error"))
       .finally(() => setLoading(false));
   }, []);
 
@@ -96,7 +96,7 @@ export default function SkillsPage() {
         "success"
       );
     } catch {
-      showToast(`Failed to toggle ${skill.name}`, "error");
+      showToast(`切换 ${skill.name} 失败`, "error");
     } finally {
       setTogglingSkills((prev) => {
         const next = new Set(prev);
@@ -208,7 +208,7 @@ export default function SkillsPage() {
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <Package className="h-5 w-5 text-muted-foreground" />
-          <h1 className="text-base font-semibold">Skills</h1>
+          <h1 className="text-base font-semibold">技能</h1>
           <span className="text-xs text-muted-foreground">
             {enabledCount}/{skills.length} enabled
           </span>
@@ -279,8 +279,8 @@ export default function SkillsPage() {
           <Card>
             <CardContent className="py-12 text-center text-sm text-muted-foreground">
               {skills.length === 0
-                ? "No skills found. Skills are loaded from ~/.hermes/skills/"
-                : "No skills match your search or filter."}
+                ? "没有找到技能。技能会从 ~/.hermes/skills/ 加载"
+                : "没有技能匹配当前搜索或筛选条件。"}
             </CardContent>
           </Card>
         ) : (
@@ -422,7 +422,7 @@ export default function SkillsPage() {
                         )}
                         {ts.tools.length === 0 && (
                           <span className="text-[10px] text-muted-foreground/60">
-                            {ts.enabled ? `${ts.name} toolset` : "Disabled for CLI"}
+                            {ts.enabled ? `${ts.name} 工具集` : "CLI 已禁用"}
                           </span>
                         )}
                       </div>

@@ -157,7 +157,7 @@ function DailyTable({ daily }: { daily: AnalyticsDailyEntry[] }) {
       <CardHeader>
         <div className="flex items-center gap-2">
           <TrendingUp className="h-5 w-5 text-muted-foreground" />
-          <CardTitle className="text-base">Daily Breakdown</CardTitle>
+          <CardTitle className="text-base">每日明细</CardTitle>
         </div>
       </CardHeader>
       <CardContent>
@@ -165,12 +165,12 @@ function DailyTable({ daily }: { daily: AnalyticsDailyEntry[] }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-muted-foreground text-xs">
-                <th className="text-left py-2 pr-4 font-medium">Date</th>
-                <th className="text-right py-2 px-4 font-medium">Sessions</th>
-                <th className="text-right py-2 px-4 font-medium">Input</th>
-                <th className="text-right py-2 px-4 font-medium">Output</th>
-                <th className="text-right py-2 px-4 font-medium">Cache Hit</th>
-                <th className="text-right py-2 pl-4 font-medium">Cost</th>
+                <th className="text-left py-2 pr-4 font-medium">日期</th>
+                <th className="text-right py-2 px-4 font-medium">会话</th>
+                <th className="text-right py-2 px-4 font-medium">输入</th>
+                <th className="text-right py-2 px-4 font-medium">输出</th>
+                <th className="text-right py-2 px-4 font-medium">缓存命中</th>
+                <th className="text-right py-2 pl-4 font-medium">成本</th>
               </tr>
             </thead>
             <tbody>
@@ -218,7 +218,7 @@ function ModelTable({ models }: { models: AnalyticsModelEntry[] }) {
       <CardHeader>
         <div className="flex items-center gap-2">
           <Cpu className="h-5 w-5 text-muted-foreground" />
-          <CardTitle className="text-base">Per-Model Breakdown</CardTitle>
+          <CardTitle className="text-base">按模型统计</CardTitle>
         </div>
       </CardHeader>
       <CardContent>
@@ -226,10 +226,10 @@ function ModelTable({ models }: { models: AnalyticsModelEntry[] }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-muted-foreground text-xs">
-                <th className="text-left py-2 pr-4 font-medium">Model</th>
-                <th className="text-right py-2 px-4 font-medium">Sessions</th>
-                <th className="text-right py-2 px-4 font-medium">Tokens</th>
-                <th className="text-right py-2 pl-4 font-medium">Cost</th>
+                <th className="text-left py-2 pr-4 font-medium">模型</th>
+                <th className="text-right py-2 px-4 font-medium">会话</th>
+                <th className="text-right py-2 px-4 font-medium">Token</th>
+                <th className="text-right py-2 pl-4 font-medium">成本</th>
               </tr>
             </thead>
             <tbody>
@@ -339,7 +339,7 @@ export default function AnalyticsPage() {
             />
             <SummaryCard
               icon={BarChart3}
-              label="Total Sessions"
+              label="总会话数"
               value={String(data.totals.total_sessions)}
               sub={`~${(data.totals.total_sessions / days).toFixed(1)}/day avg`}
             />
@@ -360,7 +360,7 @@ export default function AnalyticsPage() {
             <div className="flex flex-col items-center text-muted-foreground">
               <BarChart3 className="h-8 w-8 mb-3 opacity-40" />
               <p className="text-sm font-medium">No usage data for this period</p>
-              <p className="text-xs mt-1 text-muted-foreground/60">Start a session to see analytics here</p>
+              <p className="text-xs mt-1 text-muted-foreground/60">开始一次会话后，这里会显示分析数据</p>
             </div>
           </CardContent>
         </Card>

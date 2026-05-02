@@ -21,10 +21,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 const ROLE_STYLES: Record<string, { bg: string; text: string; label: string }> = {
-  user: { bg: "bg-primary/10", text: "text-primary", label: "User" },
-  assistant: { bg: "bg-success/10", text: "text-success", label: "Assistant" },
-  system: { bg: "bg-muted", text: "text-muted-foreground", label: "System" },
-  tool: { bg: "bg-warning/10", text: "text-warning", label: "Tool" },
+  user: { bg: "bg-primary/10", text: "text-primary", label: "用户" },
+  assistant: { bg: "bg-success/10", text: "text-success", label: "助手" },
+  system: { bg: "bg-muted", text: "text-muted-foreground", label: "系统" },
+  tool: { bg: "bg-warning/10", text: "text-warning", label: "工具" },
 };
 
 const SOURCE_CONFIG: Record<string, { icon: typeof Terminal; color: string }> = {
@@ -98,7 +98,7 @@ function ToolCallBlock({ toolCall }: { toolCall: { id: string; function: { name:
 
 function MessageBubble({ msg, highlight }: { msg: SessionMessage; highlight?: string }) {
   const style = ROLE_STYLES[msg.role] ?? ROLE_STYLES.system;
-  const label = msg.tool_name ? `Tool: ${msg.tool_name}` : style.label;
+  const label = msg.tool_name ? `工具：${msg.tool_name}` : style.label;
 
   // Check if any search term appears as a prefix of any word in content
   const isHit = (() => {
@@ -118,7 +118,7 @@ function MessageBubble({ msg, highlight }: { msg: SessionMessage; highlight?: st
       <div className="flex items-center gap-2 mb-1">
         <span className={`text-xs font-semibold ${style.text}`}>{label}</span>
         {isHit && (
-          <Badge variant="warning" className="text-[9px] py-0 px-1.5">match</Badge>
+          <Badge variant="warning" className="text-[9px] py-0 px-1.5">命中</Badge>
         )}
         {msg.timestamp && (
           <span className="text-[10px] text-muted-foreground">{timeAgo(msg.timestamp)}</span>
@@ -216,23 +216,23 @@ function SessionRow({
           <div className="flex flex-col gap-0.5 min-w-0">
             <div className="flex items-center gap-2">
               <span className={`text-sm truncate pr-2 ${hasTitle ? "font-medium" : "text-muted-foreground italic"}`}>
-                {hasTitle ? session.title : (session.preview ? session.preview.slice(0, 60) : "Untitled session")}
+                {hasTitle ? session.title : (session.preview ? session.preview.slice(0, 60) : "未命名会话")}
               </span>
               {session.is_active && (
                 <Badge variant="success" className="text-[10px] shrink-0">
                   <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
-                  Live
+                  在线
                 </Badge>
               )}
             </div>
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span className="truncate max-w-[180px]">{(session.model ?? "unknown").split("/").pop()}</span>
+              <span className="truncate max-w-[180px]">{(session.model ?? "未知模型").split("/").pop()}</span>
               <span className="text-border">&#183;</span>
-              <span>{session.message_count} msgs</span>
+              <span>{session.message_count} 条消息</span>
               {session.tool_call_count > 0 && (
                 <>
                   <span className="text-border">&#183;</span>
-                  <span>{session.tool_call_count} tools</span>
+                  <span>{session.tool_call_count} 次工具</span>
                 </>
               )}
               <span className="text-border">&#183;</span>
@@ -368,7 +368,7 @@ export default function SessionsPage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <MessageSquare className="h-5 w-5 text-muted-foreground" />
-          <h1 className="text-base font-semibold">Sessions</h1>
+          <h1 className="text-base font-semibold">会话</h1>
           <Badge variant="secondary" className="text-xs">
             {sessions.length}
           </Badge>
@@ -404,7 +404,7 @@ export default function SessionsPage() {
             {search ? "No sessions match your search" : "No sessions yet"}
           </p>
           {!search && (
-            <p className="text-xs mt-1 text-muted-foreground/60">Start a conversation to see it here</p>
+            <p className="text-xs mt-1 text-muted-foreground/60">开始一次对话后，这里会显示会话记录</p>
           )}
         </div>
       ) : (
