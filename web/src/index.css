@@ -5,16 +5,8 @@
 /* Warm gray, calm surfaces, rounded cards, sidebar-first dashboard.    */
 /* ------------------------------------------------------------------ */
 
-/* --- Font faces --- */
-@font-face { font-family: "Collapse"; src: url("/fonts/Collapse-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
-@font-face { font-family: "Collapse"; src: url("/fonts/Collapse-Bold.woff2") format("woff2"); font-weight: 700; font-display: swap; }
-@font-face { font-family: "Courier Prime"; src: url("/fonts/CourierPrime-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
-@font-face { font-family: "Courier Prime"; src: url("/fonts/CourierPrime-Bold.woff2") format("woff2"); font-weight: 700; font-display: swap; }
-@font-face { font-family: "RulesCompressed"; src: url("/fonts/RulesCompressed-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
-@font-face { font-family: "RulesCompressed"; src: url("/fonts/RulesCompressed-Medium.woff2") format("woff2"); font-weight: 600; font-display: swap; }
-@font-face { font-family: "RulesExpanded"; src: url("/fonts/RulesExpanded-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
-@font-face { font-family: "RulesExpanded"; src: url("/fonts/RulesExpanded-Bold.woff2") format("woff2"); font-weight: 700; font-display: swap; }
-@font-face { font-family: "Mondwest"; src: url("/fonts/Mondwest-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+/* CPA Management Center uses a native system UI font stack.  Keeping it local
+   avoids web-font loading cost and gives Chinese/English text the same rhythm. */
 
 @theme {
   /* ---- CLIProxyAPI Management Center palette (warm minimal) ---- */
@@ -41,17 +33,17 @@
   --color-popover-foreground: #2d2a26;
 
   /* ---- Font stacks ---- */
-  --font-sans: Inter, "Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", Arial, sans-serif;
-  --font-mono: "Courier Prime", "Courier New", monospace;
-  --font-display: "Mondwest", Arial, sans-serif;
-  --font-expanded: "RulesExpanded", Arial, sans-serif;
-  --font-compressed: "RulesCompressed", Arial, sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --font-display: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+  --font-expanded: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+  --font-compressed: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
 }
 
 /* ---- Global body ---- */
 body {
   margin: 0;
-  font-family: Inter, "Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif;
   background: var(--color-background);
   color: var(--color-foreground);
   -webkit-font-smoothing: antialiased;
@@ -116,7 +108,7 @@ html, body {
 
 /* ---- Code blocks ---- */
 code {
-  font-family: "Courier Prime", "Courier New", monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 0.85em;
   padding: 0.15em 0.4em;
   border-radius: 0;
@@ -161,12 +153,16 @@ code {
 }
 
 /* ---- Font utilities ---- */
-.font-display { font-family: "Mondwest", Arial, sans-serif; }
-.font-expanded { font-family: "RulesExpanded", Arial, sans-serif; }
-.font-compressed { font-family: "RulesCompressed", Arial, sans-serif; }
-.font-courier { font-family: "Courier Prime", "Courier New", monospace; }
-.font-collapse { font-family: "Collapse", Arial, sans-serif; }
-.font-mono-ui { font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace; }
+.font-display,
+.font-expanded,
+.font-compressed,
+.font-collapse {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+}
+.font-courier,
+.font-mono-ui {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
 
 /* ---- Subtle grain overlay for badges ---- */
 .grain {
