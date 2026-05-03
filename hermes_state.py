@@ -691,6 +691,29 @@ class SessionDB:
             return exact["id"]
         return None
 
+    def resolve_resume_session_id(self, session_id: str) -> str:
+        """Return the live continuation session for a resumable root session.
+
+        Compression can end a titled root session and continue the live
+        transcript in a child session linked via `parent_session_id`. Follow
+        the newest child chain until no further continuation exists.
+        """
+        current = session_id
+        seen: set[str] = set()
+        while current and current not in seen:
+            seen.add(current)
+            with self._lock:
+                cursor = self._conn.execute(
+                    "SELECT id FROM sessions WHERE parent_session_id = ? "
+                    "ORDER BY started_at DESC, id DESC LIMIT 1",
+                    (current,),
+                )
+                row = cursor.fetchone()
+            if not row:
+                break
+            current = row["id"]
+        return current
+
     def get_next_title_in_lineage(self, base_title: str) -> str:
         """Generate the next title in a lineage (e.g., "my session" → "my session #2").
 

@@ -10,7 +10,7 @@ import uuid
 import re
 from dataclasses import dataclass, fields, replace
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from hermes_constants import OPENROUTER_BASE_URL
 from hermes_cli.config import get_env_value
@@ -84,6 +84,15 @@ _EXTRA_KEYS = frozenset({
     "expires_in", "agent_key_id", "agent_key_expires_in", "agent_key_reused",
     "agent_key_obtained_at", "tls",
 })
+
+_SEEDED_NON_ENV_SOURCES: Dict[str, Set[str]] = {
+    "anthropic": {"claude_code", "hermes_pkce"},
+    "copilot": {"gh_cli"},
+    "minimax-oauth": {"oauth"},
+    "nous": {"device_code"},
+    "openai-codex": {"device_code"},
+    "qwen-oauth": {"qwen-cli"},
+}
 
 
 @dataclass
@@ -1112,6 +1121,39 @@ def _upsert_entry(entries: List[PooledCredential], provider: str, source: str, p
     return False
 
 
+def _get_suppression_checker() -> Callable[[str, str], bool]:
+    try:
+        from hermes_cli.auth import is_source_suppressed
+
+        return is_source_suppressed
+    except ImportError:
+        return lambda _provider, _source: False
+
+
+def _seed_source_if_allowed(
+    entries: List[PooledCredential],
+    provider: str,
+    source: str,
+    payload: Dict[str, Any],
+    active_sources: Set[str],
+    is_source_suppressed: Callable[[str, str], bool],
+) -> bool:
+    if is_source_suppressed(provider, source):
+        return False
+    active_sources.add(source)
+    return _upsert_entry(entries, provider, source, payload)
+
+
+def _is_auto_seeded_source(provider: str, source: str) -> bool:
+    if _is_manual_source(source):
+        return False
+    if source.startswith("env:"):
+        return True
+    if provider.startswith(CUSTOM_POOL_PREFIX):
+        return source == "model_config" or source.startswith("config:")
+    return source in _SEEDED_NON_ENV_SOURCES.get(provider, set())
+
+
 def _normalize_pool_priorities(provider: str, entries: List[PooledCredential]) -> bool:
     if provider != "anthropic":
         return False
@@ -1150,14 +1192,7 @@ def _seed_from_singletons(provider: str, entries: List[PooledCredential]) -> Tup
     changed = False
     active_sources: Set[str] = set()
     auth_store = _load_auth_store()
-
-    # Shared suppression gate — used at every upsert site so
-    # `hermes auth remove <provider> <N>` is stable across all source types.
-    try:
-        from hermes_cli.auth import is_source_suppressed as _is_suppressed
-    except ImportError:
-        def _is_suppressed(_p, _s):  # type: ignore[misc]
-            return False
+    is_suppressed = _get_suppression_checker()
 
     if provider == "anthropic":
         # Only auto-discover external credentials (Claude Code, Hermes PKCE)
@@ -1178,10 +1213,7 @@ def _seed_from_singletons(provider: str, entries: List[PooledCredential]) -> Tup
             ("claude_code", read_claude_code_credentials()),
         ):
             if creds and creds.get("accessToken"):
-                if _is_suppressed(provider, source_name):
-                    continue
-                active_sources.add(source_name)
-                changed |= _upsert_entry(
+                changed |= _seed_source_if_allowed(
                     entries,
                     provider,
                     source_name,
@@ -1193,12 +1225,13 @@ def _seed_from_singletons(provider: str, entries: List[PooledCredential]) -> Tup
                         "expires_at_ms": creds.get("expiresAt"),
                         "label": label_from_token(creds.get("accessToken", ""), source_name),
                     },
+                    active_sources,
+                    is_suppressed,
                 )
 
     elif provider == "nous":
         state = _load_provider_state(auth_store, "nous")
-        if state and not _is_suppressed(provider, "device_code"):
-            active_sources.add("device_code")
+        if state:
             # Prefer a user-supplied label embedded in the singleton state
             # (set by persist_nous_credentials(label=...) when the user ran
             # `hermes auth add nous --label <name>`).  Fall back to the
@@ -1207,7 +1240,7 @@ def _seed_from_singletons(provider: str, entries: List[PooledCredential]) -> Tup
             seeded_label = custom_label or label_from_token(
                 state.get("access_token", ""), "device_code"
             )
-            changed |= _upsert_entry(
+            changed |= _seed_source_if_allowed(
                 entries,
                 provider,
                 "device_code",
@@ -1239,6 +1272,8 @@ def _seed_from_singletons(provider: str, entries: List[PooledCredential]) -> Tup
                     "tls": state.get("tls") if isinstance(state.get("tls"), dict) else None,
                     "label": seeded_label,
                 },
+                active_sources,
+                is_suppressed,
             )
 
     elif provider == "copilot":
@@ -1251,21 +1286,21 @@ def _seed_from_singletons(provider: str, entries: List[PooledCredential]) -> Tup
             if token:
                 api_token = get_copilot_api_token(token)
                 source_name = "gh_cli" if "gh" in source.lower() else f"env:{source}"
-                if not _is_suppressed(provider, source_name):
-                    active_sources.add(source_name)
-                    pconfig = PROVIDER_REGISTRY.get(provider)
-                    changed |= _upsert_entry(
-                        entries,
-                        provider,
-                        source_name,
-                        {
-                            "source": source_name,
-                            "auth_type": AUTH_TYPE_API_KEY,
-                            "access_token": api_token,
-                            "base_url": pconfig.inference_base_url if pconfig else "",
-                            "label": source,
-                        },
-                    )
+                pconfig = PROVIDER_REGISTRY.get(provider)
+                changed |= _seed_source_if_allowed(
+                    entries,
+                    provider,
+                    source_name,
+                    {
+                        "source": source_name,
+                        "auth_type": AUTH_TYPE_API_KEY,
+                        "access_token": api_token,
+                        "base_url": pconfig.inference_base_url if pconfig else "",
+                        "label": source,
+                    },
+                    active_sources,
+                    is_suppressed,
+                )
         except Exception as exc:
             logger.debug("Copilot token seed failed: %s", exc)
 
@@ -1281,21 +1316,21 @@ def _seed_from_singletons(provider: str, entries: List[PooledCredential]) -> Tup
             token = creds.get("api_key", "")
             if token:
                 source_name = creds.get("source", "qwen-cli")
-                if not _is_suppressed(provider, source_name):
-                    active_sources.add(source_name)
-                    changed |= _upsert_entry(
-                        entries,
-                        provider,
-                        source_name,
-                        {
-                            "source": source_name,
-                            "auth_type": AUTH_TYPE_OAUTH,
-                            "access_token": token,
-                            "expires_at_ms": creds.get("expires_at_ms"),
-                            "base_url": creds.get("base_url", ""),
-                            "label": creds.get("auth_file", source_name),
-                        },
-                    )
+                changed |= _seed_source_if_allowed(
+                    entries,
+                    provider,
+                    source_name,
+                    {
+                        "source": source_name,
+                        "auth_type": AUTH_TYPE_OAUTH,
+                        "access_token": token,
+                        "expires_at_ms": creds.get("expires_at_ms"),
+                        "base_url": creds.get("base_url", ""),
+                        "label": creds.get("auth_file", source_name),
+                    },
+                    active_sources,
+                    is_suppressed,
+                )
         except Exception as exc:
             logger.debug("Qwen OAuth token seed failed: %s", exc)
 
@@ -1311,33 +1346,33 @@ def _seed_from_singletons(provider: str, entries: List[PooledCredential]) -> Tup
             state = get_provider_auth_state("minimax-oauth")
             if state and state.get("access_token"):
                 source_name = "oauth"
-                if not _is_suppressed(provider, source_name):
-                    active_sources.add(source_name)
+                expires_at_ms = None
+                try:
+                    from datetime import datetime as _dt
+                    raw = state.get("expires_at", "")
+                    if raw:
+                        expires_at_ms = int(_dt.fromisoformat(raw).timestamp() * 1000)
+                except Exception:
                     expires_at_ms = None
-                    try:
-                        from datetime import datetime as _dt
-                        raw = state.get("expires_at", "")
-                        if raw:
-                            expires_at_ms = int(_dt.fromisoformat(raw).timestamp() * 1000)
-                    except Exception:
-                        expires_at_ms = None
-                    base_url = str(state.get("inference_base_url", "") or "").rstrip("/")
-                    changed |= _upsert_entry(
-                        entries,
-                        provider,
-                        source_name,
-                        {
-                            "source": source_name,
-                            "auth_type": AUTH_TYPE_OAUTH,
-                            "access_token": state["access_token"],
-                            "refresh_token": state.get("refresh_token"),
-                            "expires_at_ms": expires_at_ms,
-                            "base_url": base_url,
-                            "label": state.get("label", "") or label_from_token(
-                                state.get("access_token", ""), source_name
-                            ),
-                        },
-                    )
+                base_url = str(state.get("inference_base_url", "") or "").rstrip("/")
+                changed |= _seed_source_if_allowed(
+                    entries,
+                    provider,
+                    source_name,
+                    {
+                        "source": source_name,
+                        "auth_type": AUTH_TYPE_OAUTH,
+                        "access_token": state["access_token"],
+                        "refresh_token": state.get("refresh_token"),
+                        "expires_at_ms": expires_at_ms,
+                        "base_url": base_url,
+                        "label": state.get("label", "") or label_from_token(
+                            state.get("access_token", ""), source_name
+                        ),
+                    },
+                    active_sources,
+                    is_suppressed,
+                )
         except Exception as exc:
             logger.debug("MiniMax OAuth token seed failed: %s", exc)
 
@@ -1346,7 +1381,7 @@ def _seed_from_singletons(provider: str, entries: List[PooledCredential]) -> Tup
         # the device_code source as suppressed so it won't be re-seeded from
         # the Hermes auth store.  Without this gate the removal is instantly
         # undone on the next load_pool() call.
-        if _is_suppressed(provider, "device_code"):
+        if is_suppressed(provider, "device_code"):
             return changed, active_sources
 
         state = _load_provider_state(auth_store, "openai-codex")
@@ -1358,8 +1393,7 @@ def _seed_from_singletons(provider: str, entries: List[PooledCredential]) -> Tup
         # existing Codex CLI credentials get a one-time, explicit prompt
         # via `hermes auth openai-codex`.
         if isinstance(tokens, dict) and tokens.get("access_token"):
-            active_sources.add("device_code")
-            changed |= _upsert_entry(
+            changed |= _seed_source_if_allowed(
                 entries,
                 provider,
                 "device_code",
@@ -1372,6 +1406,8 @@ def _seed_from_singletons(provider: str, entries: List[PooledCredential]) -> Tup
                     "last_refresh": state.get("last_refresh"),
                     "label": label_from_token(tokens.get("access_token", ""), "device_code"),
                 },
+                active_sources,
+                is_suppressed,
             )
 
     return changed, active_sources
@@ -1385,20 +1421,13 @@ def _seed_from_env(provider: str, entries: List[PooledCredential]) -> Tuple[bool
     # won't be re-seeded from the user's shell environment or ~/.hermes/.env.
     # Without this gate the removal is silently undone on the next
     # load_pool() call whenever the var is still exported by the shell.
-    try:
-        from hermes_cli.auth import is_source_suppressed as _is_source_suppressed
-    except ImportError:
-        def _is_source_suppressed(_p, _s):  # type: ignore[misc]
-            return False
+    is_source_suppressed = _get_suppression_checker()
     if provider == "openrouter":
         # Check both os.environ and ~/.hermes/.env file
         token = (get_env_value("OPENROUTER_API_KEY") or "").strip()
         if token:
             source = "env:OPENROUTER_API_KEY"
-            if _is_source_suppressed(provider, source):
-                return changed, active_sources
-            active_sources.add(source)
-            changed |= _upsert_entry(
+            changed |= _seed_source_if_allowed(
                 entries,
                 provider,
                 source,
@@ -1409,6 +1438,8 @@ def _seed_from_env(provider: str, entries: List[PooledCredential]) -> Tuple[bool
                     "base_url": OPENROUTER_BASE_URL,
                     "label": "OPENROUTER_API_KEY",
                 },
+                active_sources,
+                is_source_suppressed,
             )
         return changed, active_sources
 
@@ -1434,16 +1465,13 @@ def _seed_from_env(provider: str, entries: List[PooledCredential]) -> Tuple[bool
         if not token:
             continue
         source = f"env:{env_var}"
-        if _is_source_suppressed(provider, source):
-            continue
-        active_sources.add(source)
         auth_type = AUTH_TYPE_OAUTH if provider == "anthropic" and not token.startswith("sk-ant-api") else AUTH_TYPE_API_KEY
         base_url = env_url or pconfig.inference_base_url
         if provider == "kimi-coding":
             base_url = _resolve_kimi_base_url(token, pconfig.inference_base_url, env_url)
         elif provider == "zai":
             base_url = _resolve_zai_base_url(token, pconfig.inference_base_url, env_url)
-        changed |= _upsert_entry(
+        changed |= _seed_source_if_allowed(
             entries,
             provider,
             source,
@@ -1454,20 +1482,19 @@ def _seed_from_env(provider: str, entries: List[PooledCredential]) -> Tuple[bool
                 "base_url": base_url,
                 "label": env_var,
             },
+            active_sources,
+            is_source_suppressed,
         )
     return changed, active_sources
 
 
-def _prune_stale_seeded_entries(entries: List[PooledCredential], active_sources: Set[str]) -> bool:
+def _prune_stale_seeded_entries(provider: str, entries: List[PooledCredential], active_sources: Set[str]) -> bool:
     retained = [
         entry
         for entry in entries
         if _is_manual_source(entry.source)
         or entry.source in active_sources
-        or not (
-            entry.source.startswith("env:")
-            or entry.source in {"claude_code", "hermes_pkce"}
-        )
+        or not _is_auto_seeded_source(provider, entry.source)
     ]
     if len(retained) == len(entries):
         return False
@@ -1479,13 +1506,7 @@ def _seed_custom_pool(pool_key: str, entries: List[PooledCredential]) -> Tuple[b
     """Seed a custom endpoint pool from custom_providers config and model config."""
     changed = False
     active_sources: Set[str] = set()
-
-    # Shared suppression gate — same pattern as _seed_from_env/_seed_from_singletons.
-    try:
-        from hermes_cli.auth import is_source_suppressed as _is_suppressed
-    except ImportError:
-        def _is_suppressed(_p, _s):  # type: ignore[misc]
-            return False
+    is_suppressed = _get_suppression_checker()
 
     # Seed from the custom_providers config entry's api_key field
     cp_config = _get_custom_provider_config(pool_key)
@@ -1495,20 +1516,20 @@ def _seed_custom_pool(pool_key: str, entries: List[PooledCredential]) -> Tuple[b
         name = str(cp_config.get("name") or "").strip()
         if api_key:
             source = f"config:{name}"
-            if not _is_suppressed(pool_key, source):
-                active_sources.add(source)
-                changed |= _upsert_entry(
-                    entries,
-                    pool_key,
-                    source,
-                    {
-                        "source": source,
-                        "auth_type": AUTH_TYPE_API_KEY,
-                        "access_token": api_key,
-                        "base_url": base_url,
-                        "label": name or source,
-                    },
-                )
+            changed |= _seed_source_if_allowed(
+                entries,
+                pool_key,
+                source,
+                {
+                    "source": source,
+                    "auth_type": AUTH_TYPE_API_KEY,
+                    "access_token": api_key,
+                    "base_url": base_url,
+                    "label": name or source,
+                },
+                active_sources,
+                is_suppressed,
+            )
 
     # Seed from model.api_key if model.provider=='custom' and model.base_url matches
     try:
@@ -1528,20 +1549,20 @@ def _seed_custom_pool(pool_key: str, entries: List[PooledCredential]) -> Tuple[b
                 matched_key = get_custom_provider_pool_key(model_base_url)
                 if matched_key == pool_key:
                     source = "model_config"
-                    if not _is_suppressed(pool_key, source):
-                        active_sources.add(source)
-                        changed |= _upsert_entry(
-                            entries,
-                            pool_key,
-                            source,
-                            {
-                                "source": source,
-                                "auth_type": AUTH_TYPE_API_KEY,
-                                "access_token": model_api_key,
-                                "base_url": model_base_url,
-                                "label": "model_config",
-                            },
-                        )
+                    changed |= _seed_source_if_allowed(
+                        entries,
+                        pool_key,
+                        source,
+                        {
+                            "source": source,
+                            "auth_type": AUTH_TYPE_API_KEY,
+                            "access_token": model_api_key,
+                            "base_url": model_base_url,
+                            "label": "model_config",
+                        },
+                        active_sources,
+                        is_suppressed,
+                    )
     except Exception:
         pass
 
@@ -1557,12 +1578,12 @@ def load_pool(provider: str) -> CredentialPool:
         # Custom endpoint pool — seed from custom_providers config and model config
         custom_changed, custom_sources = _seed_custom_pool(provider, entries)
         changed = custom_changed
-        changed |= _prune_stale_seeded_entries(entries, custom_sources)
+        changed |= _prune_stale_seeded_entries(provider, entries, custom_sources)
     else:
         singleton_changed, singleton_sources = _seed_from_singletons(provider, entries)
         env_changed, env_sources = _seed_from_env(provider, entries)
         changed = singleton_changed or env_changed
-        changed |= _prune_stale_seeded_entries(entries, singleton_sources | env_sources)
+        changed |= _prune_stale_seeded_entries(provider, entries, singleton_sources | env_sources)
         changed |= _normalize_pool_priorities(provider, entries)
 
     if changed:

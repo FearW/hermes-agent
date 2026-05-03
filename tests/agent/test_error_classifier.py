@@ -55,6 +55,7 @@ class TestFailoverReason:
             "auth", "auth_permanent", "billing", "rate_limit",
             "overloaded", "server_error", "timeout",
             "context_overflow", "payload_too_large",
+            "image_too_large", "oauth_long_context_beta_forbidden",
             "model_not_found", "format_error",
             "thinking_signature", "long_context_tier", "unknown",
         }

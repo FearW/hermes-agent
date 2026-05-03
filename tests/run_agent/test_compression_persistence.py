@@ -91,13 +91,16 @@ class TestFlushAfterCompression:
             # THE BUG: passing the original history as conversation_history
             # causes flush_from = max(200, 0) = 200, skipping everything.
             # After the fix, conversation_history should be None.
-            agent._flush_messages_to_session_db(compressed_messages, None)
+            try:
+                agent._flush_messages_to_session_db(compressed_messages, None)
 
-            new_rows = db.get_messages("compressed-session")
-            assert len(new_rows) == 5, (
-                f"Expected 5 compressed messages in new session, got {len(new_rows)}. "
-                f"Compression persistence bug: messages not written to SQLite."
-            )
+                new_rows = db.get_messages("compressed-session")
+                assert len(new_rows) == 5, (
+                    f"Expected 5 compressed messages in new session, got {len(new_rows)}. "
+                    f"Compression persistence bug: messages not written to SQLite."
+                )
+            finally:
+                db.close()
 
     def test_flush_with_stale_history_loses_messages(self):
         """Demonstrates the bug condition: stale conversation_history causes data loss."""
@@ -121,15 +124,18 @@ class TestFlushAfterCompression:
 
             # Bug: passing a conversation_history longer than compressed messages
             stale_history = [{"role": "user", "content": f"msg{i}"} for i in range(100)]
-            agent._flush_messages_to_session_db(compressed, stale_history)
+            try:
+                agent._flush_messages_to_session_db(compressed, stale_history)
 
-            rows = db.get_messages("new-session")
-            # With the stale history, flush_from = max(100, 0) = 100
-            # But compressed only has 2 entries → messages[100:] = empty
-            assert len(rows) == 0, (
-                "Expected 0 messages with stale conversation_history "
-                "(this test verifies the bug condition exists)"
-            )
+                rows = db.get_messages("new-session")
+                # With the stale history, flush_from = max(100, 0) = 100
+                # But compressed only has 2 entries -> messages[100:] = empty
+                assert len(rows) == 0, (
+                    "Expected 0 messages with stale conversation_history "
+                    "(this test verifies the bug condition exists)"
+                )
+            finally:
+                db.close()
 
 
 # ---------------------------------------------------------------------------

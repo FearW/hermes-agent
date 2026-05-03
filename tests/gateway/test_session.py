@@ -536,11 +536,12 @@ class TestLoadTranscriptPreferLongerSource:
         sid = "legacy_session"
         store_with_db._db.create_session(session_id=sid, source="gateway", model="m")
         # JSONL has 10 messages (legacy history — written before SQLite existed)
-        for i in range(10):
-            role = "user" if i % 2 == 0 else "assistant"
-            store_with_db.append_to_transcript(
-                sid, {"role": role, "content": f"msg-{i}"}, skip_db=True,
-            )
+        transcript_path = store_with_db.get_transcript_path(sid)
+        transcript_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(transcript_path, "w", encoding="utf-8") as f:
+            for i in range(10):
+                role = "user" if i % 2 == 0 else "assistant"
+                f.write(json.dumps({"role": role, "content": f"msg-{i}"}) + "\n")
         # SQLite has only 2 messages (recent turn after migration)
         store_with_db._db.append_message(session_id=sid, role="user", content="new-q")
         store_with_db._db.append_message(session_id=sid, role="assistant", content="new-a")
@@ -572,12 +573,11 @@ class TestLoadTranscriptPreferLongerSource:
     def test_sqlite_empty_falls_back_to_jsonl(self, store_with_db):
         """No SQLite rows — falls back to JSONL (original behavior preserved)."""
         sid = "no_db_rows"
-        store_with_db.append_to_transcript(
-            sid, {"role": "user", "content": "hello"}, skip_db=True,
-        )
-        store_with_db.append_to_transcript(
-            sid, {"role": "assistant", "content": "hi"}, skip_db=True,
-        )
+        transcript_path = store_with_db.get_transcript_path(sid)
+        transcript_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(transcript_path, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"role": "user", "content": "hello"}) + "\n")
+            f.write(json.dumps({"role": "assistant", "content": "hi"}) + "\n")
 
         result = store_with_db.load_transcript(sid)
         assert len(result) == 2

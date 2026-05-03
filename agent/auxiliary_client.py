@@ -164,17 +164,16 @@ _PROVIDER_ALIASES = {
 
 def _normalize_aux_provider(provider: Optional[str]) -> str:
     normalized = (provider or "auto").strip().lower()
-    if normalized.startswith("custom:"):
-        suffix = normalized.split(":", 1)[1].strip()
-        if not suffix:
-            return "custom"
-        normalized = suffix
+    if normalized == "custom:":
+        return "custom"
     if normalized == "codex":
         return "openai-codex"
     if normalized == "main":
         # Resolve to the user's actual main provider so named custom providers
         # and non-aggregator providers (DeepSeek, Alibaba, etc.) work correctly.
         main_prov = (_read_main_provider() or "").strip().lower()
+        if main_prov in {"cliproxyapi", "cpa", "cliproxy", "cli-proxy-api"}:
+            return "custom"
         if main_prov and main_prov not in ("auto", "main", ""):
             normalized = main_prov
         else:
@@ -241,7 +240,6 @@ _API_KEY_PROVIDER_AUX_MODELS: Dict[str, str] = {
 # "exotic provider" branch checks this before falling back to the main model.
 _PROVIDER_VISION_MODELS: Dict[str, str] = {
     "xiaomi": "mimo-v2.5",
-    "zai": "glm-5v-turbo",
 }
 
 # Providers whose endpoint does not accept image input, even though the
@@ -1282,6 +1280,25 @@ def _read_main_provider() -> str:
     return ""
 
 
+def _get_named_aux_custom_provider(name: str) -> Optional[Dict[str, Any]]:
+    raw = (name or "").strip().lower()
+    if raw.startswith("custom:"):
+        raw = raw.split(":", 1)[1].strip()
+    if not raw:
+        return None
+    try:
+        from hermes_cli.config import get_compatible_custom_providers, load_config
+
+        for entry in get_compatible_custom_providers(load_config()):
+            entry_name = str(entry.get("name") or "").strip().lower()
+            provider_key = str(entry.get("provider_key") or "").strip().lower()
+            if raw in {entry_name, provider_key}:
+                return dict(entry)
+    except Exception:
+        return None
+    return None
+
+
 def _resolve_custom_runtime() -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """Resolve the active custom/main endpoint the same way the main CLI does.
 
@@ -2157,8 +2174,7 @@ def resolve_provider_client(
 
     # ── Named custom providers (config.yaml providers dict / custom_providers list) ───
     try:
-        from hermes_cli.runtime_provider import _get_named_custom_provider
-        custom_entry = _get_named_custom_provider(provider)
+        custom_entry = _get_named_aux_custom_provider(provider)
         if custom_entry:
             custom_base = custom_entry.get("base_url", "").strip()
             custom_key = custom_entry.get("api_key", "").strip()

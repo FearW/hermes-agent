@@ -14,6 +14,7 @@ directories, matching ripgrep's default behavior.
 """
 
 import os
+import shutil
 import subprocess
 
 import pytest
@@ -45,6 +46,11 @@ def searchable_tree(tmp_path):
 class TestFindExcludesHiddenDirs:
     """_search_files uses find, which should exclude hidden directories."""
 
+    pytestmark = pytest.mark.skipif(
+        os.name == "nt" or shutil.which("find") is None,
+        reason="GNU find fallback is not available on this platform",
+    )
+
     def test_find_skips_hub_cache_files(self, searchable_tree):
         """find should not return files from .hub/ directory."""
         cmd = (
@@ -75,6 +81,11 @@ class TestFindExcludesHiddenDirs:
 class TestGrepExcludesHiddenDirs:
     """_search_with_grep should exclude hidden directories."""
 
+    pytestmark = pytest.mark.skipif(
+        shutil.which("grep") is None,
+        reason="grep fallback is not available",
+    )
+
     def test_grep_skips_hub_cache(self, searchable_tree):
         """grep --exclude-dir should skip .hub/ directory."""
         cmd = (
@@ -98,7 +109,7 @@ class TestRipgrepAlreadyExcludesHidden:
     """Verify ripgrep's default behavior is to skip hidden directories."""
 
     @pytest.mark.skipif(
-        subprocess.run(["which", "rg"], capture_output=True).returncode != 0,
+        shutil.which("rg") is None,
         reason="ripgrep not installed",
     )
     def test_rg_skips_hub_by_default(self, searchable_tree):
@@ -111,7 +122,7 @@ class TestRipgrepAlreadyExcludesHidden:
         assert "catalog.json" not in result.stdout
 
     @pytest.mark.skipif(
-        subprocess.run(["which", "rg"], capture_output=True).returncode != 0,
+        shutil.which("rg") is None,
         reason="ripgrep not installed",
     )
     def test_rg_finds_visible_content(self, searchable_tree):

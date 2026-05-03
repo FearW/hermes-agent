@@ -84,6 +84,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
                args_hint="<question>"),
     CommandDef("queue", "Queue a prompt for the next turn (doesn't interrupt)", "Session",
                aliases=("q",), args_hint="<prompt>"),
+    CommandDef("steer", "Inject guidance into the running turn after the next tool call", "Session",
+               args_hint="<prompt>"),
     CommandDef("status", "Show session info", "Session"),
     CommandDef("agents", "Show active agents and background tasks", "Session",
                aliases=("tasks",)),
@@ -185,6 +187,8 @@ def resolve_command(name: str) -> CommandDef | None:
 
     Accepts names with or without the leading slash.
     """
+    if not name:
+        return None
     return _COMMAND_LOOKUP.get(name.lower().lstrip("/"))
 
 
@@ -623,6 +627,43 @@ def discord_skill_commands(
     )
 
 
+def discord_skill_commands_by_category(
+    reserved_names: set[str],
+) -> tuple[dict[str, list[tuple[str, str, str]]], list[tuple[str, str, str]], int]:
+    """Backward-compatible wrapper for Discord skill registration.
+
+    The current Discord implementation uses one flat `/skill` command with
+    autocomplete, but some callers and tests still expect the older
+    category-grouped collector shape. Return all visible entries under a
+    single uncategorized bucket to preserve that contract without reviving
+    the large nested payload.
+    """
+    entries, hidden_count = discord_skill_commands(
+        max_slots=100,
+        reserved_names=reserved_names,
+    )
+    return {}, entries, hidden_count
+
+
+def _iter_plugin_command_entries() -> list[tuple[str, str, str]]:
+    """Yield plugin slash command metadata for gateway platform adapters."""
+    try:
+        from hermes_cli.plugins import get_plugin_commands
+
+        plugin_cmds = get_plugin_commands()
+    except Exception:
+        return []
+
+    entries: list[tuple[str, str, str]] = []
+    for name, meta in sorted(plugin_cmds.items()):
+        if not isinstance(meta, dict):
+            continue
+        description = str(meta.get("description") or "Plugin command").strip() or "Plugin command"
+        args_hint = str(meta.get("args_hint") or "").strip()
+        entries.append((name, description, args_hint))
+    return entries
+
+
 def slack_subcommand_map() -> dict[str, str]:
     """Return subcommand -> /command mapping for Slack /hermes handler.
 
@@ -1053,32 +1094,42 @@ def _file_size_label(path: str) -> str:
     return f"{size / (1024 * 1024 * 1024):.1f}G"
 
 # Compatibility exports for official gateway.run.
-ACTIVE_SESSION_BYPASS_COMMANDS = frozenset({'agents', 'approve', 'background', 'busy', 'compress', 'deny', 'help', 'insights', 'model', 'new', 'personality', 'queue', 'reasoning', 'reload-mcp', 'reset', 'resume', 'retry', 'sethome', 'status', 'steer', 'stop', 'tasks', 'title', 'undo', 'update', 'usage', 'voice'})
+ACTIVE_SESSION_BYPASS_COMMANDS = frozenset({
+    "agents",
+    "approve",
+    "background",
+    "btw",
+    "commands",
+    "compress",
+    "deny",
+    "help",
+    "insights",
+    "model",
+    "new",
+    "personality",
+    "profile",
+    "queue",
+    "reasoning",
+    "reload-mcp",
+    "resume",
+    "retry",
+    "sethome",
+    "status",
+    "steer",
+    "stop",
+    "title",
+    "undo",
+    "update",
+    "usage",
+    "verbose",
+    "voice",
+    "yolo",
+})
 
-class _ResolvedCommand:
-    def __init__(self, name):
-        self.name = name
-
-def resolve_command(text):
-    raw = (text or '').strip()
-    if raw.startswith('/'):
-        raw = raw[1:]
-    parts = raw.split(maxsplit=1)
-    if not parts:
-        return None
-    name = parts[0].strip().lower()
-    if not name or '/' in name:
-        return None
-    if name == 'reset':
-        return _ResolvedCommand('new')
-    if name == 'tasks':
-        return _ResolvedCommand('agents')
-    if name in ACTIVE_SESSION_BYPASS_COMMANDS:
-        return _ResolvedCommand(name)
-    return None
 
 def should_bypass_active_session(command):
-    return resolve_command(command) is not None
+    resolved = resolve_command(command)
+    return bool(resolved and resolved.name in ACTIVE_SESSION_BYPASS_COMMANDS)
 
 
 def is_gateway_known_command(command):

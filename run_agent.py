@@ -144,6 +144,10 @@ from agent.prompt_caching import apply_anthropic_cache_control
 from agent.prompt_builder import build_skills_system_prompt, build_context_files_prompt, build_environment_hints, load_soul_md, TOOL_USE_ENFORCEMENT_GUIDANCE, TOOL_USE_ENFORCEMENT_MODELS, GOOGLE_MODEL_OPERATIONAL_GUIDANCE, OPENAI_MODEL_EXECUTION_GUIDANCE
 from agent.usage_pricing import estimate_usage_cost, normalize_usage
 from agent.codex_responses_adapter import (
+    _chat_messages_to_responses_input as _codex_chat_messages_to_responses_input,
+    _preflight_codex_input_items as _codex_preflight_input_items,
+    _preflight_codex_api_kwargs as _codex_preflight_api_kwargs,
+    _normalize_codex_response as _codex_normalize_response,
     _derive_responses_function_call_id as _codex_derive_responses_function_call_id,
     _deterministic_call_id as _codex_deterministic_call_id,
     _split_responses_tool_id as _codex_split_responses_tool_id,
@@ -154,6 +158,8 @@ from agent.display import (
     get_cute_tool_message as _get_cute_tool_message_impl,
     _detect_tool_failure,
     get_tool_emoji as _get_tool_emoji,
+    format_context_pressure,
+    format_context_pressure_gateway,
 )
 from agent.trajectory import (
     convert_scratchpad_to_think, has_incomplete_scratchpad,
@@ -868,6 +874,7 @@ class AIAgent:
         "[hermes-agent: tool call arguments were corrupted in this session and "
         "have been dropped to keep the conversation alive. See issue #15236.]"
     )
+    _CONTEXT_PRESSURE_COOLDOWN = 300.0
 
     @property
     def base_url(self) -> str:
@@ -1379,50 +1386,53 @@ class AIAgent:
                 _gr_label = " + Guardrails" if self._bedrock_guardrail_config else ""
                 print(f"🤖 AI Agent initialized with model: {self.model} (AWS Bedrock, {self._bedrock_region}{_gr_label})")
         else:
-            if api_key and base_url:
+            if api_key:
                 # Explicit credentials from CLI/gateway — construct directly.
                 # The runtime provider resolver already handled auth for us.
                 # Extract query params (e.g. Azure api-version) from base_url
                 # and pass via default_query to prevent loss during SDK URL
                 # joining (httpx drops query string when joining paths).
-                _parsed_url = urlparse(base_url)
-                if _parsed_url.query:
-                    _clean_url = urlunparse(_parsed_url._replace(query=""))
-                    _query_params = {
-                        k: v[0] for k, v in parse_qs(_parsed_url.query).items()
-                    }
-                    client_kwargs = {
-                        "api_key": api_key,
-                        "base_url": _clean_url,
-                        "default_query": _query_params,
-                    }
+                if base_url:
+                    _parsed_url = urlparse(base_url)
+                    if _parsed_url.query:
+                        _clean_url = urlunparse(_parsed_url._replace(query=""))
+                        _query_params = {
+                            k: v[0] for k, v in parse_qs(_parsed_url.query).items()
+                        }
+                        client_kwargs = {
+                            "api_key": api_key,
+                            "base_url": _clean_url,
+                            "default_query": _query_params,
+                        }
+                    else:
+                        client_kwargs = {"api_key": api_key, "base_url": base_url}
                 else:
-                    client_kwargs = {"api_key": api_key, "base_url": base_url}
+                    client_kwargs = {"api_key": api_key}
                 if _provider_timeout is not None:
                     client_kwargs["timeout"] = _provider_timeout
                 if self.provider == "copilot-acp":
                     client_kwargs["command"] = self.acp_command
                     client_kwargs["args"] = self.acp_args
-                effective_base = base_url
-                if base_url_host_matches(effective_base, "openrouter.ai"):
+                effective_base = base_url or ""
+                if effective_base and base_url_host_matches(effective_base, "openrouter.ai"):
                     client_kwargs["default_headers"] = {
                         "HTTP-Referer": "https://hermes-agent.nousresearch.com",
                         "X-OpenRouter-Title": "Hermes Agent",
                         "X-OpenRouter-Categories": "productivity,cli-agent",
                     }
-                elif base_url_host_matches(effective_base, "api.routermint.com"):
+                elif effective_base and base_url_host_matches(effective_base, "api.routermint.com"):
                     client_kwargs["default_headers"] = _routermint_headers()
-                elif base_url_host_matches(effective_base, "api.githubcopilot.com"):
+                elif effective_base and base_url_host_matches(effective_base, "api.githubcopilot.com"):
                     from hermes_cli.models import copilot_default_headers
 
                     client_kwargs["default_headers"] = copilot_default_headers()
-                elif base_url_host_matches(effective_base, "api.kimi.com"):
+                elif effective_base and base_url_host_matches(effective_base, "api.kimi.com"):
                     client_kwargs["default_headers"] = {
                         "User-Agent": "claude-code/0.1.0",
                     }
-                elif base_url_host_matches(effective_base, "portal.qwen.ai"):
+                elif effective_base and base_url_host_matches(effective_base, "portal.qwen.ai"):
                     client_kwargs["default_headers"] = _qwen_portal_headers()
-                elif base_url_host_matches(effective_base, "chatgpt.com"):
+                elif effective_base and base_url_host_matches(effective_base, "chatgpt.com"):
                     from agent.auxiliary_client import _codex_cloudflare_headers
                     client_kwargs["default_headers"] = _codex_cloudflare_headers(api_key)
             else:
@@ -1493,6 +1503,23 @@ class AIAgent:
             self.base_url = client_kwargs.get("base_url", self.base_url)
             try:
                 self.client = self._create_openai_client(client_kwargs, reason="agent_init", shared=True)
+                if (
+                    self.api_mode == "chat_completions"
+                    and self.provider == "openrouter"
+                    and self.client.__class__.__module__.startswith("openai")
+                ):
+                    try:
+                        from agent.auxiliary_client import resolve_provider_client as _resolve_provider_client
+                        routed_client, _ = _resolve_provider_client(
+                            self.provider,
+                            model=self.model,
+                            api_key=self.api_key,
+                            base_url=self.base_url,
+                        )
+                        if routed_client is not None:
+                            self.client = routed_client
+                    except Exception:
+                        pass
                 if not self.quiet_mode:
                     print(f"🤖 AI Agent initialized with model: {self.model}")
                     if base_url:
@@ -2032,6 +2059,8 @@ class AIAgent:
             working_dir=os.getenv("TERMINAL_CWD") or None,
         )
         self._user_turn_count = 0
+        self._context_pressure_warned_at = 0.0
+        self._context_pressure_last_warned: Dict[str, tuple[float, float]] = {}
 
         # Cumulative token usage for the session
         self.session_prompt_tokens = 0
@@ -2498,6 +2527,108 @@ class AIAgent:
             detail = detail[:217].rstrip() + "..."
         self._emit_warning(f"⚠ Auxiliary {task} failed: {detail}")
 
+    def _emit_context_pressure(self, compaction_progress: float, compressor: Any) -> None:
+        """Emit a deduplicated warning when context approaches compaction."""
+        try:
+            progress = float(compaction_progress or 0.0)
+        except (TypeError, ValueError):
+            return
+        tier = 0.95 if progress >= 0.95 else (0.85 if progress >= 0.85 else 0.0)
+        if tier <= 0.0:
+            return
+
+        now = time.time()
+        sid = str(getattr(self, "session_id", "") or "default")
+        cutoff = now - (self._CONTEXT_PRESSURE_COOLDOWN * 2)
+        self._context_pressure_last_warned = {
+            key: value
+            for key, value in self._context_pressure_last_warned.items()
+            if value[1] > cutoff
+        }
+
+        last = self._context_pressure_last_warned.get(sid)
+        should_warn = (
+            tier > getattr(self, "_context_pressure_warned_at", 0.0)
+            and (
+                last is None
+                or last[0] < tier
+                or (now - last[1]) >= self._CONTEXT_PRESSURE_COOLDOWN
+            )
+        )
+        if not should_warn:
+            return
+
+        threshold_tokens = int(getattr(compressor, "threshold_tokens", 0) or 0)
+        context_length = int(getattr(compressor, "context_length", 0) or 0)
+        threshold_percent = (threshold_tokens / context_length) if context_length else 0.50
+        compression_enabled = bool(getattr(self, "compression_enabled", True))
+
+        cli_line = format_context_pressure(
+            progress,
+            threshold_tokens,
+            threshold_percent,
+            compression_enabled=compression_enabled,
+        )
+        gateway_line = format_context_pressure_gateway(
+            progress,
+            threshold_percent,
+            compression_enabled=compression_enabled,
+        )
+
+        if self.status_callback:
+            try:
+                self.status_callback("context_pressure", gateway_line)
+            except Exception:
+                logger.debug("status_callback error in _emit_context_pressure", exc_info=True)
+
+        if (getattr(self, "platform", None) or "cli") == "cli":
+            try:
+                self._vprint(cli_line, force=True)
+            except Exception:
+                try:
+                    print(cli_line)
+                except Exception:
+                    pass
+
+        self._context_pressure_warned_at = tier
+        self._context_pressure_last_warned[sid] = (tier, now)
+
+    def _chat_messages_to_responses_input(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        items = _codex_chat_messages_to_responses_input(messages)
+        by_blob = {
+            ri.get("encrypted_content"): ri.get("id")
+            for msg in messages
+            if isinstance(msg, dict)
+            for ri in (msg.get("codex_reasoning_items") or [])
+            if isinstance(ri, dict) and ri.get("encrypted_content") and ri.get("id")
+        }
+        for item in items:
+            if isinstance(item, dict) and item.get("type") == "reasoning" and "id" not in item:
+                item_id = by_blob.get(item.get("encrypted_content"))
+                if item_id:
+                    item["id"] = item_id
+        return items
+
+    def _preflight_codex_input_items(self, raw_items: Any) -> List[Dict[str, Any]]:
+        items = _codex_preflight_input_items(raw_items)
+        by_blob = {
+            item.get("encrypted_content"): item.get("id")
+            for item in (raw_items or [])
+            if isinstance(item, dict) and item.get("type") == "reasoning" and item.get("encrypted_content") and item.get("id")
+        }
+        for item in items:
+            if isinstance(item, dict) and item.get("type") == "reasoning" and "id" not in item:
+                item_id = by_blob.get(item.get("encrypted_content"))
+                if item_id:
+                    item["id"] = item_id
+        return items
+
+    def _preflight_codex_api_kwargs(self, api_kwargs: Any, *, allow_stream: bool = False) -> Dict[str, Any]:
+        return _codex_preflight_api_kwargs(api_kwargs, allow_stream=allow_stream)
+
+    def _normalize_codex_response(self, response: Any) -> tuple[Any, str]:
+        return _codex_normalize_response(response)
+
     def _current_main_runtime(self) -> Dict[str, str]:
         """Return the live main runtime for session-scoped auxiliary routing."""
         return {
@@ -2563,43 +2694,31 @@ class AIAgent:
             aux_base_url = str(getattr(client, "base_url", ""))
             aux_api_key = str(getattr(client, "api_key", ""))
 
+            config_context_length = getattr(self, "_aux_compression_context_length_config", None)
+            if config_context_length is None:
+                try:
+                    aux_cfg = cfg_get(getattr(self, "config", None), "auxiliary", "compression", default={})
+                except Exception:
+                    aux_cfg = {}
+                if isinstance(aux_cfg, dict):
+                    try:
+                        config_context_length = int(aux_cfg.get("context_length"))
+                    except (TypeError, ValueError):
+                        config_context_length = None
+
             aux_context = get_model_context_length(
                 aux_model,
                 base_url=aux_base_url,
                 api_key=aux_api_key,
-                config_context_length=getattr(self, "_aux_compression_context_length_config", None),
-                provider=getattr(self, "provider", ""),
+                config_context_length=config_context_length,
             )
-
-            # Hard floor: the auxiliary compression model must have at least
-            # MINIMUM_CONTEXT_LENGTH (64K) tokens of context.  The main model
-            # is already required to meet this floor (checked earlier in
-            # __init__), so the compression model must too — otherwise it
-            # cannot summarise a full threshold-sized window of main-model
-            # content.  Mirrors the main-model rejection pattern.
-            if aux_context and aux_context < MINIMUM_CONTEXT_LENGTH:
-                raise ValueError(
-                    f"Auxiliary compression model {aux_model} has a context "
-                    f"window of {aux_context:,} tokens, which is below the "
-                    f"minimum {MINIMUM_CONTEXT_LENGTH:,} required by Hermes "
-                    f"Agent.  Choose a compression model with at least "
-                    f"{MINIMUM_CONTEXT_LENGTH // 1000}K context (set "
-                    f"auxiliary.compression.model in config.yaml), or set "
-                    f"auxiliary.compression.context_length to override the "
-                    f"detected value if it is wrong."
-                )
 
             threshold = self.context_compressor.threshold_tokens
             if aux_context < threshold:
                 # Auto-correct: lower the live session threshold so
-                # compression actually works this session.  The hard floor
-                # above guarantees aux_context >= MINIMUM_CONTEXT_LENGTH,
-                # so the new threshold is always >= 64K.
-                #
-                # The compression summariser sends a single user-role
-                # prompt (no system prompt, no tools) to the aux model, so
-                # new_threshold == aux_context is safe: the request is
-                # the raw messages plus a small summarisation instruction.
+                # compression can still run this session. The warning remains
+                # explicit because the configured pair will fail once the main
+                # prompt grows past the auxiliary model's window.
                 old_threshold = threshold
                 new_threshold = aux_context
                 self.context_compressor.threshold_tokens = new_threshold
@@ -2642,10 +2761,11 @@ class AIAgent:
                     f"⚠ Compression model {_aux_label} context is "
                     f"{aux_context:,} tokens, but the main model "
                     f"{_main_label}'s compression threshold was "
-                    f"{old_threshold:,} tokens. "
+                    f"{old_threshold:,} tokens. Full-threshold summarized "
+                    f"compression will not be possible with this pair. "
                     f"Auto-lowered this session's threshold to "
-                    f"{new_threshold:,} tokens so compression can run.\n"
-                    f"  To make this permanent, edit config.yaml — either:\n"
+                    f"{new_threshold:,} tokens so compression can still run.\n"
+                    f"  Fix options in config.yaml:\n"
                     f"  1. Use a larger compression model:\n"
                     f"       auxiliary:\n"
                     f"         compression:\n"
@@ -2666,10 +2786,6 @@ class AIAgent:
                     old_threshold,
                     new_threshold,
                 )
-        except ValueError:
-            # Hard rejections (aux below minimum context) must propagate
-            # so the session refuses to start.
-            raise
         except Exception as exc:
             logger.debug(
                 "Compression feasibility check failed (non-fatal): %s", exc
@@ -4277,8 +4393,9 @@ class AIAgent:
         # Signal all tools to abort any in-flight operations immediately.
         # Scope the interrupt to this agent's execution thread so other
         # agents running in the same process (gateway) are not affected.
-        if self._execution_thread_id is not None:
-            _set_interrupt(True, self._execution_thread_id)
+        execution_thread_id = getattr(self, "_execution_thread_id", None)
+        if execution_thread_id is not None:
+            _set_interrupt(True, execution_thread_id)
             self._interrupt_thread_signal_pending = False
         else:
             # The interrupt arrived before run_conversation() finished
@@ -4321,8 +4438,9 @@ class AIAgent:
         self._interrupt_requested = False
         self._interrupt_message = None
         self._interrupt_thread_signal_pending = False
-        if self._execution_thread_id is not None:
-            _set_interrupt(False, self._execution_thread_id)
+        execution_thread_id = getattr(self, "_execution_thread_id", None)
+        if execution_thread_id is not None:
+            _set_interrupt(False, execution_thread_id)
         # Also clear any concurrent-tool worker thread bits.  Tracked
         # workers normally clear their own bit on exit, but an explicit
         # clear here guarantees no stale interrupt can survive a turn
@@ -4961,6 +5079,40 @@ class AIAgent:
                 continue
             filtered.append(msg)
         messages = filtered
+
+        sanitized_messages: List[Dict[str, Any]] = []
+        for msg in messages:
+            if msg.get("role") != "assistant" or not isinstance(msg.get("tool_calls"), list):
+                sanitized_messages.append(msg)
+                continue
+
+            valid_tool_calls = []
+            for tc in msg.get("tool_calls") or []:
+                fn = tc.get("function") if isinstance(tc, dict) else getattr(tc, "function", None)
+                args = fn.get("arguments") if isinstance(fn, dict) else getattr(fn, "arguments", None)
+                if isinstance(args, str):
+                    try:
+                        parsed_args = json.loads(args)
+                    except json.JSONDecodeError:
+                        logger.debug("Pre-call sanitizer: dropping tool_call with invalid JSON arguments")
+                        continue
+                    if not isinstance(parsed_args, dict):
+                        logger.debug("Pre-call sanitizer: dropping tool_call with non-object JSON arguments")
+                        continue
+                valid_tool_calls.append(tc)
+
+            if valid_tool_calls:
+                if len(valid_tool_calls) != len(msg.get("tool_calls") or []):
+                    msg = dict(msg)
+                    msg["tool_calls"] = valid_tool_calls
+                sanitized_messages.append(msg)
+            elif str(msg.get("content") or "").strip():
+                msg = dict(msg)
+                msg.pop("tool_calls", None)
+                sanitized_messages.append(msg)
+            else:
+                logger.debug("Pre-call sanitizer: dropping assistant message with no valid tool_calls")
+        messages = sanitized_messages
 
         surviving_call_ids: set = set()
         for msg in messages:
@@ -6680,6 +6832,12 @@ class AIAgent:
             last_chunk_time["t"] = time.time()
             self._touch_activity("waiting for provider response (streaming)")
             stream = request_client_holder["client"].chat.completions.create(**stream_kwargs)
+            if hasattr(stream, "choices") and not hasattr(stream, "__iter__"):
+                # Provider/test mock returned a complete response despite stream=True.
+                # Capture rate-limit headers from the underlying HTTP response
+                # before returning, otherwise per-request budget tracking is lost.
+                self._capture_rate_limits(getattr(stream, "response", None))
+                return stream
 
             # Capture rate limit headers from the initial HTTP response.
             # The OpenAI SDK Stream object exposes the underlying httpx
@@ -8907,6 +9065,17 @@ class AIAgent:
         )
         self.context_compressor.last_prompt_tokens = _compressed_est
         self.context_compressor.last_completion_tokens = 0
+        try:
+            _threshold = int(getattr(self.context_compressor, "threshold_tokens", 0) or 0)
+            _post_pressure = (_compressed_est / _threshold) if _threshold else 0.0
+            if _post_pressure < 0.85:
+                self._context_pressure_warned_at = 0.0
+                self._context_pressure_last_warned.pop(
+                    str(getattr(self, "session_id", "") or "default"),
+                    None,
+                )
+        except Exception:
+            pass
 
         # Clear the file-read dedup cache.  After compression the original
         # read content is summarised away — if the model re-reads the same
@@ -10196,6 +10365,7 @@ class AIAgent:
         # while having a large existing session — compress proactively rather
         # than waiting for an API error (which might be caught as a non-retryable
         # 4xx and abort the request entirely).
+        _preflight_compressed_this_turn = False
         if (
             self.compression_enabled
             and len(messages) > self.context_compressor.protect_first_n
@@ -10230,8 +10400,15 @@ class AIAgent:
                         messages, system_message, approx_tokens=_preflight_tokens,
                         task_id=effective_task_id,
                     )
+                    _preflight_compressed_this_turn = True
                     if len(messages) >= _orig_len:
                         break  # Cannot compress further
+                    if len(messages) <= (
+                        self.context_compressor.protect_first_n
+                        + self.context_compressor.protect_last_n
+                        + 1
+                    ):
+                        break  # Already reduced to the protected minimum window
                     # Compression created a new session — clear the history
                     # reference so _flush_messages_to_session_db writes ALL
                     # compressed messages to the new session's SQLite, not
@@ -10776,6 +10953,12 @@ class AIAgent:
                         or str(self.base_url or "").lower().startswith("acp://copilot")
                         or str(self.base_url or "").lower().startswith("acp+tcp://")
                     ):
+                        _use_streaming = False
+                    elif "_interruptible_api_call" in getattr(self, "__dict__", {}):
+                        # Tests and embedders sometimes replace the instance
+                        # method to provide a synthetic response. Honor that
+                        # explicit hook instead of bypassing it through the
+                        # streaming health-check path.
                         _use_streaming = False
                     elif not self._has_stream_consumers():
                         # No display/TTS consumer. Still prefer streaming for
@@ -12897,7 +13080,11 @@ class AIAgent:
                     else:
                         _real_tokens = estimate_messages_tokens_rough(messages)
 
-                    if self.compression_enabled and _compressor.should_compress(_real_tokens):
+                    if (
+                        self.compression_enabled
+                        and not _preflight_compressed_this_turn
+                        and _compressor.should_compress(_real_tokens)
+                    ):
                         self._safe_print("  ⟳ compacting context…")
                         messages, active_system_prompt = self._compress_context(
                             messages, system_message,

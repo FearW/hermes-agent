@@ -404,20 +404,16 @@ def auth_remove_command(args) -> None:
     # handles its source-specific cleanup and we centralise suppression +
     # user-facing output here so every source behaves identically from
     # the user's perspective.
-    from agent.credential_sources import find_removal_step
-    from hermes_cli.auth import suppress_credential_source
+    from agent.credential_sources import remove_credential_source
 
-    step = find_removal_step(provider, removed.source)
-    if step is None:
+    result = remove_credential_source(provider, removed)
+    if result is None:
         # Unregistered source — e.g. "manual", which has nothing external
         # to clean up.  The pool entry is already gone; we're done.
         return
 
-    result = step.remove_fn(provider, removed)
     for line in result.cleaned:
         print(line)
-    if result.suppress:
-        suppress_credential_source(provider, removed.source)
     for line in result.hints:
         print(line)
 

@@ -28,6 +28,7 @@ def mirror_to_session(
     message_text: str,
     source_label: str = "cli",
     thread_id: Optional[str] = None,
+    user_id: Optional[str] = None,
 ) -> bool:
     """
     Append a delivery-mirror message to the target session's transcript.
@@ -39,9 +40,20 @@ def mirror_to_session(
     All errors are caught -- this is never fatal.
     """
     try:
-        session_id = _find_session_id(platform, str(chat_id), thread_id=thread_id)
+        session_id = _find_session_id(
+            platform,
+            str(chat_id),
+            thread_id=thread_id,
+            user_id=user_id,
+        )
         if not session_id:
-            logger.debug("Mirror: no session found for %s:%s:%s", platform, chat_id, thread_id)
+            logger.debug(
+                "Mirror: no session found for %s:%s:%s:%s",
+                platform,
+                chat_id,
+                thread_id,
+                user_id,
+            )
             return False
 
         mirror_msg = {
@@ -59,11 +71,16 @@ def mirror_to_session(
         return True
 
     except Exception as e:
-        logger.debug("Mirror failed for %s:%s:%s: %s", platform, chat_id, thread_id, e)
+        logger.debug("Mirror failed for %s:%s:%s:%s: %s", platform, chat_id, thread_id, user_id, e)
         return False
 
 
-def _find_session_id(platform: str, chat_id: str, thread_id: Optional[str] = None) -> Optional[str]:
+def _find_session_id(
+    platform: str,
+    chat_id: str,
+    thread_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> Optional[str]:
     """
     Find the active session_id for a platform + chat_id pair.
 
@@ -81,8 +98,7 @@ def _find_session_id(platform: str, chat_id: str, thread_id: Optional[str] = Non
         return None
 
     platform_lower = platform.lower()
-    best_match = None
-    best_updated = ""
+    matches: list[tuple[str, str, str]] = []
 
     for _key, entry in data.items():
         origin = entry.get("origin") or {}
@@ -96,12 +112,25 @@ def _find_session_id(platform: str, chat_id: str, thread_id: Optional[str] = Non
             origin_thread_id = origin.get("thread_id")
             if thread_id is not None and str(origin_thread_id or "") != str(thread_id):
                 continue
-            updated = entry.get("updated_at", "")
-            if updated > best_updated:
-                best_updated = updated
-                best_match = entry.get("session_id")
+            origin_user_id = origin.get("user_id")
+            if user_id is not None and str(origin_user_id or "") != str(user_id):
+                continue
+            matches.append((
+                str(entry.get("updated_at") or ""),
+                str(origin_user_id or ""),
+                str(entry.get("session_id") or ""),
+            ))
 
-    return best_match
+    if not matches:
+        return None
+
+    if user_id is None and thread_id is None:
+        distinct_users = {row[1] for row in matches if row[1]}
+        if len(distinct_users) > 1:
+            return None
+
+    matches.sort(reverse=True)
+    return matches[0][2] or None
 
 
 def _append_to_jsonl(session_id: str, message: dict) -> None:

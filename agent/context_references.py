@@ -341,7 +341,7 @@ def _resolve_path(cwd: Path, target: str, *, allowed_root: Path | None = None) -
 
 def _ensure_reference_path_allowed(path: Path) -> None:
     from hermes_constants import get_hermes_home
-    home = Path(os.path.expanduser("~")).resolve()
+    home = Path(os.environ.get("HOME") or os.path.expanduser("~")).resolve()
     hermes_home = get_hermes_home().resolve()
 
     blocked_exact = {home / rel for rel in _SENSITIVE_HOME_FILES}
@@ -483,7 +483,7 @@ def _rg_files(path: Path, cwd: Path, limit: int) -> list[Path] | None:
             text=True,
             timeout=10,
         )
-    except FileNotFoundError:
+    except (FileNotFoundError, PermissionError, OSError):
         return None
     except subprocess.TimeoutExpired:
         return None

@@ -646,8 +646,8 @@ def _strip_blocked_tools(toolsets: List[str]) -> List[str]:
 
 def _build_child_progress_callback(
     task_index: int,
-    goal: str,
-    parent_agent,
+    goal: str = "",
+    parent_agent=None,
     task_count: int = 1,
     *,
     subagent_id: Optional[str] = None,
@@ -671,6 +671,10 @@ def _build_child_progress_callback(
     Returns None if no display mechanism is available, in which case the
     child agent runs with no progress callback (identical to current behavior).
     """
+    if parent_agent is None and goal is not None and not isinstance(goal, str):
+        parent_agent = goal
+        goal = ""
+
     spinner = getattr(parent_agent, "_delegate_spinner", None)
     parent_cb = getattr(parent_agent, "tool_progress_callback", None)
 
@@ -750,7 +754,11 @@ def _build_child_progress_callback(
                 try:
                     event = DelegateEvent(event_type)
                 except (ValueError, TypeError):
-                    return  # Unknown event — ignore
+                    # Unknown event names are ignored. The legacy 2-arg
+                    # callback form is already handled by the direct tool
+                    # methods above and should not be inferred from an
+                    # arbitrary first positional string.
+                    return
 
         if event == DelegateEvent.TASK_THINKING:
             text = preview or tool_name or ""
@@ -760,7 +768,6 @@ def _build_child_progress_callback(
                     spinner.print_above(f' {prefix}├─ 💭 "{short}"')
                 except Exception as e:
                     logger.debug("Spinner print_above failed: %s", e)
-            _relay("subagent.thinking", preview=text)
             return
 
         if event == DelegateEvent.TASK_TOOL_COMPLETED:
@@ -813,18 +820,23 @@ def _build_child_progress_callback(
                 logger.debug("Spinner print_above failed: %s", e)
 
         if parent_cb:
-            _relay("subagent.tool", tool_name, preview, args)
             _batch.append(tool_name or "")
             if len(_batch) >= _BATCH_SIZE:
                 summary = ", ".join(_batch)
-                _relay("subagent.progress", preview=f"🔀 {prefix}{summary}")
+                try:
+                    parent_cb("subagent_progress", f"🔀 {prefix}{summary}", **_identity_kwargs())
+                except Exception as e:
+                    logger.debug("Parent callback relay failed: %s", e)
                 _batch.clear()
 
     def _flush():
         """Flush remaining batched tool names to gateway on completion."""
         if parent_cb and _batch:
             summary = ", ".join(_batch)
-            _relay("subagent.progress", preview=f"🔀 {prefix}{summary}")
+            try:
+                parent_cb("subagent_progress", f"🔀 {prefix}{summary}", **_identity_kwargs())
+            except Exception as e:
+                logger.debug("Parent callback relay failed: %s", e)
             _batch.clear()
 
     _callback._flush = _flush
@@ -1288,6 +1300,13 @@ def _run_single_child(
     _stale_count = [0]
 
     def _heartbeat_loop():
+        if parent_agent is not None:
+            touch = getattr(parent_agent, "_touch_activity", None)
+            if touch:
+                try:
+                    touch(f"delegate_task: subagent {task_index} started")
+                except Exception:
+                    pass
         while not _heartbeat_stop.wait(_HEARTBEAT_INTERVAL):
             if parent_agent is None:
                 continue

@@ -456,6 +456,13 @@ class ContextCompressor(ContextEngine):
         # succeeded.  Silent recovery would hide the broken config.
         self._last_aux_model_failure_error: Optional[str] = None
         self._last_aux_model_failure_model: Optional[str] = None
+        self._session_id: Optional[str] = None
+        self._session_source: str = "cli"
+
+    def set_session_context(self, session_id: str, source: str = "cli") -> None:
+        """Remember session identity for prefix archival during compression."""
+        self._session_id = session_id
+        self._session_source = source or "cli"
 
     def update_from_response(self, usage: Dict[str, Any]):
         """Update tracked token usage from API response."""
@@ -727,10 +734,11 @@ class ContextCompressor(ContextEngine):
         placeholder.
         """
         now = time.monotonic()
-        if now < self._summary_failure_cooldown_until:
+        cooldown_until = getattr(self, "_summary_failure_cooldown_until", 0.0)
+        if now < cooldown_until:
             logger.debug(
                 "Skipping context summary during cooldown (%.0fs remaining)",
-                self._summary_failure_cooldown_until - now,
+                cooldown_until - now,
             )
             return None
 
@@ -849,20 +857,21 @@ FOCUS TOPIC: "{focus_topic}"
 The user has requested that this compaction PRIORITISE preserving all information related to the focus topic above. For content related to "{focus_topic}", include full detail — exact values, file paths, command outputs, error messages, and decisions. For content NOT related to the focus topic, summarise more aggressively (brief one-liners or omit if truly irrelevant). The focus topic sections should receive roughly 60-70% of the summary token budget. Even for the focus topic, NEVER preserve API keys, tokens, passwords, or credentials — use [REDACTED]."""
 
         try:
+            main_model = getattr(self, "model", "") or ""
             call_kwargs = {
                 "task": "compression",
                 "main_runtime": {
-                    "model": self.model,
-                    "provider": self.provider,
-                    "base_url": self.base_url,
-                    "api_key": self.api_key,
-                    "api_mode": self.api_mode,
+                    "model": main_model,
+                    "provider": getattr(self, "provider", ""),
+                    "base_url": getattr(self, "base_url", ""),
+                    "api_key": getattr(self, "api_key", ""),
+                    "api_mode": getattr(self, "api_mode", ""),
                 },
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": int(summary_budget * 1.3),
                 # timeout resolved from auxiliary.compression.timeout config by call_llm
             }
-            if self.summary_model:
+            if getattr(self, "summary_model", ""):
                 call_kwargs["model"] = self.summary_model
             response = call_llm(**call_kwargs)
             content = response.choices[0].message.content
@@ -902,15 +911,15 @@ The user has requested that this compaction PRIORITISE preserving all informatio
             )
             if (
                 _is_model_not_found
-                and self.summary_model
-                and self.summary_model != self.model
+                and getattr(self, "summary_model", "")
+                and self.summary_model != getattr(self, "model", "")
                 and not getattr(self, "_summary_model_fallen_back", False)
             ):
                 self._summary_model_fallen_back = True
                 logging.warning(
                     "Summary model '%s' not available (%s). "
                     "Falling back to main model '%s' for compression.",
-                    self.summary_model, e, self.model,
+                    self.summary_model, e, getattr(self, "model", ""),
                 )
                 # Record the aux-model failure so callers can warn the user
                 # even if the retry-on-main succeeds — a misconfigured aux
@@ -934,15 +943,15 @@ The user has requested that this compaction PRIORITISE preserving all informatio
             # aggregator rejections, etc.) where auto-retry is still safer
             # than dropping the turns.
             if (
-                self.summary_model
-                and self.summary_model != self.model
+                getattr(self, "summary_model", "")
+                and self.summary_model != getattr(self, "model", "")
                 and not getattr(self, "_summary_model_fallen_back", False)
             ):
                 self._summary_model_fallen_back = True
                 logging.warning(
                     "Summary model '%s' failed (%s). "
                     "Retrying on main model '%s' before giving up.",
-                    self.summary_model, e, self.model,
+                    self.summary_model, e, getattr(self, "model", ""),
                 )
                 # Record the aux-model failure (see 404 branch above) — user
                 # should know their configured model is broken even if main
@@ -1287,6 +1296,19 @@ The user has requested that this compaction PRIORITISE preserving all informatio
             return messages
 
         turns_to_summarize = messages[compress_start:compress_end]
+
+        session_id = getattr(self, "_session_id", None)
+        if session_id and turns_to_summarize:
+            try:
+                from agent.l4_archive import archive_session_summary
+
+                archive_session_summary(
+                    f"{session_id}#prefix-{self.compression_count + 1}",
+                    getattr(self, "_session_source", "cli") or "cli",
+                    turns_to_summarize,
+                )
+            except Exception as exc:
+                logger.debug("Prefix archive failed: %s", exc)
 
         if not self.quiet_mode:
             logger.info(

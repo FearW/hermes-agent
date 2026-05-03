@@ -1346,13 +1346,12 @@ class SessionStore:
         return self.sessions_dir / f"{session_id}.jsonl"
     
     def append_to_transcript(self, session_id: str, message: Dict[str, Any], skip_db: bool = False) -> None:
-        """Append a message to a session's transcript (SQLite + legacy JSONL).
+        """Append a message to a session's transcript.
 
         Args:
-            skip_db: When True, only write to JSONL and skip the SQLite write.
-                     Used when the agent already persisted messages to SQLite
-                     via its own _flush_messages_to_session_db(), preventing
-                     the duplicate-write bug (#860).
+            skip_db: When True, skip the SQLite write because the agent already
+                     persisted the message directly via SessionDB. If SQLite is
+                     unavailable, JSONL remains the fallback transcript store.
         """
         normalized_message = dict(message)
         normalized_tool_calls = _normalize_tool_calls(message.get("tool_calls"))
@@ -1380,18 +1379,22 @@ class SessionStore:
             except Exception as e:
                 logger.debug("Session DB operation failed: %s", e)
         
-        # Also write legacy JSONL (keeps existing tooling working during transition)
-        transcript_path = self.get_transcript_path(session_id)
-        with open(transcript_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(normalized_message, ensure_ascii=False) + "\n")
+        # New transcript writes are SQLite-only when the DB is available.
+        # JSONL remains the fallback store when SQLite is unavailable, and
+        # legacy JSONL files are still readable for pre-migration sessions.
+        if self._db is None:
+            transcript_path = self.get_transcript_path(session_id)
+            with open(transcript_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(normalized_message, ensure_ascii=False) + "\n")
     
     def rewrite_transcript(self, session_id: str, messages: List[Dict[str, Any]]) -> None:
         """Replace the entire transcript for a session with new messages.
         
         Used by /retry, /undo, and /compress to persist modified conversation history.
-        Rewrites both SQLite and legacy JSONL storage.
+        Rewrites SQLite transcript storage and removes any stale legacy JSONL.
         """
         # SQLite: clear old messages and re-insert normalized messages.
+        db_write_ok = False
         if self._db:
             try:
                 db_messages = []
@@ -1404,20 +1407,23 @@ class SessionStore:
                         normalized_msg.pop("tool_calls", None)
                     db_messages.append(normalized_msg)
                 self._db.replace_messages(session_id, db_messages)
+                db_write_ok = True
             except Exception as e:
                 logger.debug("Failed to rewrite transcript in DB: %s", e)
-        
-        # JSONL: overwrite the file
+
         transcript_path = self.get_transcript_path(session_id)
-        with open(transcript_path, "w", encoding="utf-8") as f:
-            for msg in messages:
-                normalized_msg = dict(msg)
-                normalized_tool_calls = _normalize_tool_calls(msg.get("tool_calls"))
-                if normalized_tool_calls:
-                    normalized_msg["tool_calls"] = normalized_tool_calls
-                else:
-                    normalized_msg.pop("tool_calls", None)
-                f.write(json.dumps(normalized_msg, ensure_ascii=False) + "\n")
+        if self._db is None:
+            with open(transcript_path, "w", encoding="utf-8") as f:
+                for msg in messages:
+                    normalized_msg = dict(msg)
+                    normalized_tool_calls = _normalize_tool_calls(msg.get("tool_calls"))
+                    if normalized_tool_calls:
+                        normalized_msg["tool_calls"] = normalized_tool_calls
+                    else:
+                        normalized_msg.pop("tool_calls", None)
+                    f.write(json.dumps(normalized_msg, ensure_ascii=False) + "\n")
+        elif db_write_ok and transcript_path.exists():
+            transcript_path.unlink()
 
     def load_transcript(self, session_id: str) -> List[Dict[str, Any]]:
         """Load all messages from a session's transcript."""

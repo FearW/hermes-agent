@@ -1270,6 +1270,7 @@ class GatewayRunner:
         mode, attach `request_overrides` so the API call is marked
         accordingly.
         """
+        from agent.smart_model_routing import resolve_turn_route
         from hermes_cli.models import resolve_fast_mode_overrides
 
         runtime = {
@@ -1281,18 +1282,23 @@ class GatewayRunner:
             "args": list(runtime_kwargs.get("args") or []),
             "credential_pool": runtime_kwargs.get("credential_pool"),
         }
-        route = {
-            "model": model,
-            "runtime": runtime,
-            "signature": (
-                model,
-                runtime["provider"],
-                runtime["base_url"],
-                runtime["api_mode"],
-                runtime["command"],
-                tuple(runtime["args"]),
+        primary = {"model": model, **runtime}
+        route = resolve_turn_route(
+            user_message,
+            getattr(self, "_smart_model_routing", None),
+            primary,
+        )
+        route.setdefault(
+            "signature",
+            (
+                route.get("model"),
+                route.get("runtime", {}).get("provider"),
+                route.get("runtime", {}).get("base_url"),
+                route.get("runtime", {}).get("api_mode"),
+                route.get("runtime", {}).get("command"),
+                tuple(route.get("runtime", {}).get("args") or []),
             ),
-        }
+        )
 
         service_tier = getattr(self, "_service_tier", None)
         if not service_tier:
@@ -4063,11 +4069,10 @@ class GatewayRunner:
             if _cmd_def_inner and _cmd_def_inner.name == "agents":
                 return await self._handle_agents_command(event)
 
-            # /background must bypass the running-agent guard — it starts a
-            # parallel task and must never interrupt the active conversation.
-            # /btw is an alias of /background and resolves to the same canonical
-            # name, so this branch handles both commands.
-            if _cmd_def_inner and _cmd_def_inner.name == "background":
+            # /background and /btw must bypass the running-agent guard — they
+            # start parallel side work and must never interrupt the active
+            # conversation.
+            if _cmd_def_inner and _cmd_def_inner.name in ("background", "btw"):
                 return await self._handle_background_command(event)
 
             # Session-level toggles that are safe to run mid-agent —

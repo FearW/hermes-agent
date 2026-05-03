@@ -43,6 +43,7 @@ class StreamConsumerConfig:
     edit_interval: float = 1.0
     buffer_threshold: int = 40
     cursor: str = " ▉"
+    fresh_final_after_seconds: float = 0.0
 
 
 class GatewayStreamConsumer:
@@ -87,6 +88,7 @@ class GatewayStreamConsumer:
         self._flood_strikes = 0         # Consecutive flood-control edit failures
         self._current_edit_interval = self.cfg.edit_interval  # Adaptive backoff
         self._final_response_sent = False
+        self._message_created_ts: Optional[float] = None
 
     @property
     def already_sent(self) -> bool:
@@ -480,7 +482,26 @@ class GatewayStreamConsumer:
             logger.error("Commentary send error: %s", e)
         return False
 
-    async def _send_or_edit(self, text: str) -> bool:
+    def _should_send_fresh_final(self) -> bool:
+        """Return True when final delivery should use a fresh message."""
+        if self._message_id in (None, "__no_edit__"):
+            return False
+        threshold = float(getattr(self.cfg, "fresh_final_after_seconds", 0.0) or 0.0)
+        if threshold <= 0 or self._message_created_ts is None:
+            return False
+        return (time.monotonic() - self._message_created_ts) >= threshold
+
+    async def _delete_preview_message(self, message_id: str) -> None:
+        """Best-effort cleanup for stale previews after fresh-final send."""
+        delete_fn = getattr(self.adapter, "delete_message", None)
+        if not delete_fn:
+            return
+        try:
+            await delete_fn(self.chat_id, message_id)
+        except Exception:
+            pass
+
+    async def _send_or_edit(self, text: str, *, finalize: bool = False) -> bool:
         """Send or edit the streaming message.
 
         Returns True if the text was successfully delivered (sent or edited),
@@ -499,6 +520,22 @@ class GatewayStreamConsumer:
                     # Skip if text is identical to what we last sent
                     if text == self._last_sent_text:
                         return True
+                    if finalize and self._should_send_fresh_final():
+                        old_message_id = self._message_id
+                        result = await self.adapter.send(
+                            chat_id=self.chat_id,
+                            content=text,
+                            metadata=self.metadata,
+                        )
+                        if result.success:
+                            self._already_sent = True
+                            self._final_response_sent = True
+                            self._last_sent_text = text
+                            if result.message_id:
+                                self._message_id = result.message_id
+                                self._message_created_ts = time.monotonic()
+                            await self._delete_preview_message(old_message_id)
+                            return True
                     # Edit existing message
                     result = await self.adapter.edit_message(
                         chat_id=self.chat_id,
@@ -507,6 +544,8 @@ class GatewayStreamConsumer:
                     )
                     if result.success:
                         self._already_sent = True
+                        if finalize:
+                            self._final_response_sent = True
                         self._last_sent_text = text
                         # Successful edit — reset flood strike counter
                         self._flood_strikes = 0
@@ -564,9 +603,12 @@ class GatewayStreamConsumer:
                 if result.success:
                     if result.message_id:
                         self._message_id = result.message_id
+                        self._message_created_ts = time.monotonic()
                     else:
                         self._edit_supported = False
                     self._already_sent = True
+                    if finalize:
+                        self._final_response_sent = True
                     self._last_sent_text = text
                     if not result.message_id:
                         self._fallback_prefix = self._visible_prefix()

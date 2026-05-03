@@ -1056,6 +1056,44 @@ def test_load_pool_does_not_seed_copilot_when_no_token(tmp_path, monkeypatch):
     assert pool.entries() == []
 
 
+def test_load_pool_removes_stale_copilot_seeded_entry(tmp_path, monkeypatch):
+    """Auto-seeded copilot entries should disappear when the upstream token source is gone."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
+    _write_auth_store(
+        tmp_path,
+        {
+            "version": 1,
+            "credential_pool": {
+                "copilot": [
+                    {
+                        "id": "seeded-gh",
+                        "label": "gh auth token",
+                        "auth_type": "api_key",
+                        "priority": 0,
+                        "source": "gh_cli",
+                        "access_token": "stale-gh-token",
+                        "base_url": "https://api.githubcopilot.com",
+                    }
+                ]
+            },
+        },
+    )
+
+    monkeypatch.setattr(
+        "hermes_cli.copilot_auth.resolve_copilot_token",
+        lambda: ("", ""),
+    )
+
+    from agent.credential_pool import load_pool
+
+    pool = load_pool("copilot")
+
+    assert pool.entries() == []
+
+    auth_payload = json.loads((tmp_path / "hermes" / "auth.json").read_text())
+    assert auth_payload["credential_pool"]["copilot"] == []
+
+
 def test_load_pool_seeds_qwen_oauth_via_cli_tokens(tmp_path, monkeypatch):
     """Qwen OAuth credentials from ~/.qwen/oauth_creds.json should be seeded into the pool."""
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
@@ -1102,6 +1140,48 @@ def test_load_pool_does_not_seed_qwen_oauth_when_no_token(tmp_path, monkeypatch)
 
     assert not pool.has_credentials()
     assert pool.entries() == []
+
+
+def test_load_pool_removes_stale_qwen_seeded_entry(tmp_path, monkeypatch):
+    """Auto-seeded qwen entries should disappear when CLI credentials are unavailable."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
+    _write_auth_store(
+        tmp_path,
+        {
+            "version": 1,
+            "credential_pool": {
+                "qwen-oauth": [
+                    {
+                        "id": "seeded-qwen",
+                        "label": "qwen creds",
+                        "auth_type": "oauth",
+                        "priority": 0,
+                        "source": "qwen-cli",
+                        "access_token": "stale-qwen-token",
+                        "base_url": "https://portal.qwen.ai/v1",
+                    }
+                ]
+            },
+        },
+    )
+
+    from hermes_cli.auth import AuthError
+
+    monkeypatch.setattr(
+        "hermes_cli.auth.resolve_qwen_runtime_credentials",
+        lambda **kw: (_ for _ in ()).throw(
+            AuthError("Qwen CLI credentials not found.", provider="qwen-oauth", code="qwen_auth_missing")
+        ),
+    )
+
+    from agent.credential_pool import load_pool
+
+    pool = load_pool("qwen-oauth")
+
+    assert pool.entries() == []
+
+    auth_payload = json.loads((tmp_path / "hermes" / "auth.json").read_text())
+    assert auth_payload["credential_pool"]["qwen-oauth"] == []
 
 
 def test_nous_seed_from_singletons_preserves_obtained_at_timestamps(tmp_path, monkeypatch):

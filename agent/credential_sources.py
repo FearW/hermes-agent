@@ -12,14 +12,14 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterable, List, Optional
+from typing import Callable, List, Optional
 
 
 @dataclass(frozen=True)
 class RemovalResult:
     cleaned: List[str] = field(default_factory=list)
     hints: List[str] = field(default_factory=list)
-    suppress: bool = True
+    suppress_sources: Optional[List[str]] = None
 
 
 @dataclass(frozen=True)
@@ -31,6 +31,10 @@ class RemovalStep:
 
 def _source(entry: object) -> str:
     return str(getattr(entry, "source", "") or "")
+
+
+def _default_suppression_result() -> RemovalResult:
+    return RemovalResult(suppress_sources=None)
 
 
 def _remove_provider_state(provider: str) -> bool:
@@ -55,7 +59,7 @@ def _remove_env(provider: str, entry: object) -> RemovalResult:
     source = _source(entry)
     env_var = source.split(":", 1)[1] if source.startswith("env:") else ""
     if not env_var:
-        return RemovalResult()
+        return _default_suppression_result()
 
     had_process_value = env_var in os.environ
     from hermes_cli.config.env import remove_env_value
@@ -69,42 +73,43 @@ def _remove_env(provider: str, entry: object) -> RemovalResult:
         hints.append(
             f"{env_var} is still set in your shell environment; unset it there to stop future sessions from seeing it."
         )
-    return RemovalResult(cleaned=cleaned, hints=hints, suppress=True)
+    return RemovalResult(cleaned=cleaned, hints=hints)
 
 
 def _remove_copilot(provider: str, entry: object) -> RemovalResult:
-    from hermes_cli.auth import suppress_credential_source
-
-    for source in (
+    return RemovalResult(suppress_sources=[
         "gh_cli",
         "env:COPILOT_GITHUB_TOKEN",
         "env:GH_TOKEN",
         "env:GITHUB_TOKEN",
-    ):
-        suppress_credential_source(provider, source)
-    return RemovalResult(suppress=False)
+    ])
 
 
 def _remove_provider_state_source(provider: str, entry: object) -> RemovalResult:
     cleaned = []
     if _remove_provider_state(provider):
         cleaned.append(f"Cleared auth.json providers.{provider}")
-    return RemovalResult(cleaned=cleaned, suppress=True)
+    return RemovalResult(cleaned=cleaned)
 
 
 def _remove_codex(provider: str, entry: object) -> RemovalResult:
-    from hermes_cli.auth import suppress_credential_source
-
     cleaned = []
     if _remove_provider_state(provider):
         cleaned.append("Cleared auth.json providers.openai-codex")
-    suppress_credential_source(provider, "device_code")
-    return RemovalResult(cleaned=cleaned, suppress=False)
+    return RemovalResult(cleaned=cleaned, suppress_sources=["device_code"])
 
 
 def _remove_anthropic_external(provider: str, entry: object) -> RemovalResult:
     source = _source(entry)
     cleaned: List[str] = []
+    if source == "claude_code":
+        claude_credentials_path = _claude_code_credentials_path()
+        if claude_credentials_path.exists():
+            try:
+                claude_credentials_path.unlink()
+                cleaned.append("Removed ~/.claude/.credentials.json")
+            except OSError:
+                pass
     if source in {"hermes_pkce", "manual:hermes_pkce"}:
         oauth_path = _hermes_oauth_path()
         if oauth_path.exists():
@@ -113,29 +118,25 @@ def _remove_anthropic_external(provider: str, entry: object) -> RemovalResult:
                 cleaned.append("Removed ~/.hermes/.anthropic_oauth.json")
             except OSError:
                 pass
-    return RemovalResult(cleaned=cleaned, suppress=True)
+    if source == "manual:hermes_pkce":
+        return RemovalResult(cleaned=cleaned, suppress_sources=["hermes_pkce"])
+    return RemovalResult(cleaned=cleaned)
 
 
 def _remove_qwen(provider: str, entry: object) -> RemovalResult:
     source = _source(entry)
-    from hermes_cli.auth import suppress_credential_source
-
     if source == "manual:qwen_cli":
-        suppress_credential_source(provider, "qwen-cli")
-        return RemovalResult(suppress=False)
-    return RemovalResult(suppress=True)
+        return RemovalResult(suppress_sources=["qwen-cli"])
+    return _default_suppression_result()
 
 
 def _remove_minimax(provider: str, entry: object) -> RemovalResult:
-    from hermes_cli.auth import suppress_credential_source
-
     cleaned = []
     if _remove_provider_state(provider):
         cleaned.append("Cleared auth.json providers.minimax-oauth")
     if _source(entry) == "manual:minimax_oauth":
-        suppress_credential_source(provider, "oauth")
-        return RemovalResult(cleaned=cleaned, suppress=False)
-    return RemovalResult(cleaned=cleaned, suppress=True)
+        return RemovalResult(cleaned=cleaned, suppress_sources=["oauth"])
+    return RemovalResult(cleaned=cleaned)
 
 
 def _remove_custom_config(provider: str, entry: object) -> RemovalResult:
@@ -143,7 +144,6 @@ def _remove_custom_config(provider: str, entry: object) -> RemovalResult:
         hints=[
             "This credential also exists in config.yaml custom_providers; remove the api_key field there if you do not want it re-enabled."
         ],
-        suppress=True,
     )
 
 
@@ -151,6 +151,10 @@ def _hermes_oauth_path() -> Path:
     from hermes_constants import get_hermes_home
 
     return get_hermes_home() / ".anthropic_oauth.json"
+
+
+def _claude_code_credentials_path() -> Path:
+    return Path.home() / ".claude" / ".credentials.json"
 
 
 def _provider_is(provider: str, *names: str) -> bool:
@@ -209,7 +213,7 @@ _REGISTRY: List[RemovalStep] = [
     RemovalStep(
         "Custom provider config.yaml api_key field",
         lambda provider, source: provider.startswith("custom:")
-        and _source_is(source, "model_config") or _source_starts(source, "config:"),
+        and (_source_is(source, "model_config") or _source_starts(source, "config:")),
         _remove_custom_config,
     ),
     RemovalStep(
@@ -229,4 +233,33 @@ def find_removal_step(provider: str, source: str) -> Optional[RemovalStep]:
     return None
 
 
-__all__ = ["RemovalResult", "RemovalStep", "_REGISTRY", "find_removal_step"]
+def remove_credential_source(provider: str, entry: object) -> Optional[RemovalResult]:
+    """Run any registered external cleanup and apply suppression markers.
+
+    Returns the ``RemovalResult`` when a matching step exists, or ``None`` when
+    the source is purely local and removing the pool entry is already complete.
+    """
+    step = find_removal_step(provider, _source(entry))
+    if step is None:
+        return None
+
+    result = step.remove_fn(provider, entry)
+    suppress_sources = result.suppress_sources
+    if suppress_sources is None:
+        suppress_sources = [_source(entry)]
+
+    if suppress_sources:
+        from hermes_cli.auth import suppress_credential_source
+
+        for source_name in suppress_sources:
+            suppress_credential_source(provider, source_name)
+    return result
+
+
+__all__ = [
+    "RemovalResult",
+    "RemovalStep",
+    "_REGISTRY",
+    "find_removal_step",
+    "remove_credential_source",
+]

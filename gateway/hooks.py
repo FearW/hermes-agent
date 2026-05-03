@@ -192,3 +192,34 @@ class HookRegistry:
                     await result
             except Exception as e:
                 print(f"[hooks] Error in handler for '{event_type}': {e}", flush=True)
+
+    async def emit_collect(
+        self,
+        event_type: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> List[Any]:
+        """Fire handlers and collect non-None return values.
+
+        Used by decision-style hooks where downstream code needs handler
+        responses instead of pure fire-and-forget behavior.
+        """
+        if context is None:
+            context = {}
+
+        handlers = list(self._handlers.get(event_type, []))
+        if ":" in event_type:
+            base = event_type.split(":")[0]
+            handlers.extend(self._handlers.get(f"{base}:*", []))
+
+        results: List[Any] = []
+        for fn in handlers:
+            try:
+                result = fn(event_type, context)
+                if asyncio.iscoroutine(result):
+                    result = await result
+                if result is not None:
+                    results.append(result)
+            except Exception as e:
+                print(f"[hooks] Error in handler for '{event_type}': {e}", flush=True)
+
+        return results

@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -905,6 +906,52 @@ def test_auth_remove_claude_code_suppresses_reseed(tmp_path, monkeypatch):
     assert "claude_code" in suppressed["anthropic"]
 
 
+def test_auth_remove_claude_code_removes_credentials_file(tmp_path, monkeypatch, capsys):
+    """Removing a claude_code entry should also delete ~/.claude/.credentials.json."""
+    hermes_home = tmp_path / "hermes"
+    hermes_home.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    _write_auth_store(
+        tmp_path,
+        {
+            "version": 1,
+            "credential_pool": {
+                "anthropic": [{
+                    "id": "cc1",
+                    "label": "claude_code",
+                    "auth_type": "oauth",
+                    "priority": 0,
+                    "source": "claude_code",
+                    "access_token": "cc-token",
+                }]
+            },
+        },
+    )
+
+    cred_path = tmp_path / ".claude" / ".credentials.json"
+    cred_path.parent.mkdir(parents=True, exist_ok=True)
+    cred_path.write_text(json.dumps({
+        "claudeAiOauth": {
+            "accessToken": "cc-token",
+            "refreshToken": "cc-refresh",
+            "expiresAt": 9999999999999,
+        }
+    }))
+
+    from types import SimpleNamespace
+    from hermes_cli.auth_commands import auth_remove_command
+
+    monkeypatch.setattr("hermes_cli.auth.is_provider_explicitly_configured", lambda pid: pid == "anthropic")
+
+    auth_remove_command(SimpleNamespace(provider="anthropic", target="1"))
+
+    assert not cred_path.exists()
+    out = capsys.readouterr().out
+    assert "Removed ~/.claude/.credentials.json" in out
+
+
 def test_unsuppress_credential_source_clears_marker(tmp_path, monkeypatch):
     """unsuppress_credential_source() removes a previously-set marker."""
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
@@ -1503,6 +1550,45 @@ def test_credential_sources_find_step_copilot_before_generic_env(tmp_path, monke
     assert "env-seeded" in step.description.lower()
 
 
+def test_remove_credential_source_defaults_to_original_source(tmp_path, monkeypatch):
+    """Generic sources suppress their own source key through the unified entry point."""
+    hermes_home = tmp_path / "hermes"
+    hermes_home.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+
+    from types import SimpleNamespace
+    from agent.credential_sources import remove_credential_source
+    from hermes_cli.auth import is_source_suppressed
+
+    result = remove_credential_source("xai", SimpleNamespace(source="env:XAI_API_KEY"))
+    assert result is not None
+    assert is_source_suppressed("xai", "env:XAI_API_KEY") is True
+
+
+def test_remove_credential_source_can_override_suppressed_source(tmp_path, monkeypatch):
+    """Canonical suppression targets still work through the unified entry point."""
+    hermes_home = tmp_path / "hermes"
+    hermes_home.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+
+    _write_auth_store(
+        tmp_path,
+        {
+            "version": 1,
+            "providers": {"openai-codex": {"tokens": {"access_token": "t", "refresh_token": "r"}}},
+        },
+    )
+
+    from types import SimpleNamespace
+    from agent.credential_sources import remove_credential_source
+    from hermes_cli.auth import is_source_suppressed
+
+    result = remove_credential_source("openai-codex", SimpleNamespace(source="manual:device_code"))
+    assert result is not None
+    assert is_source_suppressed("openai-codex", "device_code") is True
+    assert is_source_suppressed("openai-codex", "manual:device_code") is False
+
+
 def test_auth_remove_copilot_suppresses_all_variants(tmp_path, monkeypatch):
     """Removing any copilot source must suppress gh_cli + all env:* variants
     so the duplicate-seed paths don't resurrect the credential.
@@ -1531,6 +1617,15 @@ def test_auth_remove_copilot_suppresses_all_variants(tmp_path, monkeypatch):
     from types import SimpleNamespace
     from hermes_cli.auth import is_source_suppressed
     from hermes_cli.auth_commands import auth_remove_command
+
+    monkeypatch.setattr(
+        "hermes_cli.copilot_auth.resolve_copilot_token",
+        lambda: ("gho_fake_token_abc123", "gh auth token"),
+    )
+    monkeypatch.setattr(
+        "hermes_cli.copilot_auth.get_copilot_api_token",
+        lambda token: token,
+    )
 
     auth_remove_command(SimpleNamespace(provider="copilot", target="1"))
 

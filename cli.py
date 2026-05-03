@@ -3302,6 +3302,7 @@ class HermesCLI:
         Processing / Anthropic fast mode, attach `request_overrides` so the
         API call is marked accordingly.
         """
+        from agent.smart_model_routing import resolve_turn_route
         from hermes_cli.models import resolve_fast_mode_overrides
 
         runtime = {
@@ -3313,18 +3314,23 @@ class HermesCLI:
             "args": list(self.acp_args or []),
             "credential_pool": getattr(self, "_credential_pool", None),
         }
-        route = {
-            "model": self.model,
-            "runtime": runtime,
-            "signature": (
-                self.model,
-                runtime["provider"],
-                runtime["base_url"],
-                runtime["api_mode"],
-                runtime["command"],
-                tuple(runtime["args"]),
+        primary = {"model": self.model, **runtime}
+        route = resolve_turn_route(
+            user_message,
+            getattr(self, "_smart_model_routing", None),
+            primary,
+        )
+        route.setdefault(
+            "signature",
+            (
+                route.get("model"),
+                route.get("runtime", {}).get("provider"),
+                route.get("runtime", {}).get("base_url"),
+                route.get("runtime", {}).get("api_mode"),
+                route.get("runtime", {}).get("command"),
+                tuple(route.get("runtime", {}).get("args") or []),
             ),
-        }
+        )
 
         service_tier = getattr(self, "service_tier", None)
         if not service_tier:

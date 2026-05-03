@@ -49,7 +49,7 @@ _TIER_HIGH = {
 }
 
 _TIER_MEDIUM = {
-    "tool_progress": "off",
+    "tool_progress": "new",
     "show_reasoning": False,
     "tool_preview_length": 40,
     "streaming": None,
@@ -75,7 +75,7 @@ _PLATFORM_DEFAULTS: dict[str, dict[str, Any]] = {
     "discord":     _TIER_HIGH,
 
     # Tier 2 — edit support, often customer/workspace channels
-    "slack":           _TIER_MEDIUM,
+    "slack":           {**_TIER_MEDIUM, "tool_progress": "off"},
     "mattermost":      _TIER_MEDIUM,
     "matrix":          _TIER_MEDIUM,
     "feishu":          _TIER_MEDIUM,
@@ -144,9 +144,11 @@ def resolve_display_setting(
                 return _normalise(setting, val)
 
     # 2. Global user setting (display.<key>)
-    val = display_cfg.get(setting)
-    if val is not None:
-        return _normalise(setting, val)
+    # display.streaming is CLI-only and must not override gateway defaults.
+    if setting != "streaming":
+        val = display_cfg.get(setting)
+        if val is not None:
+            return _normalise(setting, val)
 
     # 3. Built-in platform default
     plat_defaults = _PLATFORM_DEFAULTS.get(platform_key)
