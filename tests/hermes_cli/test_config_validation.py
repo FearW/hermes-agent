@@ -1,8 +1,10 @@
 """Tests for config.yaml structure validation (validate_config_structure)."""
 
+import yaml
 import pytest
 
 from hermes_cli.config import validate_config_structure, ConfigIssue
+from hermes_cli.config.loader import get_config_path, save_config
 
 
 class TestCustomProvidersValidation:
@@ -127,6 +129,17 @@ class TestFallbackModelValidation:
             "fallback_model": "gpt-5-mini",
         })
         assert not any("fallback" in i.message.lower() for i in issues)
+
+    def test_save_config_accepts_string_fallback(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+
+        save_config({
+            "model": {"default": "gpt-5.4", "provider": "cliproxyapi"},
+            "fallback_model": "MiniMax-M2.7",
+        })
+
+        saved = yaml.safe_load(get_config_path().read_text(encoding="utf-8"))
+        assert saved["fallback_model"] == "MiniMax-M2.7"
 
     def test_empty_fallback_dict_no_issues(self):
         """Empty fallback_model dict means disabled — no warnings needed."""
