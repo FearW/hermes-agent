@@ -134,7 +134,7 @@ async def test_resume_clears_session_scoped_approval_and_yolo_state():
 
     result = await runner._handle_resume_command(_make_event("/resume Resumed Work"))
 
-    assert "Resumed session" in result
+    assert "已恢复会话" in result
     assert is_approved(session_key, "recursive delete") is False
     assert is_session_yolo_enabled(session_key) is False
     assert session_key not in runner._pending_approvals

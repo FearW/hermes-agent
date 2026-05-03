@@ -135,16 +135,14 @@ def slack_manifest_command(args) -> int:
         target.write_text(payload, encoding="utf-8")
         print(f"Slack manifest written to: {target}", file=sys.stderr)
         print(
-            "\nNext steps:\n"
-            "  1. Open https://api.slack.com/apps and pick your Hermes app\n"
-            "     (or create a new one: Create New App → From an app manifest).\n"
-            f"  2. Features → App Manifest → paste the contents of\n"
+            "\n下一步：\n"
+            "  1. 打开 https://api.slack.com/apps，并选择你的 Hermes 应用\n"
+            "     （或新建一个：Create New App → From an app manifest）。\n"
+            f"  2. 打开 Features → App Manifest，然后粘贴以下文件内容：\n"
             f"     {target}\n"
-            "  3. Save; Slack will prompt to reinstall the app if scopes or\n"
-            "     slash commands changed.\n"
-            "  4. Make sure Socket Mode is enabled and you have a bot token\n"
-            "     (xoxb-...) and app token (xapp-...) configured via\n"
-            "     `hermes setup`.\n",
+            "  3. 保存；如果 scopes 或 slash commands 有变化，Slack 会提示你重新安装应用。\n"
+            "  4. 确保已启用 Socket Mode，并且已通过 `hermes setup` 配置 bot token\n"
+            "     （xoxb-...）和 app token（xapp-...）。\n",
             file=sys.stderr,
         )
     else:

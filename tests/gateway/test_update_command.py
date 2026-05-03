@@ -145,7 +145,7 @@ class TestHandleUpdateCommand:
              patch("subprocess.Popen", mock_popen):
             result = await runner._handle_update_command(event)
 
-        assert "Starting Hermes update" in result
+        assert "正在启动 Hermes 更新" in result
         call_args = mock_popen.call_args[0][0]
         # The update_cmd uses sys.executable -m hermes_cli.main
         joined = " ".join(call_args) if isinstance(call_args, list) else call_args
@@ -241,7 +241,7 @@ class TestHandleUpdateCommand:
         assert call_args[0] == "/usr/bin/setsid"
         assert call_args[1] == "bash"
         assert ".update_exit_code" in call_args[-1]
-        assert "Starting Hermes update" in result
+        assert "正在启动 Hermes 更新" in result
 
     @pytest.mark.asyncio
     async def test_fallback_when_no_setsid(self, tmp_path):
@@ -281,7 +281,7 @@ class TestHandleUpdateCommand:
         # start_new_session=True should be in kwargs
         call_kwargs = mock_popen.call_args[1]
         assert call_kwargs.get("start_new_session") is True
-        assert "Starting Hermes update" in result
+        assert "正在启动 Hermes 更新" in result
 
     @pytest.mark.asyncio
     async def test_popen_failure_cleans_up(self, tmp_path):
@@ -304,7 +304,7 @@ class TestHandleUpdateCommand:
              patch("subprocess.Popen", side_effect=OSError("spawn failed")):
             result = await runner._handle_update_command(event)
 
-        assert "Failed to start update" in result
+        assert "启动更新失败" in result
         # Pending file should be cleaned up
         assert not (hermes_home / ".update_pending.json").exists()
         assert not (hermes_home / ".update_exit_code").exists()
@@ -330,7 +330,7 @@ class TestHandleUpdateCommand:
              patch("subprocess.Popen"):
             result = await runner._handle_update_command(event)
 
-        assert "stream progress" in result
+        assert "持续推送进度" in result
 
 
 # ---------------------------------------------------------------------------
@@ -385,9 +385,9 @@ class TestSendUpdateNotification:
         claimed_path = hermes_home / ".update_pending.claimed.json"
         claimed_path.write_text(json.dumps({
             "platform": "telegram", "chat_id": "67890", "user_id": "12345",
-        }))
-        (hermes_home / ".update_output.txt").write_text("done")
-        (hermes_home / ".update_exit_code").write_text("0")
+        }), encoding="utf-8")
+        (hermes_home / ".update_output.txt").write_text("done", encoding="utf-8")
+        (hermes_home / ".update_exit_code").write_text("0", encoding="utf-8")
 
         mock_adapter = AsyncMock()
         runner.adapters = {Platform.TELEGRAM: mock_adapter}
@@ -413,11 +413,12 @@ class TestSendUpdateNotification:
             "user_id": "12345",
             "timestamp": "2026-03-04T21:00:00",
         }
-        (hermes_home / ".update_pending.json").write_text(json.dumps(pending))
+        (hermes_home / ".update_pending.json").write_text(json.dumps(pending), encoding="utf-8")
         (hermes_home / ".update_output.txt").write_text(
-            "→ Found 3 new commit(s)\n✓ Code updated!\n✓ Update complete!"
+            "→ Found 3 new commit(s)\n✓ Code updated!\n✓ Update complete!",
+            encoding="utf-8",
         )
-        (hermes_home / ".update_exit_code").write_text("0")
+        (hermes_home / ".update_exit_code").write_text("0", encoding="utf-8")
 
         # Mock the adapter
         mock_adapter = AsyncMock()
@@ -430,7 +431,7 @@ class TestSendUpdateNotification:
         mock_adapter.send.assert_called_once()
         call_args = mock_adapter.send.call_args
         assert call_args[0][0] == "67890"  # chat_id
-        assert "Update complete" in call_args[0][1] or "update finished" in call_args[0][1].lower()
+        assert "更新已完成" in call_args[0][1] or "更新完成" in call_args[0][1]
 
     @pytest.mark.asyncio
     async def test_strips_ansi_codes(self, tmp_path):
@@ -440,11 +441,12 @@ class TestSendUpdateNotification:
         hermes_home.mkdir()
 
         pending = {"platform": "telegram", "chat_id": "111", "user_id": "222"}
-        (hermes_home / ".update_pending.json").write_text(json.dumps(pending))
+        (hermes_home / ".update_pending.json").write_text(json.dumps(pending), encoding="utf-8")
         (hermes_home / ".update_output.txt").write_text(
-            "\x1b[32m✓ Code updated!\x1b[0m\n\x1b[1mDone\x1b[0m"
+            "\x1b[32m✓ 代码已更新！\x1b[0m\n\x1b[1m完成\x1b[0m",
+            encoding="utf-8",
         )
-        (hermes_home / ".update_exit_code").write_text("0")
+        (hermes_home / ".update_exit_code").write_text("0", encoding="utf-8")
 
         mock_adapter = AsyncMock()
         runner.adapters = {Platform.TELEGRAM: mock_adapter}
@@ -454,7 +456,7 @@ class TestSendUpdateNotification:
 
         sent_text = mock_adapter.send.call_args[0][1]
         assert "\x1b[" not in sent_text
-        assert "Code updated" in sent_text
+        assert "代码已更新" in sent_text
 
     @pytest.mark.asyncio
     async def test_truncates_long_output(self, tmp_path):
@@ -464,9 +466,9 @@ class TestSendUpdateNotification:
         hermes_home.mkdir()
 
         pending = {"platform": "telegram", "chat_id": "111", "user_id": "222"}
-        (hermes_home / ".update_pending.json").write_text(json.dumps(pending))
-        (hermes_home / ".update_output.txt").write_text("x" * 5000)
-        (hermes_home / ".update_exit_code").write_text("0")
+        (hermes_home / ".update_pending.json").write_text(json.dumps(pending), encoding="utf-8")
+        (hermes_home / ".update_output.txt").write_text("x" * 5000, encoding="utf-8")
+        (hermes_home / ".update_exit_code").write_text("0", encoding="utf-8")
 
         mock_adapter = AsyncMock()
         runner.adapters = {Platform.TELEGRAM: mock_adapter}
@@ -488,9 +490,9 @@ class TestSendUpdateNotification:
         hermes_home.mkdir()
 
         pending = {"platform": "telegram", "chat_id": "111", "user_id": "222"}
-        (hermes_home / ".update_pending.json").write_text(json.dumps(pending))
-        (hermes_home / ".update_output.txt").write_text("Traceback: boom")
-        (hermes_home / ".update_exit_code").write_text("1")
+        (hermes_home / ".update_pending.json").write_text(json.dumps(pending), encoding="utf-8")
+        (hermes_home / ".update_output.txt").write_text("Traceback: boom", encoding="utf-8")
+        (hermes_home / ".update_exit_code").write_text("1", encoding="utf-8")
 
         mock_adapter = AsyncMock()
         runner.adapters = {Platform.TELEGRAM: mock_adapter}
@@ -500,7 +502,7 @@ class TestSendUpdateNotification:
 
         assert result is True
         sent_text = mock_adapter.send.call_args[0][1]
-        assert "update failed" in sent_text.lower()
+        assert "更新失败" in sent_text.lower()
         assert "Traceback: boom" in sent_text
 
     @pytest.mark.asyncio
@@ -511,9 +513,9 @@ class TestSendUpdateNotification:
         hermes_home.mkdir()
 
         pending = {"platform": "telegram", "chat_id": "111", "user_id": "222"}
-        (hermes_home / ".update_pending.json").write_text(json.dumps(pending))
+        (hermes_home / ".update_pending.json").write_text(json.dumps(pending), encoding="utf-8")
         # No .update_output.txt created
-        (hermes_home / ".update_exit_code").write_text("0")
+        (hermes_home / ".update_exit_code").write_text("0", encoding="utf-8")
 
         mock_adapter = AsyncMock()
         runner.adapters = {Platform.TELEGRAM: mock_adapter}
@@ -522,7 +524,7 @@ class TestSendUpdateNotification:
             await runner._send_update_notification()
 
         sent_text = mock_adapter.send.call_args[0][1]
-        assert "finished successfully" in sent_text
+        assert "更新成功完成" in sent_text or "更新已完成" in sent_text
 
     @pytest.mark.asyncio
     async def test_cleans_up_files_after_notification(self, tmp_path):
@@ -536,9 +538,9 @@ class TestSendUpdateNotification:
         exit_code_path = hermes_home / ".update_exit_code"
         pending_path.write_text(json.dumps({
             "platform": "telegram", "chat_id": "111", "user_id": "222",
-        }))
-        output_path.write_text("✓ Done")
-        exit_code_path.write_text("0")
+        }), encoding="utf-8")
+        output_path.write_text("✓ Done", encoding="utf-8")
+        exit_code_path.write_text("0", encoding="utf-8")
 
         mock_adapter = AsyncMock()
         runner.adapters = {Platform.TELEGRAM: mock_adapter}
@@ -562,9 +564,9 @@ class TestSendUpdateNotification:
         exit_code_path = hermes_home / ".update_exit_code"
         pending_path.write_text(json.dumps({
             "platform": "telegram", "chat_id": "111", "user_id": "222",
-        }))
-        output_path.write_text("✓ Done")
-        exit_code_path.write_text("0")
+        }), encoding="utf-8")
+        output_path.write_text("✓ Done", encoding="utf-8")
+        exit_code_path.write_text("0", encoding="utf-8")
 
         # Adapter send raises
         mock_adapter = AsyncMock()
@@ -587,7 +589,7 @@ class TestSendUpdateNotification:
         hermes_home.mkdir()
 
         pending_path = hermes_home / ".update_pending.json"
-        pending_path.write_text("{corrupt json!!")
+        pending_path.write_text("{corrupt json!!", encoding="utf-8")
 
         with patch("gateway.run._hermes_home", hermes_home):
             # Should not raise
@@ -607,9 +609,9 @@ class TestSendUpdateNotification:
         pending_path = hermes_home / ".update_pending.json"
         output_path = hermes_home / ".update_output.txt"
         exit_code_path = hermes_home / ".update_exit_code"
-        pending_path.write_text(json.dumps(pending))
-        output_path.write_text("Done")
-        exit_code_path.write_text("0")
+        pending_path.write_text(json.dumps(pending), encoding="utf-8")
+        output_path.write_text("Done", encoding="utf-8")
+        exit_code_path.write_text("0", encoding="utf-8")
 
         # Only telegram adapter available, but pending says discord
         mock_adapter = AsyncMock()

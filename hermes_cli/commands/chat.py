@@ -7,7 +7,7 @@ from typing import Optional
 
 def _require_tty(command_name: str) -> None:
     if not sys.stdin.isatty():
-        print(f"Error: 'hermes {command_name}' requires an interactive terminal. Run it directly in your terminal instead.", file=sys.stderr)
+        print(f"错误：`hermes {command_name}` 需要交互式终端。请直接在你的终端中运行。", file=sys.stderr)
         sys.exit(1)
 
 
@@ -22,8 +22,8 @@ def cmd_chat(args):
             if resolved:
                 args.resume = resolved
             else:
-                print(f"No session found matching '{continue_val}'.")
-                print("Use 'hermes sessions list' to see available sessions.")
+                print(f"未找到与“{continue_val}”匹配的会话。")
+                print("可运行 `hermes sessions list` 查看可用会话。")
                 sys.exit(1)
         else:
             # -c with no argument — continue the most recent session
@@ -31,7 +31,7 @@ def cmd_chat(args):
             if last_id:
                 args.resume = last_id
             else:
-                print("No previous CLI session found to continue.")
+                print("没有找到可继续的上一条 CLI 会话。")
                 sys.exit(1)
 
     # Resolve --resume by title if it's not a direct session ID
@@ -46,28 +46,28 @@ def cmd_chat(args):
     # First-run guard: check if any provider is configured before launching
     if not _has_any_provider_configured():
         print()
-        print("It looks like Hermes isn't configured yet -- no API keys or providers found.")
+        print("看起来 Hermes 还没有完成配置，目前未找到 API Key 或模型提供方。")
         print()
-        print("  Run:  hermes setup")
+        print("  运行：hermes setup")
         print()
 
         from hermes_cli.setup import is_interactive_stdin, print_noninteractive_setup_guidance
 
         if not is_interactive_stdin():
             print_noninteractive_setup_guidance(
-                "No interactive TTY detected for the first-run setup prompt."
+                "首次运行的设置向导未检测到交互式 TTY。"
             )
             sys.exit(1)
 
         try:
-            reply = input("Run setup now? [Y/n] ").strip().lower()
+            reply = input("现在运行设置向导吗？[Y/n] ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             reply = "n"
         if reply in ("", "y", "yes"):
             cmd_setup(args)
             return
         print()
-        print("You can run 'hermes setup' at any time to configure.")
+        print("你可以随时运行 `hermes setup` 完成配置。")
         sys.exit(1)
 
     # Start update check in background (runs while other init happens)
@@ -117,7 +117,6 @@ def cmd_chat(args):
     try:
         cli_main(**kwargs)
     except ValueError as e:
-        print(f"Error: {e}")
+        print(f"错误：{e}")
         sys.exit(1)
-
 

@@ -12,7 +12,7 @@ Security features (based on OWASP + NIST SP 800-63-4 guidance):
   - Max 3 pending codes per platform
   - Rate limiting: 1 request per user per 10 minutes
   - Lockout after 5 failed approval attempts (1 hour)
-  - File permissions: chmod 0600 on all data files
+  - File permissions: best-effort owner-only writes on POSIX data files
   - Codes are never logged to stdout
 
 Storage: ~/.hermes/pairing/
@@ -47,7 +47,7 @@ PAIRING_DIR = get_hermes_dir("platforms/pairing", "pairing")
 
 
 def _secure_write(path: Path, data: str) -> None:
-    """Write data to file with restrictive permissions (owner read/write only).
+    """Write data to file with restrictive permissions when supported.
 
     Uses a temp-file + atomic rename so readers always see either the old
     complete file or the new one — never a partial write.

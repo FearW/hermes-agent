@@ -61,18 +61,18 @@ def cmd_profile(args):
         # Bare `hermes profile` — show current profile status
         profile_name = get_active_profile_name()
         dhh = display_hermes_home()
-        print(f"\nActive profile: {profile_name}")
-        print(f"Path:           {dhh}")
+        print(f"\n当前配置档：{profile_name}")
+        print(f"路径：         {dhh}")
 
         profiles = list_profiles()
         for p in profiles:
             if p.name == profile_name or (profile_name == "default" and p.is_default):
                 if p.model:
-                    print(f"Model:          {p.model}" + (f" ({p.provider})" if p.provider else ""))
-                print(f"Gateway:        {'running' if p.gateway_running else 'stopped'}")
-                print(f"Skills:         {p.skill_count} installed")
+                    print(f"模型：         {p.model}" + (f" ({p.provider})" if p.provider else ""))
+                print(f"网关：         {'运行中' if p.gateway_running else '已停止'}")
+                print(f"技能：         已安装 {p.skill_count} 个")
                 if p.alias_path:
-                    print(f"Alias:          {p.name} → hermes -p {p.name}")
+                    print(f"别名：         {p.name} → hermes -p {p.name}")
                 break
         print()
         return
@@ -82,18 +82,18 @@ def cmd_profile(args):
         active = get_active_profile_name()
 
         if not profiles:
-            print("No profiles found.")
+            print("未找到任何配置档。")
             return
 
         # Header
-        print(f"\n {'Profile':<16} {'Model':<28} {'Gateway':<12} {'Alias'}")
+        print(f"\n {'配置档':<16} {'模型':<28} {'网关':<12} {'别名'}")
         print(f" {'─' * 15}    {'─' * 27}    {'─' * 11}    {'─' * 12}")
 
         for p in profiles:
             marker = " ◆" if (p.name == active or (active == "default" and p.is_default)) else "  "
             name = p.name
             model = (p.model or "—")[:26]
-            gw = "running" if p.gateway_running else "stopped"
+            gw = "运行中" if p.gateway_running else "已停止"
             alias = p.name if p.alias_path else "—"
             if p.is_default:
                 alias = "—"
@@ -105,11 +105,11 @@ def cmd_profile(args):
         try:
             set_active_profile(name)
             if name == "default":
-                print(f"Switched to: default (~/.hermes)")
+                print("已切换到：default (~/.hermes)")
             else:
-                print(f"Switched to: {name}")
+                print(f"已切换到：{name}")
         except (ValueError, FileNotFoundError) as e:
-            print(f"Error: {e}")
+            print(f"错误：{e}")
             sys.exit(1)
 
     elif action == "create":
@@ -128,21 +128,21 @@ def cmd_profile(args):
                 clone_config=clone,
                 no_alias=no_alias,
             )
-            print(f"\nProfile '{name}' created at {profile_dir}")
+            print(f"\n已创建配置档“{name}”：{profile_dir}")
 
             if clone or clone_all:
                 source_label = getattr(args, "clone_from", None) or get_active_profile_name()
                 if clone_all:
-                    print(f"Full copy from {source_label}.")
+                    print(f"已从 {source_label} 完整复制。")
                 else:
-                    print(f"Cloned config, .env, SOUL.md from {source_label}.")
+                    print(f"已从 {source_label} 复制 config、.env 和 SOUL.md。")
 
             # Auto-clone Honcho config for the new profile (only with --clone/--clone-all)
             if clone or clone_all:
                 try:
                     from plugins.memory.honcho.cli import clone_honcho_for_profile
                     if clone_honcho_for_profile(name):
-                        print(f"Honcho config cloned (peer: {name})")
+                        print(f"已复制 Honcho 配置（peer：{name}）")
                 except Exception:
                     pass  # Honcho plugin not installed or not configured
 
@@ -151,25 +151,25 @@ def cmd_profile(args):
                 result = seed_profile_skills(profile_dir)
                 if result:
                     copied = len(result.get("copied", []))
-                    print(f"{copied} bundled skills synced.")
+                    print(f"已同步 {copied} 个内置技能。")
                 else:
-                    print("⚠ Skills could not be seeded. Run `{} update` to retry.".format(name))
+                    print("⚠ 技能初始化失败。可运行 `{} update` 重试。".format(name))
 
             # Create wrapper alias
             if not no_alias:
                 collision = check_alias_collision(name)
                 if collision:
-                    print(f"\n⚠ Cannot create alias '{name}' — {collision}")
-                    print(f"  Choose a custom alias:  hermes profile alias {name} --name <custom>")
-                    print(f"  Or access via flag:     hermes -p {name} chat")
+                    print(f"\n⚠ 无法创建别名“{name}”——{collision}")
+                    print(f"  可自定义别名：hermes profile alias {name} --name <custom>")
+                    print(f"  或通过参数访问：hermes -p {name} chat")
                 else:
                     wrapper_path = create_wrapper_script(name)
                     if wrapper_path:
-                        print(f"Wrapper created: {wrapper_path}")
+                        print(f"已创建包装脚本：{wrapper_path}")
                         if not _is_wrapper_dir_in_path():
-                            print(f"\n⚠ {_get_wrapper_dir()} is not in your PATH.")
-                            print(f'  Add to your shell config (~/.bashrc or ~/.zshrc):')
-                            print(f'    export PATH="$HOME/.local/bin:$PATH"')
+                            print(f"\n⚠ {_get_wrapper_dir()} 不在你的 PATH 中。")
+                            print("  请把下面这行加入 shell 配置（如 ~/.bashrc 或 ~/.zshrc）：")
+                            print('    export PATH="$HOME/.local/bin:$PATH"')
 
             # Profile dir for display
             try:
@@ -178,21 +178,21 @@ def cmd_profile(args):
                 profile_dir_display = str(profile_dir)
 
             # Next steps
-            print(f"\nNext steps:")
-            print(f"  {name} setup              Configure API keys and model")
-            print(f"  {name} chat               Start chatting")
-            print(f"  {name} gateway start      Start the messaging gateway")
+            print(f"\n下一步：")
+            print(f"  {name} setup              配置 API 密钥和模型")
+            print(f"  {name} chat               开始聊天")
+            print(f"  {name} gateway start      启动消息网关")
             if clone or clone_all:
-                print(f"\n  Edit {profile_dir_display}/.env for different API keys")
-                print(f"  Edit {profile_dir_display}/SOUL.md for different personality")
+                print(f"\n  编辑 {profile_dir_display}/.env 以使用不同的 API 密钥")
+                print(f"  编辑 {profile_dir_display}/SOUL.md 以设置不同人格")
             else:
-                print(f"\n  ⚠ This profile has no API keys yet. Run '{name} setup' first,")
-                print(f"    or it will inherit keys from your shell environment.")
-                print(f"  Edit {profile_dir_display}/SOUL.md to customize personality")
+                print(f"\n  ⚠ 这个 profile 还没有 API 密钥。请先执行 `{name} setup`，")
+                print(f"    否则它会继承你当前 shell 环境中的密钥。")
+                print(f"  编辑 {profile_dir_display}/SOUL.md 可自定义人格")
             print()
 
         except (ValueError, FileExistsError, FileNotFoundError) as e:
-            print(f"Error: {e}")
+            print(f"错误：{e}")
             sys.exit(1)
 
     elif action == "delete":
@@ -201,14 +201,14 @@ def cmd_profile(args):
         try:
             delete_profile(name, yes=yes)
         except (ValueError, FileNotFoundError) as e:
-            print(f"Error: {e}")
+            print(f"错误：{e}")
             sys.exit(1)
 
     elif action == "show":
         name = args.profile_name
         from hermes_cli.profiles import get_profile_dir, profile_exists, _read_config_model, _check_gateway_running, _count_skills
         if not profile_exists(name):
-            print(f"Error: Profile '{name}' does not exist.")
+            print(f"错误：配置档“{name}”不存在。")
             sys.exit(1)
         profile_dir = get_profile_dir(name)
         model, provider = _read_config_model(profile_dir)
@@ -216,16 +216,16 @@ def cmd_profile(args):
         skills = _count_skills(profile_dir)
         wrapper = _get_wrapper_dir() / name
 
-        print(f"\nProfile: {name}")
-        print(f"Path:    {profile_dir}")
+        print(f"\n配置档：{name}")
+        print(f"路径：   {profile_dir}")
         if model:
-            print(f"Model:   {model}" + (f" ({provider})" if provider else ""))
-        print(f"Gateway: {'running' if gw else 'stopped'}")
-        print(f"Skills:  {skills}")
-        print(f".env:    {'exists' if (profile_dir / '.env').exists() else 'not configured'}")
-        print(f"SOUL.md: {'exists' if (profile_dir / 'SOUL.md').exists() else 'not configured'}")
+            print(f"模型：   {model}" + (f" ({provider})" if provider else ""))
+        print(f"网关：   {'运行中' if gw else '已停止'}")
+        print(f"技能：   {skills}")
+        print(f".env：   {'已存在' if (profile_dir / '.env').exists() else '未配置'}")
+        print(f"SOUL.md：{'已存在' if (profile_dir / 'SOUL.md').exists() else '未配置'}")
         if wrapper.exists():
-            print(f"Alias:   {wrapper}")
+            print(f"别名：   {wrapper}")
         print()
 
     elif action == "alias":
@@ -235,38 +235,38 @@ def cmd_profile(args):
 
         from hermes_cli.profiles import profile_exists
         if not profile_exists(name):
-            print(f"Error: Profile '{name}' does not exist.")
+            print(f"错误：配置档“{name}”不存在。")
             sys.exit(1)
 
         alias_name = custom_name or name
 
         if remove:
             if remove_wrapper_script(alias_name):
-                print(f"✓ Removed alias '{alias_name}'")
+                print(f"✓ 已删除别名“{alias_name}”")
             else:
-                print(f"No alias '{alias_name}' found to remove.")
+                print(f"未找到要删除的别名“{alias_name}”。")
         else:
             collision = check_alias_collision(alias_name)
             if collision:
-                print(f"Error: {collision}")
+                print(f"错误：{collision}")
                 sys.exit(1)
             wrapper_path = create_wrapper_script(alias_name)
             if wrapper_path:
                 # If custom name, write the profile name into the wrapper
                 if custom_name:
                     wrapper_path.write_text(f'#!/bin/sh\nexec hermes -p {name} "$@"\n')
-                print(f"✓ Alias created: {wrapper_path}")
+                print(f"✓ 已创建别名：{wrapper_path}")
                 if not _is_wrapper_dir_in_path():
-                    print(f"⚠ {_get_wrapper_dir()} is not in your PATH.")
+                    print(f"⚠ {_get_wrapper_dir()} 不在你的 PATH 中。")
 
     elif action == "rename":
         from hermes_cli.profiles import rename_profile
         try:
             new_dir = rename_profile(args.old_name, args.new_name)
-            print(f"\nProfile renamed: {args.old_name} → {args.new_name}")
-            print(f"Path: {new_dir}\n")
+            print(f"\n已重命名配置档：{args.old_name} → {args.new_name}")
+            print(f"路径：{new_dir}\n")
         except (ValueError, FileExistsError, FileNotFoundError) as e:
-            print(f"Error: {e}")
+            print(f"错误：{e}")
             sys.exit(1)
 
     elif action == "export":
@@ -275,9 +275,9 @@ def cmd_profile(args):
         output = args.output or f"{name}.tar.gz"
         try:
             result_path = export_profile(name, output)
-            print(f"✓ Exported '{name}' to {result_path}")
+            print(f"✓ 已导出配置档“{name}”到 {result_path}")
         except (ValueError, FileNotFoundError) as e:
-            print(f"Error: {e}")
+            print(f"错误：{e}")
             sys.exit(1)
 
     elif action == "import":
@@ -285,17 +285,17 @@ def cmd_profile(args):
         try:
             profile_dir = import_profile(args.archive, name=getattr(args, "import_name", None))
             name = profile_dir.name
-            print(f"✓ Imported profile '{name}' at {profile_dir}")
+            print(f"✓ 已导入配置档“{name}”：{profile_dir}")
 
             # Offer to create alias
             collision = check_alias_collision(name)
             if not collision:
                 wrapper_path = create_wrapper_script(name)
                 if wrapper_path:
-                    print(f"  Wrapper created: {wrapper_path}")
+                    print(f"  已创建包装脚本：{wrapper_path}")
             print()
         except (ValueError, FileExistsError, FileNotFoundError) as e:
-            print(f"Error: {e}")
+            print(f"错误：{e}")
             sys.exit(1)
 
 
@@ -305,8 +305,8 @@ def cmd_dashboard(args):
         import fastapi  # noqa: F401
         import uvicorn  # noqa: F401
     except ImportError:
-        print("Web UI dependencies not installed.")
-        print("Install them with:  pip install hermes-agent[web]")
+        print("尚未安装 Web UI 依赖。")
+        print("可运行：pip install hermes-agent[web]")
         sys.exit(1)
 
     if not _build_web_ui(PROJECT_ROOT / "web", fatal=True):
@@ -349,5 +349,3 @@ def cmd_logs(args):
         since=getattr(args, "since", None),
         component=getattr(args, "component", None),
     )
-
-

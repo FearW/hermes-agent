@@ -26,6 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const PROVIDERS: Array<{ kind: CPAProviderKind; label: string; hint: string }> = [
@@ -33,7 +34,7 @@ const PROVIDERS: Array<{ kind: CPAProviderKind; label: string; hint: string }> =
   { kind: "codex", label: "Codex", hint: "OpenAI / Codex OAuth 或 Key" },
   { kind: "claude", label: "Claude", hint: "Anthropic Claude 渠道" },
   { kind: "vertex", label: "Vertex", hint: "Google Vertex AI 凭据" },
-  { kind: "openai", label: "OpenAI 兼容", hint: "任意 OpenAI-compatible 上游" },
+  { kind: "openai", label: "OpenAI 兼容", hint: "任意兼容 OpenAI 的上游" },
 ];
 
 const OAUTH_PROVIDERS: Array<{ provider: CPAOAuthProvider; label: string; hint: string; needsCallback?: boolean }> = [
@@ -78,6 +79,7 @@ export default function CPAPage() {
   const [oauthStatuses, setOauthStatuses] = useState<Partial<Record<CPAOAuthProvider, CPAOAuthStatusResponse>>>({});
   const [callbackUrls, setCallbackUrls] = useState<Partial<Record<CPAOAuthProvider, string>>>({});
   const [authFiles, setAuthFiles] = useState<CPAAuthFileItem[]>([]);
+  const [togglingAuthFiles, setTogglingAuthFiles] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
   const { toast, showToast } = useToast();
 
@@ -220,6 +222,27 @@ export default function CPAPage() {
     }
   };
 
+  const toggleAuthFile = async (file: CPAAuthFileItem) => {
+    setTogglingAuthFiles((prev) => new Set(prev).add(file.name));
+    try {
+      await api.setCPAAuthFileStatus(file.name, !Boolean(file.disabled));
+      setAuthFiles((prev) =>
+        prev.map((item) =>
+          item.name === file.name ? { ...item, disabled: !item.disabled } : item
+        )
+      );
+      showToast(`认证文件 ${file.name} 已${file.disabled ? "启用" : "停用"}`, "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : `切换 ${file.name} 失败`, "error");
+    } finally {
+      setTogglingAuthFiles((prev) => {
+        const next = new Set(prev);
+        next.delete(file.name);
+        return next;
+      });
+    }
+  };
+
   if (!config) {
     return <div className="flex items-center justify-center py-24"><div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>;
   }
@@ -263,7 +286,7 @@ export default function CPAPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><Server className="h-5 w-5" />Hermes → CPA 连接</CardTitle>
           <CardDescription>
-            这里是 Hermes 唯一模型入口；上游渠道全部交给内置 CPA 管理。保存后 Hermes 会请求 CPA 的 OpenAI-compatible /v1。
+            这里是 Hermes 唯一模型入口；上游渠道全部交给内置 CPA 管理。保存后 Hermes 会请求 CPA 的兼容 /v1。
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-5 md:grid-cols-3">
@@ -329,7 +352,7 @@ export default function CPAPage() {
                         value={oauthStarts[provider]?.url || oauthStarts[provider]?.auth_url || oauthStarts[provider]?.authUrl || oauthStarts[provider]?.login_url || ""}
                       />
                     )}
-                    {oauthStarts[provider]?.state && <div className="rounded-xl border border-border/60 bg-background/35 px-3 py-2 font-mono-ui text-xs text-muted-foreground">state: {oauthStarts[provider]?.state}</div>}
+                    {oauthStarts[provider]?.state && <div className="rounded-xl border border-border/60 bg-background/35 px-3 py-2 font-mono-ui text-xs text-muted-foreground">状态：{oauthStarts[provider]?.state}</div>}
                     {oauthStatuses[provider] && <Badge variant={oauthStatuses[provider]?.status === "ok" ? "success" : oauthStatuses[provider]?.status === "error" ? "destructive" : "warning"}>{oauthStatuses[provider]?.status}</Badge>}
                     {needsCallback && <div className="grid gap-2">
                       <Label>回调 URL</Label>
@@ -356,7 +379,7 @@ export default function CPAPage() {
                 </div>
                 <div className="overflow-hidden rounded-2xl border border-border/80">
                   <table className="w-full text-left text-sm">
-                    <thead className="bg-muted/45 text-xs text-muted-foreground"><tr><th className="p-3">名称</th><th className="p-3">类型</th><th className="p-3">渠道</th><th className="p-3">状态</th><th className="p-3">更新时间</th></tr></thead>
+                    <thead className="bg-muted/45 text-xs text-muted-foreground"><tr><th className="p-3">名称</th><th className="p-3">类型</th><th className="p-3">渠道</th><th className="p-3">状态</th><th className="p-3">启停</th><th className="p-3">更新时间</th></tr></thead>
                     <tbody>
                       {authFiles.map((file) => (
                         <tr key={file.name} className="border-t border-border/70 transition-colors hover:bg-foreground/5">
@@ -364,10 +387,17 @@ export default function CPAPage() {
                           <td className="p-3">{file.type ?? "-"}</td>
                           <td className="p-3">{file.channel ?? file.provider ?? "-"}</td>
                           <td className="p-3"><Badge variant={file.disabled ? "outline" : "success"}>{file.disabled ? "停用" : "启用"}</Badge></td>
+                          <td className="p-3">
+                            <Switch
+                              checked={!file.disabled}
+                              onCheckedChange={() => toggleAuthFile(file)}
+                              disabled={togglingAuthFiles.has(file.name)}
+                            />
+                          </td>
                           <td className="p-3 text-muted-foreground">{file.modified ?? file.mtime ?? "-"}</td>
                         </tr>
                       ))}
-                      {authFiles.length === 0 && <tr><td className="p-4 text-center text-muted-foreground" colSpan={5}><Upload className="mx-auto mb-2 h-4 w-4" />暂无认证文件</td></tr>}
+                      {authFiles.length === 0 && <tr><td className="p-4 text-center text-muted-foreground" colSpan={6}><Upload className="mx-auto mb-2 h-4 w-4" />暂无认证文件</td></tr>}
                     </tbody>
                   </table>
                 </div>

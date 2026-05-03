@@ -530,6 +530,7 @@ class DreamConfigUpdate(BaseModel):
     enabled: Optional[bool] = None
     profile: Optional[str] = None
     report_actions: Optional[bool] = None
+    idle_before_maintenance_seconds: Optional[int] = None
 
 
 class EnvVarUpdate(BaseModel):
@@ -1192,10 +1193,22 @@ def _cpa_management_key() -> str:
 
 def _cpa_url(path: str, query: str = "") -> str:
     clean_path = path.strip("/")
+    url = f"{_cpa_management_base_url()}/{clean_path}"
+    return f"{url}?{query}" if query else url
+
+
+def _cpa_legacy_url(path: str, query: str = "") -> str:
+    clean_path = path.strip("/")
     if not clean_path.startswith("v0/management/"):
         clean_path = f"v0/management/{clean_path}"
     url = f"{_cpa_management_base_url()}/{clean_path}"
     return f"{url}?{query}" if query else url
+
+
+def _cpa_url_candidates(path: str, query: str = "") -> list[str]:
+    primary = _cpa_url(path, query)
+    legacy = _cpa_legacy_url(path, query)
+    return [primary] if primary == legacy else [primary, legacy]
 
 
 def _cpa_public_url(path: str, query: str = "") -> str:
@@ -1238,15 +1251,26 @@ def _cpa_proxy(
         headers["Authorization"] = f"Bearer {management_key}"
     if content_type and body is not None:
         headers["Content-Type"] = content_type
-    request = urllib.request.Request(_cpa_url(path, query), data=body, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(request, timeout=20) as resp:
-            return _jsonable_proxy_response(resp.read(), resp.headers.get("Content-Type", ""))
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace") or exc.reason
-        raise HTTPException(status_code=exc.code, detail=detail) from exc
-    except urllib.error.URLError as exc:
-        raise HTTPException(status_code=502, detail=f"CPA is unreachable: {exc.reason}") from exc
+    urls = _cpa_url_candidates(path, query)
+    last_http_error: urllib.error.HTTPError | None = None
+    for idx, url in enumerate(urls):
+        request = urllib.request.Request(url, data=body, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(request, timeout=20) as resp:
+                return _jsonable_proxy_response(resp.read(), resp.headers.get("Content-Type", ""))
+        except urllib.error.HTTPError as exc:
+            if exc.code in {404, 405} and idx < len(urls) - 1:
+                last_http_error = exc
+                continue
+            detail = exc.read().decode("utf-8", errors="replace") or exc.reason
+            raise HTTPException(status_code=exc.code, detail=detail) from exc
+        except urllib.error.URLError as exc:
+            raise HTTPException(status_code=502, detail=f"CPA is unreachable: {exc.reason}") from exc
+
+    if last_http_error is not None:
+        detail = last_http_error.read().decode("utf-8", errors="replace") or last_http_error.reason
+        raise HTTPException(status_code=last_http_error.code, detail=detail) from last_http_error
+    raise HTTPException(status_code=502, detail="CPA management request failed")
 
 
 async def _request_body_and_type(request: Request) -> tuple[bytes | None, str | None]:
@@ -1446,6 +1470,12 @@ async def update_dream_config(body: DreamConfigUpdate):
         sleep["profile"] = profile
     if body.report_actions is not None:
         sleep["report_actions"] = bool(body.report_actions)
+    if body.idle_before_maintenance_seconds is not None:
+        try:
+            idle_before = max(0, int(body.idle_before_maintenance_seconds))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="Invalid dream idle threshold") from exc
+        sleep["idle_before_maintenance_seconds"] = idle_before
     config["sleep_mode"] = sleep
     save_config(config)
     return await get_dream_status()
@@ -2614,31 +2644,63 @@ async def delete_cron_job(job_id: str):
 class SkillToggle(BaseModel):
     name: str
     enabled: bool
+    platform: Optional[str] = "cli"
+
+
+def _normalize_skill_toggle_platform(platform: Optional[str]) -> Optional[str]:
+    raw = (platform or "").strip().lower()
+    if raw in {"", "global", "all"}:
+        return None
+    return raw
 
 
 @app.get("/api/skills")
-async def get_skills():
+async def get_skills(platform: str = "cli"):
     from tools.skills_tool import _find_all_skills
     from hermes_cli.skills_config import get_disabled_skills
+
     config = load_config()
-    disabled = get_disabled_skills(config)
+    resolved_platform = _normalize_skill_toggle_platform(platform)
+    disabled = get_disabled_skills(config, resolved_platform)
     skills = _find_all_skills(skip_disabled=True)
     for s in skills:
         s["enabled"] = s["name"] not in disabled
     return skills
 
 
+@app.get("/api/skills/platforms")
+async def get_skill_platforms():
+    from hermes_cli.skills_config import PLATFORMS
+
+    return {
+        "platforms": [
+            {"key": "global", "label": "All platforms (global default)"},
+            *[
+                {"key": key, "label": label}
+                for key, label in PLATFORMS.items()
+            ],
+        ]
+    }
+
+
 @app.put("/api/skills/toggle")
 async def toggle_skill(body: SkillToggle):
     from hermes_cli.skills_config import get_disabled_skills, save_disabled_skills
+
     config = load_config()
-    disabled = get_disabled_skills(config)
+    resolved_platform = _normalize_skill_toggle_platform(body.platform)
+    disabled = get_disabled_skills(config, resolved_platform)
     if body.enabled:
         disabled.discard(body.name)
     else:
         disabled.add(body.name)
-    save_disabled_skills(config, disabled)
-    return {"ok": True, "name": body.name, "enabled": body.enabled}
+    save_disabled_skills(config, disabled, resolved_platform)
+    return {
+        "ok": True,
+        "name": body.name,
+        "enabled": body.enabled,
+        "platform": resolved_platform or "global",
+    }
 
 
 @app.get("/api/tools/toolsets")

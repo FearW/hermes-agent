@@ -2109,11 +2109,15 @@ class AIAgent:
             else:
                 print(f"📊 Context limit: {self.context_compressor.context_length:,} tokens (auto-compression disabled)")
 
-        # Check immediately so CLI users see the warning at startup.
-        # Gateway status_callback is not yet wired, so any warning is stored
-        # in _compression_warning and replayed in the first run_conversation().
+        # Check immediately for interactive callers so they see the warning at
+        # startup. Quiet/background callers without a status callback defer the
+        # feasibility probe until the first run_conversation() to avoid paying
+        # the auxiliary-provider detection cost during bulk cache warmups.
         self._compression_warning = None
-        self._check_compression_model_feasibility()
+        self._compression_warning_checked = False
+        if self.status_callback or not self.quiet_mode:
+            self._check_compression_model_feasibility()
+            self._compression_warning_checked = True
 
         # Snapshot primary runtime for per-turn restoration.  When fallback
         # activates during a turn, the next turn restores these values so the
@@ -2677,14 +2681,22 @@ class AIAgent:
                 _aux_cfg_provider, _, _, _, _ = _resolve_task_provider_model("compression")
             except Exception:
                 _aux_cfg_provider = ""
+            def _emit_startup_compression_warning(message: str) -> None:
+                # During quiet/background construction (for example gateway cache
+                # warmup/tests) there may be no callback yet and stdout spam can
+                # dominate startup time. Cache the warning for first-turn replay,
+                # but only print immediately when the caller is interactive.
+                self._compression_warning = message
+                if self.status_callback or not self.quiet_mode:
+                    self._emit_status(message)
+
             if client is None or not aux_model:
                 msg = (
                     "⚠ No auxiliary LLM provider configured — context "
                     "compression will drop middle turns without a summary. "
                     "Run `hermes setup` or set OPENROUTER_API_KEY."
                 )
-                self._compression_warning = msg
-                self._emit_status(msg)
+                _emit_startup_compression_warning(msg)
                 logger.warning(
                     "No auxiliary LLM provider for compression — "
                     "summaries will be unavailable."
@@ -2774,8 +2786,7 @@ class AIAgent:
                     f"       compression:\n"
                     f"         threshold: 0.{safe_pct:02d}"
                 )
-                self._compression_warning = msg
-                self._emit_status(msg)
+                _emit_startup_compression_warning(msg)
                 logger.warning(
                     "Auxiliary compression model %s has %d token context, "
                     "below the main model's compression threshold of %d "
@@ -10235,6 +10246,10 @@ class AIAgent:
                     )
             except Exception:
                 pass
+        if not getattr(self, "_compression_warning_checked", False):
+            self._check_compression_model_feasibility()
+            self._compression_warning_checked = True
+
         # Replay compression warning through status_callback for gateway
         # platforms (the callback was not wired during __init__).
         if self._compression_warning:

@@ -28,8 +28,8 @@ def hooks_command(args) -> None:
     sub = getattr(args, "hooks_action", None)
 
     if not sub:
-        print("Usage: hermes hooks {list|test|revoke|doctor}")
-        print("Run 'hermes hooks --help' for details.")
+        print("用法：hermes hooks {list|test|revoke|doctor}")
+        print("可运行 `hermes hooks --help` 查看详情。")
         return
 
     if sub in ("list", "ls"):
@@ -41,7 +41,7 @@ def hooks_command(args) -> None:
     elif sub == "doctor":
         _cmd_doctor(args)
     else:
-        print(f"Unknown hooks subcommand: {sub}")
+        print(f"未知 hooks 子命令：{sub}")
 
 
 # ---------------------------------------------------------------------------
@@ -55,10 +55,10 @@ def _cmd_list(_args) -> None:
     specs = shell_hooks.iter_configured_hooks(load_config())
 
     if not specs:
-        print("No shell hooks configured in ~/.hermes/config.yaml.")
-        print("See `hermes hooks --help` or")
+        print("~/.hermes/config.yaml 中尚未配置 shell hooks。")
+        print("可查看 `hermes hooks --help` 或")
         print("    website/docs/user-guide/features/hooks.md")
-        print("for the config schema and worked examples.")
+        print("了解配置格式与示例。")
         return
 
     by_event: Dict[str, List] = {}
@@ -72,13 +72,13 @@ def _cmd_list(_args) -> None:
         if isinstance(e, dict)
     }
 
-    print(f"Configured shell hooks ({len(specs)} total):\n")
+    print(f"已配置 shell hooks（共 {len(specs)} 个）：\n")
 
     for event in sorted(by_event.keys()):
         print(f"  [{event}]")
         for spec in by_event[event]:
             is_approved = (spec.event, spec.command) in approved
-            status = "✓ allowed" if is_approved else "✗ not allowlisted"
+            status = "✓ 已允许" if is_approved else "✗ 未加入允许列表"
             matcher_part = f" matcher={spec.matcher!r}" if spec.matcher else ""
             print(
                 f"    - {spec.command}{matcher_part} "
@@ -88,14 +88,14 @@ def _cmd_list(_args) -> None:
             if is_approved:
                 entry = shell_hooks.allowlist_entry_for(spec.event, spec.command)
                 if entry and entry.get("approved_at"):
-                    print(f"      approved_at: {entry['approved_at']}")
+                    print(f"      批准时间：{entry['approved_at']}")
                     mtime_now = shell_hooks.script_mtime_iso(spec.command)
                     mtime_at = entry.get("script_mtime_at_approval")
                     if mtime_now and mtime_at and mtime_now > mtime_at:
                         print(
-                            f"      ⚠ script modified since approval "
-                            f"(was {mtime_at}, now {mtime_now}) — "
-                            f"run `hermes hooks doctor` to re-validate"
+                            f"      ⚠ 脚本在批准后已被修改 "
+                            f"（原为 {mtime_at}，当前为 {mtime_now}）——"
+                            f"请运行 `hermes hooks doctor` 重新验证"
                         )
         print()
 
@@ -192,8 +192,8 @@ def _cmd_test(args) -> None:
 
     event = args.event
     if event not in VALID_HOOKS:
-        print(f"Unknown event: {event!r}")
-        print(f"Valid events: {', '.join(sorted(VALID_HOOKS))}")
+        print(f"未知事件：{event!r}")
+        print(f"有效事件：{', '.join(sorted(VALID_HOOKS))}")
         return
 
     # Synthetic kwargs in the same shape invoke_hook() would pass.  Merged
@@ -209,9 +209,9 @@ def _cmd_test(args) -> None:
             if isinstance(custom, dict):
                 payload.update(custom)
             else:
-                print(f"Warning: {args.payload_file} is not a JSON object; ignoring")
+                print(f"警告：{args.payload_file} 不是 JSON 对象，已忽略。")
         except Exception as exc:
-            print(f"Error reading payload file: {exc}")
+            print(f"读取 payload 文件失败：{exc}")
             return
 
     specs = shell_hooks.iter_configured_hooks(load_config())
@@ -225,12 +225,12 @@ def _cmd_test(args) -> None:
         ]
 
     if not specs:
-        print(f"No shell hooks configured for event: {event}")
+        print(f"事件 {event} 尚未配置任何 shell hooks。")
         if getattr(args, "for_tool", None):
-            print(f"(with matcher filter --for-tool={args.for_tool})")
+            print(f"（已应用 matcher 过滤 --for-tool={args.for_tool}）")
         return
 
-    print(f"Firing {len(specs)} hook(s) for event '{event}':\n")
+    print(f"正在为事件“{event}”触发 {len(specs)} 个 hook：\n")
     for spec in specs:
         print(f"  → {spec.command}")
         result = shell_hooks.run_once(spec, payload)
@@ -240,10 +240,10 @@ def _cmd_test(args) -> None:
 
 def _print_run_result(result: Dict[str, Any]) -> None:
     if result.get("error"):
-        print(f"      ✗ error: {result['error']}")
+        print(f"      ✗ 错误：{result['error']}")
         return
     if result.get("timed_out"):
-        print(f"      ✗ timed out after {result['elapsed_seconds']}s")
+        print(f"      ✗ 已超时（{result['elapsed_seconds']}s）")
         return
 
     rc = result.get("returncode")
@@ -259,9 +259,9 @@ def _print_run_result(result: Dict[str, Any]) -> None:
 
     parsed = result.get("parsed")
     if parsed:
-        print(f"      parsed (Hermes wire shape): {json.dumps(parsed)}")
+        print(f"      解析结果（Hermes 线协议格式）：{json.dumps(parsed)}")
     else:
-        print("      parsed: <none — hook contributed nothing to the dispatcher>")
+        print("      解析结果：<无——该 hook 未向调度器返回任何内容>")
 
 
 def _truncate(s: str, n: int) -> str:
@@ -277,12 +277,12 @@ def _cmd_revoke(args) -> None:
 
     removed = shell_hooks.revoke(args.command)
     if removed == 0:
-        print(f"No allowlist entry found for command: {args.command}")
+        print(f"未找到命令对应的允许列表记录：{args.command}")
         return
-    print(f"Removed {removed} allowlist entry/entries for: {args.command}")
+    print(f"已删除 {removed} 条允许列表记录：{args.command}")
     print(
-        "Note: currently running CLI / gateway processes keep their "
-        "already-registered callbacks until they restart."
+        "注意：当前正在运行的 CLI / gateway 进程会继续保留已注册的回调，"
+        "直到它们重启。"
     )
 
 
@@ -297,10 +297,10 @@ def _cmd_doctor(_args) -> None:
     specs = shell_hooks.iter_configured_hooks(load_config())
 
     if not specs:
-        print("No shell hooks configured — nothing to check.")
+        print("尚未配置 shell hooks，没有可检查的内容。")
         return
 
-    print(f"Checking {len(specs)} configured shell hook(s)...\n")
+    print(f"正在检查 {len(specs)} 个已配置的 shell hook...\n")
 
     problems = 0
     for spec in specs:
@@ -309,9 +309,9 @@ def _cmd_doctor(_args) -> None:
         print()
 
     if problems:
-        print(f"{problems} issue(s) found.  Fix before relying on these hooks.")
+        print(f"发现 {problems} 个问题。请修复后再依赖这些 hooks。")
     else:
-        print("All shell hooks look healthy.")
+        print("所有 shell hooks 看起来都正常。")
 
 
 def _doctor_one(spec, shell_hooks) -> int:
@@ -319,20 +319,20 @@ def _doctor_one(spec, shell_hooks) -> int:
 
     # 1. Script exists and is executable
     if shell_hooks.script_is_executable(spec.command):
-        print("      ✓ script exists and is executable")
+        print("      ✓ 脚本存在且可执行")
     else:
         problems += 1
-        print("      ✗ script missing or not executable "
-              "(chmod +x the file, or fix the path)")
+        print("      ✗ 脚本不存在或不可执行"
+              "（请 chmod +x，或修正路径）")
 
     # 2. Allowlist status
     entry = shell_hooks.allowlist_entry_for(spec.event, spec.command)
     if entry:
-        print(f"      ✓ allowlisted (approved {entry.get('approved_at', '?')})")
+        print(f"      ✓ 已加入允许列表（批准时间 {entry.get('approved_at', '?')}）")
     else:
         problems += 1
-        print("      ✗ not allowlisted — hook will NOT fire at runtime "
-              "(run with --accept-hooks once, or confirm at the TTY prompt)")
+        print("      ✗ 未加入允许列表——运行时不会触发该 hook"
+              "（可用 --accept-hooks 运行一次，或在 TTY 提示中确认）")
 
     # 3. Mtime drift
     if entry and entry.get("script_mtime_at_approval"):
@@ -340,11 +340,11 @@ def _doctor_one(spec, shell_hooks) -> int:
         mtime_at = entry["script_mtime_at_approval"]
         if mtime_now and mtime_at and mtime_now > mtime_at:
             problems += 1
-            print(f"      ⚠ script modified since approval "
-                  f"(was {mtime_at}, now {mtime_now}) — review changes, "
-                  f"then `hermes hooks revoke` + re-approve to refresh")
+            print(f"      ⚠ 脚本在批准后已被修改"
+                  f"（原为 {mtime_at}，当前为 {mtime_now}）——请先审查改动，"
+                  f"再执行 `hermes hooks revoke` 后重新批准")
         elif mtime_now and mtime_at and mtime_now == mtime_at:
-            print("      ✓ script unchanged since approval")
+            print("      ✓ 自批准后脚本未发生变化")
 
     # 4. Produces valid JSON for a synthetic payload — only when the entry
     # is already allowlisted.  Otherwise `hermes hooks doctor` would execute
@@ -352,19 +352,19 @@ def _doctor_one(spec, shell_hooks) -> int:
     # reviewed them, which directly contradicts the documented workflow
     # ("spot newly-added hooks *before they register*").
     if not entry:
-        print("      ℹ skipped JSON smoke test — not allowlisted yet. "
-              "Approve the hook first (via TTY prompt or --accept-hooks), "
-              "then re-run `hermes hooks doctor`.")
+        print("      ℹ 已跳过 JSON 冒烟测试——该 hook 尚未加入允许列表。"
+              "请先批准（TTY 提示或 --accept-hooks），"
+              "然后重新运行 `hermes hooks doctor`。")
     elif shell_hooks.script_is_executable(spec.command):
         payload = _DEFAULT_PAYLOADS.get(spec.event, {"extra": {}})
         result = shell_hooks.run_once(spec, payload)
         if result.get("timed_out"):
             problems += 1
-            print(f"      ✗ timed out after {result['elapsed_seconds']}s "
-                  f"on synthetic payload (timeout={spec.timeout}s)")
+            print(f"      ✗ 在模拟 payload 上执行超时（{result['elapsed_seconds']}s，"
+                  f"限制 {spec.timeout}s）")
         elif result.get("error"):
             problems += 1
-            print(f"      ✗ execution error: {result['error']}")
+            print(f"      ✗ 执行错误：{result['error']}")
         else:
             rc = result.get("returncode")
             elapsed = result.get("elapsed_seconds", 0)
@@ -372,14 +372,14 @@ def _doctor_one(spec, shell_hooks) -> int:
             if stdout:
                 try:
                     json.loads(stdout)
-                    print(f"      ✓ produced valid JSON on synthetic payload "
-                          f"(exit={rc}, {elapsed}s)")
+                    print(f"      ✓ 在模拟 payload 上产出了有效 JSON"
+                          f"（exit={rc}，{elapsed}s）")
                 except json.JSONDecodeError:
                     problems += 1
-                    print(f"      ✗ stdout was not valid JSON (exit={rc}, "
-                          f"{elapsed}s): {_truncate(stdout, 120)}")
+                    print(f"      ✗ stdout 不是有效 JSON（exit={rc}，"
+                          f"{elapsed}s）：{_truncate(stdout, 120)}")
             else:
-                print(f"      ✓ ran clean with empty stdout "
-                      f"(exit={rc}, {elapsed}s) — hook is observer-only")
+                print(f"      ✓ 在 stdout 为空的情况下正常运行"
+                      f"（exit={rc}，{elapsed}s）——该 hook 仅作观察用途")
 
     return problems

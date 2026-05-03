@@ -127,6 +127,7 @@ def _extract_url_query_params(url: str):
 
 # Module-level flag: only warn once per process about stale OPENAI_BASE_URL.
 _stale_base_url_warned = False
+_aux_provider_unavailable_warned = False
 
 _PROVIDER_ALIASES = {
     "google": "gemini",
@@ -1871,10 +1872,13 @@ def _resolve_auto(main_runtime: Optional[Dict[str, Any]] = None) -> Tuple[Option
                 logger.info("Auxiliary auto-detect: using %s (%s)", label, model or "default")
             return client, model
         tried.append(label)
-    logger.warning("Auxiliary auto-detect: no provider available (tried: %s). "
-                   "Compression, summarization, and memory flush will not work. "
-                   "Set OPENROUTER_API_KEY or configure a local model in config.yaml.",
-                   ", ".join(tried))
+    global _aux_provider_unavailable_warned
+    if not _aux_provider_unavailable_warned:
+        logger.warning("Auxiliary auto-detect: no provider available (tried: %s). "
+                       "Compression, summarization, and memory flush will not work. "
+                       "Set OPENROUTER_API_KEY or configure a local model in config.yaml.",
+                       ", ".join(tried))
+        _aux_provider_unavailable_warned = True
     return None, None
 
 

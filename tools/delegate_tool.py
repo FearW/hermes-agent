@@ -754,11 +754,22 @@ def _build_child_progress_callback(
                 try:
                     event = DelegateEvent(event_type)
                 except (ValueError, TypeError):
-                    # Unknown event names are ignored. The legacy 2-arg
-                    # callback form is already handled by the direct tool
-                    # methods above and should not be inferred from an
-                    # arbitrary first positional string.
-                    return
+                    # Backward compatibility: older callers invoked the
+                    # callback as cb(tool_name, preview), without an explicit
+                    # event type. Preserve that shape by treating it as a
+                    # tool-start event when the first positional arg looks
+                    # like a tool name and a second arg is present.
+                    if (
+                        isinstance(event_type, str)
+                        and "." not in event_type
+                        and preview is None
+                        and tool_name is not None
+                    ):
+                        preview = tool_name
+                        tool_name = event_type
+                        event = DelegateEvent.TASK_TOOL_STARTED
+                    else:
+                        return
 
         if event == DelegateEvent.TASK_THINKING:
             text = preview or tool_name or ""

@@ -38,40 +38,40 @@ def _inherited_flag(parser, *args, **kwargs):
 
 
 _EPILOGUE = """
-Examples:
-    hermes                        Start interactive chat
-    hermes chat -q "Hello"        Single query mode
-    hermes -c                     Resume the most recent session
-    hermes -c "my project"        Resume a session by name (latest in lineage)
-    hermes --resume <session_id>  Resume a specific session by ID
-    hermes setup                  Run setup wizard
-    hermes logout                 Clear stored authentication
-    hermes auth add <provider>    Add a pooled credential
-    hermes auth list              List pooled credentials
-    hermes auth remove <p> <t>    Remove pooled credential by index, id, or label
-    hermes auth reset <provider>  Clear exhaustion status for a provider
-    hermes model                  Select default model
-    hermes fallback [list]        Show CPA fallback model chain
-    hermes fallback add           Add a CPA fallback model
-    hermes fallback remove        Remove a fallback model from the chain
-    hermes config                 View configuration
-    hermes config edit            Edit config in $EDITOR
-    hermes config set model gpt-4 Set a config value
-    hermes gateway                Run messaging gateway
+示例：
+    hermes                        启动交互式聊天
+    hermes chat -q "Hello"        单条查询模式
+    hermes -c                     恢复最近一次会话
+    hermes -c "my project"        按名称恢复会话（取谱系中最新的一个）
+    hermes --resume <session_id>  按会话 ID 恢复指定会话
+    hermes setup                  运行配置向导
+    hermes logout                 清除已保存的认证信息
+    hermes auth add <provider>    添加一个轮换凭证
+    hermes auth list              列出轮换凭证
+    hermes auth remove <p> <t>    按索引、ID 或标签移除轮换凭证
+    hermes auth reset <provider>  清除某个 provider 的耗尽状态
+    hermes model                  选择默认模型
+    hermes fallback [list]        查看 CPA 回退模型链
+    hermes fallback add           添加一个 CPA 回退模型
+    hermes fallback remove        从链路中移除一个回退模型
+    hermes config                 查看配置
+    hermes config edit            在 $EDITOR 中编辑配置
+    hermes config set model gpt-4 设置一个配置项
+    hermes gateway                运行消息网关
     hermes -s hermes-agent-dev,github-auth
-    hermes -w                     Start in isolated git worktree
-    hermes gateway install        Install gateway background service
-    hermes sessions list          List past sessions
-    hermes sessions browse        Interactive session picker
-    hermes sessions rename ID T   Rename/title a session
-    hermes logs                   View agent.log (last 50 lines)
-    hermes logs -f                Follow agent.log in real time
-    hermes logs errors            View errors.log
-    hermes logs --since 1h        Lines from the last hour
-    hermes debug share             Upload debug report for support
-    hermes update                 Update to latest version
+    hermes -w                     在隔离的 git worktree 中启动
+    hermes gateway install        安装网关后台服务
+    hermes sessions list          列出历史会话
+    hermes sessions browse        打开交互式会话选择器
+    hermes sessions rename ID T   重命名/设标题
+    hermes logs                   查看 agent.log（最近 50 行）
+    hermes logs -f                实时跟踪 agent.log
+    hermes logs errors            查看 errors.log
+    hermes logs --since 1h        查看最近 1 小时日志
+    hermes debug share            上传调试报告以便支持排查
+    hermes update                 更新到最新版本
 
-For more help on a command:
+查看某个命令的更多帮助：
     hermes <command> --help
 """
 
@@ -85,13 +85,13 @@ def build_top_level_parser():
     """
     parser = argparse.ArgumentParser(
         prog="hermes",
-        description="Hermes Agent - AI assistant with tool-calling capabilities",
+        description="Hermes Agent - 支持工具调用的 AI 助手",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_EPILOGUE,
     )
 
     parser.add_argument(
-        "--version", "-V", action="store_true", help="Show version and exit"
+        "--version", "-V", action="store_true", help="显示版本并退出"
     )
     parser.add_argument(
         "-z",
@@ -99,11 +99,10 @@ def build_top_level_parser():
         metavar="PROMPT",
         default=None,
         help=(
-            "One-shot mode: send a single prompt and print ONLY the final "
-            "response text to stdout. No banner, no spinner, no tool "
-            "previews, no session_id line. Tools, memory, rules, and "
-            "AGENTS.md in the CWD are loaded as normal; approvals are "
-            "auto-bypassed. Intended for scripts / pipes."
+            "单次模式：发送一条提示词，并且只把最终回复文本输出到 stdout。"
+            "不会显示 banner、spinner、工具预览或 session_id 行。"
+            "当前目录中的工具、记忆、规则和 AGENTS.md 仍会正常加载；审批会自动跳过。"
+            "适用于脚本和管道。"
         ),
     )
     # --model is accepted at the top level so it can pair with -z without
@@ -115,22 +114,22 @@ def build_top_level_parser():
         "--model",
         default=None,
         help=(
-            "Model override for this invocation (e.g. anthropic/claude-sonnet-4.6). "
-            "Applies to -z/--oneshot and --tui. Also settable via HERMES_INFERENCE_MODEL env var."
+            "本次调用的模型覆盖项（例如 anthropic/claude-sonnet-4.6）。"
+            "适用于 -z/--oneshot 和 --tui，也可通过 HERMES_INFERENCE_MODEL 环境变量设置。"
         ),
     )
     parser.add_argument(
         "-t",
         "--toolsets",
         default=None,
-        help="Comma-separated toolsets to enable for this invocation. Applies to -z/--oneshot and --tui.",
+        help="为本次调用启用的工具集，多个值用逗号分隔。适用于 -z/--oneshot 和 --tui。",
     )
     parser.add_argument(
         "--resume",
         "-r",
         metavar="SESSION",
         default=None,
-        help="Resume a previous session by ID or title",
+        help="按 ID 或标题恢复一个历史会话",
     )
     parser.add_argument(
         "--continue",
@@ -140,14 +139,14 @@ def build_top_level_parser():
         const=True,
         default=None,
         metavar="SESSION_NAME",
-        help="Resume a session by name, or the most recent if no name given",
+        help="按名称恢复会话；如果不填名称，则恢复最近一次会话",
     )
     parser.add_argument(
         "--worktree",
         "-w",
         action="store_true",
         default=False,
-        help="Run in an isolated git worktree (for parallel agents)",
+        help="在隔离的 git worktree 中运行（适合并行代理）",
     )
     _inherited_flag(
         parser,
@@ -155,10 +154,10 @@ def build_top_level_parser():
         action="store_true",
         default=False,
         help=(
-            "Auto-approve any unseen shell hooks declared in config.yaml "
-            "without a TTY prompt.  Equivalent to HERMES_ACCEPT_HOOKS=1 or "
-            "hooks_auto_accept: true in config.yaml.  Use on CI / headless "
-            "runs that can't prompt."
+            "自动批准 config.yaml 中声明但尚未确认的 shell hooks，"
+            "不再弹出 TTY 提示。等价于设置 HERMES_ACCEPT_HOOKS=1，"
+            "或在 config.yaml 中设置 hooks_auto_accept: true。"
+            "适用于 CI 或无头环境。"
         ),
     )
     _inherited_flag(
@@ -167,42 +166,42 @@ def build_top_level_parser():
         "-s",
         action="append",
         default=None,
-        help="Preload one or more skills for the session (repeat flag or comma-separate)",
+        help="为当前会话预加载一个或多个技能（可重复传参或用逗号分隔）",
     )
     _inherited_flag(
         parser,
         "--yolo",
         action="store_true",
         default=False,
-        help="Bypass all dangerous command approval prompts (use at your own risk)",
+        help="跳过所有危险命令审批提示（风险自负）",
     )
     _inherited_flag(
         parser,
         "--pass-session-id",
         action="store_true",
         default=False,
-        help="Include the session ID in the agent's system prompt",
+        help="把会话 ID 注入到代理的系统提示词中",
     )
     _inherited_flag(
         parser,
         "--ignore-user-config",
         action="store_true",
         default=False,
-        help="Ignore ~/.hermes/config.yaml and fall back to built-in defaults (credentials in .env are still loaded)",
+        help="忽略 ~/.hermes/config.yaml，退回到内置默认值（仍会加载 .env 中的凭证）",
     )
     _inherited_flag(
         parser,
         "--ignore-rules",
         action="store_true",
         default=False,
-        help="Skip auto-injection of AGENTS.md, SOUL.md, .cursorrules, memory, and preloaded skills",
+        help="跳过自动注入 AGENTS.md、SOUL.md、.cursorrules、memory 和预加载技能",
     )
     _inherited_flag(
         parser,
         "--tui",
         action="store_true",
         default=False,
-        help="Launch the modern TUI instead of the classic REPL",
+        help="启动现代 TUI，而不是经典 REPL",
     )
     _inherited_flag(
         parser,
@@ -210,31 +209,31 @@ def build_top_level_parser():
         dest="tui_dev",
         action="store_true",
         default=False,
-        help="With --tui: run TypeScript sources via tsx (skip dist build)",
+        help="配合 --tui 使用：通过 tsx 运行 TypeScript 源码（跳过 dist 构建）",
     )
 
-    subparsers = parser.add_subparsers(dest="command", help="Command to run")
+    subparsers = parser.add_subparsers(dest="command", help="要执行的命令")
 
     # =========================================================================
     # chat command
     # =========================================================================
     chat_parser = subparsers.add_parser(
         "chat",
-        help="Interactive chat with the agent",
-        description="Start an interactive chat session with Hermes Agent",
+        help="与代理进行交互式聊天",
+        description="启动 Hermes Agent 的交互式聊天会话",
     )
     chat_parser.add_argument(
-        "-q", "--query", help="Single query (non-interactive mode)"
+        "-q", "--query", help="单条查询（非交互模式）"
     )
     chat_parser.add_argument(
-        "--image", help="Optional local image path to attach to a single query"
+        "--image", help="可选：为单次查询附加一张本地图片"
     )
     _inherited_flag(
         chat_parser,
-        "-m", "--model", help="Model to use (e.g., anthropic/claude-sonnet-4)",
+        "-m", "--model", help="要使用的模型（例如 anthropic/claude-sonnet-4）",
     )
     chat_parser.add_argument(
-        "-t", "--toolsets", help="Comma-separated toolsets to enable"
+        "-t", "--toolsets", help="要启用的工具集，多个值用逗号分隔"
     )
     _inherited_flag(
         chat_parser,
@@ -242,23 +241,23 @@ def build_top_level_parser():
         "--skills",
         action="append",
         default=argparse.SUPPRESS,
-        help="Preload one or more skills for the session (repeat flag or comma-separate)",
+        help="为当前会话预加载一个或多个技能（可重复传参或用逗号分隔）",
     )
     chat_parser.add_argument(
-        "-v", "--verbose", action="store_true", help="Verbose output"
+        "-v", "--verbose", action="store_true", help="显示更详细的输出"
     )
     chat_parser.add_argument(
         "-Q",
         "--quiet",
         action="store_true",
-        help="Quiet mode for programmatic use: suppress banner, spinner, and tool previews. Only output the final response and session info.",
+        help="静默模式：隐藏 banner、spinner 和工具预览，仅输出最终回复和会话信息。",
     )
     chat_parser.add_argument(
         "--resume",
         "-r",
         metavar="SESSION_ID",
         default=argparse.SUPPRESS,
-        help="Resume a previous session by ID (shown on exit)",
+        help="按 ID 恢复一个历史会话（会在退出时显示）",
     )
     chat_parser.add_argument(
         "--continue",
@@ -268,14 +267,14 @@ def build_top_level_parser():
         const=True,
         default=argparse.SUPPRESS,
         metavar="SESSION_NAME",
-        help="Resume a session by name, or the most recent if no name given",
+        help="按名称恢复会话；如果不填名称，则恢复最近一次会话",
     )
     chat_parser.add_argument(
         "--worktree",
         "-w",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="Run in an isolated git worktree (for parallel agents on the same repo)",
+        help="在隔离的 git worktree 中运行（适合在同一仓库中并行代理）",
     )
     _inherited_flag(
         chat_parser,
@@ -283,63 +282,63 @@ def build_top_level_parser():
         action="store_true",
         default=argparse.SUPPRESS,
         help=(
-            "Auto-approve any unseen shell hooks declared in config.yaml "
-            "without a TTY prompt (see also HERMES_ACCEPT_HOOKS env var and "
-            "hooks_auto_accept: in config.yaml)."
+            "自动批准 config.yaml 中声明但尚未确认的 shell hooks，"
+            "不再弹出 TTY 提示（另见 HERMES_ACCEPT_HOOKS 环境变量和 "
+            "config.yaml 中的 hooks_auto_accept 配置）。"
         ),
     )
     chat_parser.add_argument(
         "--checkpoints",
         action="store_true",
         default=False,
-        help="Enable filesystem checkpoints before destructive file operations (use /rollback to restore)",
+        help="在破坏性文件操作前启用文件系统检查点（可用 /rollback 恢复）",
     )
     chat_parser.add_argument(
         "--max-turns",
         type=int,
         default=None,
         metavar="N",
-        help="Maximum tool-calling iterations per conversation turn (default: 90, or agent.max_turns in config)",
+        help="每轮对话允许的最大工具调用迭代次数（默认 90，或取 agent.max_turns 配置）",
     )
     _inherited_flag(
         chat_parser,
         "--yolo",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="Bypass all dangerous command approval prompts (use at your own risk)",
+        help="跳过所有危险命令审批提示（风险自负）",
     )
     _inherited_flag(
         chat_parser,
         "--pass-session-id",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="Include the session ID in the agent's system prompt",
+        help="把会话 ID 注入到代理的系统提示词中",
     )
     _inherited_flag(
         chat_parser,
         "--ignore-user-config",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="Ignore ~/.hermes/config.yaml and fall back to built-in defaults (credentials in .env are still loaded). Useful for isolated CI runs, reproduction, and third-party integrations.",
+        help="忽略 ~/.hermes/config.yaml，退回到内置默认值（仍会加载 .env 中的凭证）。适合隔离 CI、问题复现和第三方集成。",
     )
     _inherited_flag(
         chat_parser,
         "--ignore-rules",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="Skip auto-injection of AGENTS.md, SOUL.md, .cursorrules, memory, and preloaded skills. Combine with --ignore-user-config for a fully isolated run.",
+        help="跳过自动注入 AGENTS.md、SOUL.md、.cursorrules、memory 和预加载技能。可与 --ignore-user-config 组合以获得完全隔离的运行环境。",
     )
     chat_parser.add_argument(
         "--source",
         default=None,
-        help="Session source tag for filtering (default: cli). Use 'tool' for third-party integrations that should not appear in user session lists.",
+        help="会话来源标签，用于过滤（默认：cli）。第三方集成若不应出现在用户会话列表中，可使用 'tool'。",
     )
     _inherited_flag(
         chat_parser,
         "--tui",
         action="store_true",
         default=False,
-        help="Launch the modern TUI instead of the classic REPL",
+        help="启动现代 TUI，而不是经典 REPL",
     )
     _inherited_flag(
         chat_parser,
@@ -347,7 +346,7 @@ def build_top_level_parser():
         dest="tui_dev",
         action="store_true",
         default=False,
-        help="With --tui: run TypeScript sources via tsx (skip dist build)",
+        help="配合 --tui 使用：通过 tsx 运行 TypeScript 源码（跳过 dist 构建）",
     )
 
     return parser, subparsers, chat_parser

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Email platform adapter for the Hermes gateway.
 
 Allows users to interact with Hermes by sending emails.
@@ -9,6 +9,7 @@ Environment variables:
     EMAIL_IMAP_PORT     — IMAP server port (default: 993)
     EMAIL_SMTP_HOST     — SMTP server host (e.g., smtp.gmail.com)
     EMAIL_SMTP_PORT     — SMTP server port (default: 587)
+    EMAIL_SMTP_SSL      — Use implicit TLS/SSL for SMTP (default: true when port is 465)
     EMAIL_ADDRESS       — Email address for the agent
     EMAIL_PASSWORD      — Email password or app-specific password
     EMAIL_POLL_INTERVAL — Seconds between mailbox checks (default: 15)
@@ -231,6 +232,7 @@ class EmailAdapter(BasePlatformAdapter):
         self._imap_port = int(os.getenv("EMAIL_IMAP_PORT", "993"))
         self._smtp_host = os.getenv("EMAIL_SMTP_HOST", "")
         self._smtp_port = int(os.getenv("EMAIL_SMTP_PORT", "587"))
+        self._smtp_ssl = self._smtp_port == 465 or os.getenv("EMAIL_SMTP_SSL", "").lower() in {"1", "true", "yes", "on"}
         self._poll_interval = int(os.getenv("EMAIL_POLL_INTERVAL", "15"))
 
         # Skip attachments — configured via config.yaml:
@@ -249,6 +251,19 @@ class EmailAdapter(BasePlatformAdapter):
         self._thread_context: Dict[str, Dict[str, str]] = {}
 
         logger.info("[Email] Adapter initialized for %s", self._address)
+
+    def _open_smtp(self):
+        if self._smtp_ssl:
+            return smtplib.SMTP_SSL(
+                self._smtp_host,
+                self._smtp_port,
+                timeout=30,
+                context=ssl.create_default_context(),
+            )
+
+        smtp = smtplib.SMTP(self._smtp_host, self._smtp_port, timeout=30)
+        smtp.starttls(context=ssl.create_default_context())
+        return smtp
 
     def _trim_seen_uids(self) -> None:
         """Keep only the most recent UIDs to prevent unbounded memory growth.
@@ -292,8 +307,7 @@ class EmailAdapter(BasePlatformAdapter):
 
         try:
             # Test SMTP connection
-            smtp = smtplib.SMTP(self._smtp_host, self._smtp_port, timeout=30)
-            smtp.starttls(context=ssl.create_default_context())
+            smtp = self._open_smtp()
             smtp.login(self._address, self._password)
             smtp.quit()
             logger.info("[Email] SMTP connection test passed.")
@@ -511,9 +525,8 @@ class EmailAdapter(BasePlatformAdapter):
 
         msg.attach(MIMEText(body, "plain", "utf-8"))
 
-        smtp = smtplib.SMTP(self._smtp_host, self._smtp_port, timeout=30)
+        smtp = self._open_smtp()
         try:
-            smtp.starttls(context=ssl.create_default_context())
             smtp.login(self._address, self._password)
             smtp.send_message(msg)
         finally:
@@ -605,9 +618,8 @@ class EmailAdapter(BasePlatformAdapter):
             part.add_header("Content-Disposition", f"attachment; filename={fname}")
             msg.attach(part)
 
-        smtp = smtplib.SMTP(self._smtp_host, self._smtp_port, timeout=30)
+        smtp = self._open_smtp()
         try:
-            smtp.starttls(context=ssl.create_default_context())
             smtp.login(self._address, self._password)
             smtp.send_message(msg)
         finally:
@@ -627,3 +639,5 @@ class EmailAdapter(BasePlatformAdapter):
             "chat_id": chat_id,
             "subject": ctx.get("subject", ""),
         }
+
+

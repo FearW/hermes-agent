@@ -348,9 +348,13 @@ class VoiceReceiver:
                 user_id = self._ssrc_to_user.get(ssrc, 0)
             if user_id:
                 try:
-                    import davey
+                    try:
+                        import davey
+                        media_type = davey.MediaType.audio
+                    except Exception:
+                        media_type = "audio"
                     decrypted = self._dave_session.decrypt(
-                        user_id, davey.MediaType.audio, decrypted
+                        user_id, media_type, decrypted
                     )
                 except Exception as e:
                     # Unencrypted passthrough — use NaCl-decrypted data as-is

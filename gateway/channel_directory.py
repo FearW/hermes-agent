@@ -317,9 +317,9 @@ def format_directory_for_display() -> str:
     platforms = directory.get("platforms", {})
 
     if not any(platforms.values()):
-        return "No messaging platforms connected or no channels discovered yet."
+        return "当前没有已连接的消息平台，或尚未发现任何频道。"
 
-    lines = ["Available messaging targets:\n"]
+    lines = ["可用消息目标：\n"]
 
     for plat_name, channels in sorted(platforms.items()):
         if not channels:
@@ -337,7 +337,7 @@ def format_directory_for_display() -> str:
                     dms.append(ch)
 
             for guild_name, guild_channels in sorted(guilds.items()):
-                lines.append(f"Discord ({guild_name}):")
+                lines.append(f"Discord（{guild_name}）：")
                 for ch in sorted(guild_channels, key=lambda c: c["name"]):
                     lines.append(f"  discord:{_channel_target_name(plat_name, ch)}")
             if dms:

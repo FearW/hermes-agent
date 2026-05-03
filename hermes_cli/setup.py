@@ -1972,7 +1972,7 @@ def _setup_telegram():
         save_env_value("TELEGRAM_ALLOWED_USERS", allowed_users.replace(" ", ""))
         print_success("Telegram allowlist configured - only listed users can use the bot")
     else:
-        print_info("⚠️  No allowlist set - anyone who finds your bot can use it!")
+        print_info("⚠️  未设置允许名单，任何找到机器人地址的人都能使用它！")
 
     print()
     print_info("📬 Home Channel: where Hermes delivers cron job results,")
@@ -2003,7 +2003,7 @@ def _setup_discord():
         print_info("Discord: already configured")
         if not prompt_yes_no("Reconfigure Discord?", False):
             if not get_env_value("DISCORD_ALLOWED_USERS"):
-                print_info("⚠️  Discord has no user allowlist - anyone can use your bot!")
+                print_info("⚠️  Discord 没有用户允许名单 - 任何人都能使用你的机器人！")
                 if prompt_yes_no("Add allowed users now?", True):
                     print_info("   To find Discord ID: Enable Developer Mode, right-click name → Copy ID")
                     allowed_users = prompt("Allowed user IDs (comma-separated)")
@@ -2036,7 +2036,7 @@ def _setup_discord():
         save_env_value("DISCORD_ALLOWED_USERS", ",".join(cleaned_ids))
         print_success("Discord allowlist configured")
     else:
-        print_info("⚠️  No allowlist set - anyone in servers with your bot can use it!")
+        print_info("⚠️  未设置允许名单，服务器里的任何人都可以使用你的机器人！")
 
     print()
     print_info("📬 Home Channel: where Hermes delivers cron job results,")
@@ -2117,7 +2117,7 @@ def _setup_slack():
         save_env_value("SLACK_ALLOWED_USERS", allowed_users.replace(" ", ""))
         print_success("Slack allowlist configured")
     else:
-        print_warning("⚠️  No Slack allowlist set - unpaired users will be denied by default.")
+        print_warning("⚠️  未设置 Slack 允许名单 - 未配对用户默认会被拒绝。")
         print_info("   Set SLACK_ALLOW_ALL_USERS=true or GATEWAY_ALLOW_ALL_USERS=true only if you intentionally want open workspace access.")
 
 
@@ -2239,7 +2239,7 @@ def _setup_matrix():
             save_env_value("MATRIX_ALLOWED_USERS", allowed_users.replace(" ", ""))
             print_success("Matrix allowlist configured")
         else:
-            print_info("⚠️  No allowlist set - anyone who can message the bot can use it!")
+            print_info("⚠️  未设置允许名单，任何能给机器人发消息的人都可以使用它！")
 
         print()
         print_info("📬 Home Room: where Hermes delivers cron job results and notifications.")
@@ -2282,7 +2282,7 @@ def _setup_mattermost():
         save_env_value("MATTERMOST_ALLOWED_USERS", allowed_users.replace(" ", ""))
         print_success("Mattermost allowlist configured")
     else:
-        print_info("⚠️  No allowlist set - anyone who can message the bot can use it!")
+        print_info("⚠️  未设置允许名单，任何能给机器人发消息的人都可以使用它！")
 
     print()
     print_info("📬 Home Channel: where Hermes delivers cron job results and notifications.")
@@ -2333,7 +2333,7 @@ def _setup_bluebubbles():
         save_env_value("BLUEBUBBLES_ALLOWED_USERS", allowed_users.replace(" ", ""))
         print_success("BlueBubbles allowlist configured")
     else:
-        print_info("⚠️  No allowlist set — anyone who can iMessage you can use the bot!")
+        print_info("⚠️  未设置允许名单——任何能通过 iMessage 联系你的人都可以使用这个机器人！")
 
     print()
     print_info("📬 Home Channel: phone or email for cron job delivery and notifications.")
@@ -2399,17 +2399,17 @@ def _setup_webhooks():
 
     save_env_value("WEBHOOK_ENABLED", "true")
     print()
-    print_success("Webhooks enabled! Next steps:")
+    print_success("Webhooks 已启用。下一步：")
     from hermes_constants import display_hermes_home as _dhh
-    print_info(f"   1. Define webhook routes in {_dhh()}/config.yaml")
-    print_info("   2. Point your service (GitHub, GitLab, etc.) at:")
+    print_info(f"   1. 在 {_dhh()}/config.yaml 中定义 webhook 路由")
+    print_info("   2. 把你的服务（GitHub、GitLab 等）指向：")
     print_info("      http://your-server:8644/webhooks/<route-name>")
     print()
-    print_info("   Route configuration guide:")
+    print_info("   路由配置文档：")
     print_info("   https://hermes-agent.nousresearch.com/docs/user-guide/messaging/webhooks/#configuring-routes")
     print()
-    print_info("   Open config in your editor:  hermes config edit")
-    print_info("   Open config in your editor:  hermes config edit")
+    print_info("   用编辑器打开配置：hermes config edit")
+    print_info("   用编辑器打开配置：hermes config edit")
 
 
 def setup_gateway(config: dict):
@@ -3171,8 +3171,8 @@ def run_setup_wizard(args):
         print_info("Running the full wizard — each prompt shows your current value.")
         print_info("Press Enter to keep it, or type a new value to change it.")
         print_info("")
-        print_info("Tip: jump straight to a section with 'hermes setup model|tts|terminal|")
-        print_info("     webui|gateway|tools|agent', or fill only missing items with --quick.")
+        print_info("提示：可直接跳到某一节，例如 `hermes setup model|tts|terminal|`")
+        print_info("     `webui|gateway|tools|agent`，或使用 --quick 只补全缺失项。")
         # Fall through to the "Full Setup — run all sections" block below.
         # --reconfigure is now the default on existing installs; the flag
         # is preserved for backwards compatibility but is a no-op here.

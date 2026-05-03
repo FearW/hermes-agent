@@ -1799,16 +1799,16 @@ def systemd_install(force: bool = False, system: bool = False, run_as_user: str 
     print()
     print(f"✓ {_service_scope_label(system).capitalize()} service installed and enabled!")
     print()
-    print("Next steps:")
-    print(f"  {'sudo ' if system else ''}hermes gateway start{scope_flag}              # Start the service")
-    print(f"  {'sudo ' if system else ''}hermes gateway status{scope_flag}             # Check status")
-    print(f"  {'journalctl' if system else 'journalctl --user'} -u {get_service_name()} -f  # View logs")
+    print("下一步：")
+    print(f"  {'sudo ' if system else ''}hermes gateway start{scope_flag}              # 启动服务")
+    print(f"  {'sudo ' if system else ''}hermes gateway status{scope_flag}             # 查看状态")
+    print(f"  {'journalctl' if system else 'journalctl --user'} -u {get_service_name()} -f  # 查看日志")
     print()
 
     if system:
         configured_user = _read_systemd_user_from_unit(unit_path)
         if configured_user:
-            print(f"Configured to run as: {configured_user}")
+            print(f"配置为以下用户运行：{configured_user}")
     else:
         _ensure_linger_enabled()
 
@@ -2168,10 +2168,10 @@ def launchd_install(force: bool = False):
     print()
     print("✓ Service installed and loaded!")
     print()
-    print("Next steps:")
-    print("  hermes gateway status             # Check status")
+    print("下一步：")
+    print("  hermes gateway status             # 查看状态")
     from hermes_constants import display_hermes_home as _dhh
-    print(f"  tail -f {_dhh()}/logs/gateway.log  # View logs")
+    print(f"  tail -f {_dhh()}/logs/gateway.log  # 查看日志")
 
 def launchd_uninstall():
     plist_path = get_launchd_plist_path()
@@ -3714,7 +3714,7 @@ def _setup_signal():
     try:
         url = input(f"  HTTP URL [{default_url}]: ").strip() or default_url
     except (EOFError, KeyboardInterrupt):
-        print("\n  Setup cancelled.")
+        print("\n  设置已取消。")
         return
 
     # Test connectivity
@@ -3745,7 +3745,7 @@ def _setup_signal():
         if not account:
             account = default_account
     except (EOFError, KeyboardInterrupt):
-        print("\n  Setup cancelled.")
+        print("\n  设置已取消。")
         return
 
     if not account:
@@ -3763,7 +3763,7 @@ def _setup_signal():
     try:
         allowed = input(f"  Allowed users [{default_allowed}]: ").strip() or default_allowed
     except (EOFError, KeyboardInterrupt):
-        print("\n  Setup cancelled.")
+        print("\n  设置已取消。")
         return
 
     save_env_value("SIGNAL_ALLOWED_USERS", allowed)
@@ -3777,7 +3777,7 @@ def _setup_signal():
         try:
             groups = input(f"  Group IDs [{existing_groups or '*'}]: ").strip() or existing_groups or "*"
         except (EOFError, KeyboardInterrupt):
-            print("\n  Setup cancelled.")
+            print("\n  设置已取消。")
             return
         save_env_value("SIGNAL_GROUP_ALLOWED_USERS", groups)
 

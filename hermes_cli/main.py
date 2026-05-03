@@ -121,9 +121,9 @@ def _require_tty(command_name: str) -> None:
     """
     if not sys.stdin.isatty():
         print(
-            f"Error: 'hermes {command_name}' requires an interactive terminal.\n"
-            f"It cannot be run through a pipe or non-interactive subprocess.\n"
-            f"Run it directly in your terminal instead.",
+            f"错误：`hermes {command_name}` 需要交互式终端。\n"
+            f"它不能通过管道或非交互子进程运行。\n"
+            f"请直接在你的终端中运行。",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -419,7 +419,7 @@ def _session_browse_picker(sessions: list) -> Optional[str]:
     bug in tmux/iTerm when arrow keys are used.
     """
     if not sessions:
-        print("No sessions found.")
+        print("未找到任何会话。")
         return None
 
     # Try curses-based picker first
@@ -1261,8 +1261,8 @@ def cmd_chat(args):
             if resolved:
                 args.resume = resolved
             else:
-                print(f"No session found matching '{continue_val}'.")
-                print("Use 'hermes sessions list' to see available sessions.")
+                print(f"未找到与“{continue_val}”匹配的会话。")
+                print("可运行 `hermes sessions list` 查看可用会话。")
                 sys.exit(1)
         else:
             # -c with no argument — continue the most recent session
@@ -1274,7 +1274,7 @@ def cmd_chat(args):
                 args.resume = last_id
             else:
                 kind = "TUI" if use_tui else "CLI"
-                print(f"No previous {kind} session found to continue.")
+                print(f"没有找到可继续的上一条 {kind} 会话。")
                 sys.exit(1)
 
     # Resolve --resume by title if it's not a direct session ID
@@ -1409,35 +1409,35 @@ def cmd_whatsapp(args):
     from hermes_cli.config import get_env_value, save_env_value
 
     print()
-    print("⚕ WhatsApp Setup")
+    print("⚕ WhatsApp 设置")
     print("=" * 50)
 
     # ── Step 1: Choose mode ──────────────────────────────────────────────
     current_mode = get_env_value("WHATSAPP_MODE") or ""
     if not current_mode:
         print()
-        print("How will you use WhatsApp with Hermes?")
+        print("你打算如何将 WhatsApp 与 Hermes 一起使用？")
         print()
-        print("  1. Separate bot number (recommended)")
-        print("     People message the bot's number directly — cleanest experience.")
+        print("  1. 独立机器人号码（推荐）")
+        print("     其他人直接给机器人的号码发消息，体验最干净。")
         print(
             "     Requires a second phone number with WhatsApp installed on a device."
         )
         print()
-        print("  2. Personal number (self-chat)")
-        print("     You message yourself to talk to the agent.")
-        print("     Quick to set up, but the UX is less intuitive.")
+        print("  2. 个人号码（和自己聊天）")
+        print("     你给自己发消息来和代理对话。")
+        print("     配置很快，但交互体验不够直观。")
         print()
         try:
-            choice = input("  Choose [1/2]: ").strip()
+            choice = input("  请选择 [1/2]：").strip()
         except (EOFError, KeyboardInterrupt):
-            print("\nSetup cancelled.")
+            print("\n设置已取消。")
             return
 
         if choice == "1":
             save_env_value("WHATSAPP_MODE", "bot")
             wa_mode = "bot"
-            print("  ✓ Mode: separate bot number")
+            print("  ✓ 模式：独立机器人号码")
             print()
             print("  ┌─────────────────────────────────────────────────┐")
             print("  │  Getting a second number for the bot:           │")
@@ -1454,11 +1454,11 @@ def cmd_whatsapp(args):
         else:
             save_env_value("WHATSAPP_MODE", "self-chat")
             wa_mode = "self-chat"
-            print("  ✓ Mode: personal number (self-chat)")
+            print("  ✓ 模式：个人号码（自聊）")
     else:
         wa_mode = current_mode
         mode_label = (
-            "separate bot number" if wa_mode == "bot" else "personal number (self-chat)"
+            "独立机器人号码" if wa_mode == "bot" else "个人号码（自聊）"
         )
         print(f"\n✓ Mode: {mode_label}")
 
@@ -1466,17 +1466,17 @@ def cmd_whatsapp(args):
     print()
     current = get_env_value("WHATSAPP_ENABLED")
     if current and current.lower() == "true":
-        print("✓ WhatsApp is already enabled")
+        print("✓ WhatsApp 已启用")
     else:
         save_env_value("WHATSAPP_ENABLED", "true")
-        print("✓ WhatsApp enabled")
+        print("✓ 已启用 WhatsApp")
 
     # ── Step 3: Allowed users ────────────────────────────────────────────
     current_users = get_env_value("WHATSAPP_ALLOWED_USERS") or ""
     if current_users:
-        print(f"✓ Allowed users: {current_users}")
+        print(f"✓ 当前允许名单：{current_users}")
         try:
-            response = input("\n  Update allowed users? [y/N] ").strip()
+            response = input("\n  更新允许名单吗？[y/N] ").strip()
         except (EOFError, KeyboardInterrupt):
             response = "n"
         if response.lower() in ("y", "yes"):
@@ -1485,24 +1485,24 @@ def cmd_whatsapp(args):
                     "  Phone numbers that can message the bot (comma-separated): "
                 ).strip()
             else:
-                phone = input("  Your phone number (e.g. 15551234567): ").strip()
+                phone = input("  你的手机号（例如 15551234567）：").strip()
             if phone:
                 save_env_value("WHATSAPP_ALLOWED_USERS", phone.replace(" ", ""))
                 print(f"  ✓ Updated to: {phone}")
     else:
         print()
         if wa_mode == "bot":
-            print("  Who should be allowed to message the bot?")
+            print("  谁可以给机器人发消息？")
             phone = input(
                 "  Phone numbers (comma-separated, or * for anyone): "
             ).strip()
         else:
-            phone = input("  Your phone number (e.g. 15551234567): ").strip()
+            phone = input("  你的手机号（例如 15551234567）：").strip()
         if phone:
             save_env_value("WHATSAPP_ALLOWED_USERS", phone.replace(" ", ""))
             print(f"  ✓ Allowed users set: {phone}")
         else:
-            print("  ⚠ No allowlist — the agent will respond to ALL incoming messages")
+            print("  ⚠ 未设置允许名单，代理会响应所有传入消息")
 
     # ── Step 4: Install bridge dependencies ──────────────────────────────
     project_root = Path(__file__).resolve().parents[1]
@@ -1510,14 +1510,14 @@ def cmd_whatsapp(args):
     bridge_script = bridge_dir / "bridge.js"
 
     if not bridge_script.exists():
-        print(f"\n✗ Bridge script not found at {bridge_script}")
+        print(f"\n✗ 未找到桥接脚本：{bridge_script}")
         return
 
     if not (bridge_dir / "node_modules").exists():
-        print("\n→ Installing WhatsApp bridge dependencies (this can take a few minutes)...")
+        print("\n→ 正在安装 WhatsApp 桥接依赖（可能需要几分钟）...")
         npm = shutil.which("npm")
         if not npm:
-            print("  ✗ npm not found on PATH — install Node.js first")
+            print("  ✗ PATH 中未找到 npm - 请先安装 Node.js")
             return
         try:
             result = subprocess.run(
@@ -1533,19 +1533,19 @@ def cmd_whatsapp(args):
         if result.returncode != 0:
             err = (result.stderr or "").strip()
             preview = "\n".join(err.splitlines()[-30:]) if err else "(no output)"
-            print("  ✗ npm install failed:")
+            print("  ✗ npm install 失败：")
             print(preview)
             return
-        print("  ✓ Dependencies installed")
+        print("  ✓ 依赖已安装")
     else:
-        print("✓ Bridge dependencies already installed")
+        print("✓ 桥接依赖已安装")
 
     # ── Step 5: Check for existing session ───────────────────────────────
     session_dir = get_hermes_home() / "whatsapp" / "session"
     session_dir.mkdir(parents=True, exist_ok=True)
 
     if (session_dir / "creds.json").exists():
-        print("✓ Existing WhatsApp session found")
+        print("✓ 已找到现有 WhatsApp 会话")
         try:
             response = input(
                 "\n  Re-pair? This will clear the existing session. [y/N] "
@@ -1555,22 +1555,22 @@ def cmd_whatsapp(args):
         if response.lower() in ("y", "yes"):
             shutil.rmtree(session_dir, ignore_errors=True)
             session_dir.mkdir(parents=True, exist_ok=True)
-            print("  ✓ Session cleared")
+            print("  ✓ 会话已清除")
         else:
-            print("\n✓ WhatsApp is configured and paired!")
-            print("  Start the gateway with: hermes gateway")
+            print("\n✓ WhatsApp 已配置并完成配对！")
+            print("  启动网关：hermes gateway")
             return
 
     # ── Step 6: QR code pairing ──────────────────────────────────────────
     print()
     print("─" * 50)
     if wa_mode == "bot":
-        print("📱 Open WhatsApp (or WhatsApp Business) on the")
-        print("   phone with the BOT's number, then scan:")
+        print("📱 打开 WhatsApp（或 WhatsApp Business），在")
+        print("   绑定机器人号码的手机上扫描：")
     else:
-        print("📱 Open WhatsApp on your phone, then scan:")
+        print("📱 在你的手机上打开 WhatsApp，然后扫描：")
     print()
-    print("   Settings → Linked Devices → Link a Device")
+    print("   设置 → 已关联设备 → 关联设备")
     print("─" * 50)
     print()
 
@@ -1585,27 +1585,27 @@ def cmd_whatsapp(args):
     # ── Step 7: Post-pairing ─────────────────────────────────────────────
     print()
     if (session_dir / "creds.json").exists():
-        print("✓ WhatsApp paired successfully!")
+        print("✓ WhatsApp 已配对成功！")
         print()
         if wa_mode == "bot":
-            print("  Next steps:")
-            print("    1. Start the gateway:  hermes gateway")
-            print("    2. Send a message to the bot's WhatsApp number")
-            print("    3. The agent will reply automatically")
+            print("  下一步：")
+            print("    1. 启动网关：hermes gateway")
+            print("    2. 给机器人的 WhatsApp 号码发送一条消息")
+            print("    3. 代理会自动回复你")
             print()
-            print("  Tip: Agent responses are prefixed with '⚕ Hermes Agent'")
+            print("  提示：代理回复会带有前缀“⚕ Hermes Agent”")
         else:
-            print("  Next steps:")
-            print("    1. Start the gateway:  hermes gateway")
-            print("    2. Open WhatsApp → Message Yourself")
-            print("    3. Type a message — the agent will reply")
+            print("  下一步：")
+            print("    1. 启动网关：hermes gateway")
+            print("    2. 打开 WhatsApp → 给自己发消息")
+            print("    3. 输入一条消息，代理就会回复")
             print()
-            print("  Tip: Agent responses are prefixed with '⚕ Hermes Agent'")
-            print("  so you can tell them apart from your own messages.")
+            print("  提示：代理回复会带有前缀“⚕ Hermes Agent”")
+            print("  这样你就能和自己发出的消息区分开。")
         print()
-        print("  Or install as a service: hermes gateway install")
+        print("  也可以安装成服务：hermes gateway install")
     else:
-        print("⚠ Pairing may not have completed. Run 'hermes whatsapp' to try again.")
+        print("⚠ 配对可能还没有完成。可执行 `hermes whatsapp` 再试一次。")
 
 
 def cmd_setup(args):
@@ -4917,13 +4917,13 @@ def cmd_slack(args):
     if sub in (None, ""):
         # No subcommand — print usage hint.
         print(
-            "usage: hermes slack <subcommand>\n"
+            "用法：hermes slack <subcommand>\n"
             "\n"
-            "subcommands:\n"
-            "  manifest   Generate a Slack app manifest with every gateway\n"
-            "             command registered as a native slash\n"
+            "子命令：\n"
+            "  manifest   生成 Slack 应用清单，包含每个网关\n"
+            "             命令，并注册为原生 slash 命令\n"
             "\n"
-            "Run `hermes slack manifest -h` for details.",
+            "运行 `hermes slack manifest -h` 查看详情。",
             file=sys.stderr,
         )
         return 1
@@ -4933,7 +4933,7 @@ def cmd_slack(args):
 
         return slack_manifest_command(args)
 
-    print(f"Unknown slack subcommand: {sub}", file=sys.stderr)
+    print(f"未知的 slack 子命令：{sub}", file=sys.stderr)
     return 1
 
 
@@ -5434,13 +5434,13 @@ def _update_via_zip(args):
                 shutil.copy2(src, dst)
             update_count += 1
 
-        print(f"✓ Updated {update_count} items from ZIP")
+        print(f"✓ 已从 ZIP 更新 {update_count} 个项目")
 
         # Cleanup
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
     except Exception as e:
-        print(f"✗ ZIP update failed: {e}")
+        print(f"✗ ZIP 更新失败：{e}")
         sys.exit(1)
 
     # Clear stale bytecode after ZIP extraction
@@ -5453,7 +5453,7 @@ def _update_via_zip(args):
     # Reinstall Python dependencies. Prefer .[all], but if one optional extra
     # breaks on this machine, keep base deps and reinstall the remaining extras
     # individually so update does not silently strip working capabilities.
-    print("→ Updating Python dependencies...")
+    print("→ 正在更新 Python 依赖...")
 
     uv_bin = shutil.which("uv")
     if uv_bin:
@@ -5487,7 +5487,7 @@ def _update_via_zip(args):
     try:
         from tools.skills_sync import sync_skills
 
-        print("→ Syncing bundled skills...")
+        print("→ 正在同步内置技能...")
         result = sync_skills(quiet=True)
         if result["copied"]:
             print(f"  + {len(result['copied'])} new: {', '.join(result['copied'])}")
@@ -5500,12 +5500,12 @@ def _update_via_zip(args):
         if result.get("cleaned"):
             print(f"  − {len(result['cleaned'])} removed from manifest")
         if not result["copied"] and not result.get("updated"):
-            print("  ✓ Skills are up to date")
+            print("  ✓ 技能已是最新")
     except Exception:
         pass
 
     print()
-    print("✓ Update complete!")
+    print("✓ 更新完成！")
     _warn_stale_dashboard_processes()
 
 
@@ -6751,7 +6751,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
         # Reinstall Python dependencies. Prefer .[all], but if one optional extra
         # breaks on this machine, keep base deps and reinstall the remaining extras
         # individually so update does not silently strip working capabilities.
-        print("→ Updating Python dependencies...")
+        print("→ 正在更新 Python 依赖...")
         uv_bin = shutil.which("uv")
         if uv_bin:
             uv_env = {**os.environ, "VIRTUAL_ENV": str(PROJECT_ROOT / "venv")}
@@ -6802,7 +6802,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
             from tools.skills_sync import sync_skills
 
             print()
-            print("→ Syncing bundled skills...")
+            print("→ 正在同步内置技能...")
             result = sync_skills(quiet=True)
             if result["copied"]:
                 print(f"  + {len(result['copied'])} new: {', '.join(result['copied'])}")
@@ -6815,7 +6815,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
             if result.get("cleaned"):
                 print(f"  − {len(result['cleaned'])} removed from manifest")
             if not result["copied"] and not result.get("updated"):
-                print("  ✓ Skills are up to date")
+                print("  ✓ 技能已是最新")
         except Exception as e:
             logger.debug("Skills sync during update failed: %s", e)
 
@@ -6831,7 +6831,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
             other_profiles = [p for p in list_profiles() if p.name != active]
             if other_profiles:
                 print()
-                print("→ Syncing bundled skills to other profiles...")
+                print("→ 正在同步其他 profile 的内置技能...")
                 for p in other_profiles:
                     try:
                         r = seed_profile_skills(p.path, quiet=True)
@@ -6846,12 +6846,12 @@ def _cmd_update_impl(args, gateway_mode: bool):
                                 parts.append(f"↑{updated} updated")
                             if modified:
                                 parts.append(f"~{modified} user-modified")
-                            status = ", ".join(parts) if parts else "up to date"
+                            status = ", ".join(parts) if parts else "已是最新"
                         else:
-                            status = "sync failed"
+                            status = "同步失败"
                         print(f"  {p.name}: {status}")
                     except Exception as pe:
-                        print(f"  {p.name}: error ({pe})")
+                        print(f"  {p.name}: 错误（{pe}）")
         except Exception:
             pass  # profiles module not available or no profiles
 
@@ -6861,13 +6861,13 @@ def _cmd_update_impl(args, gateway_mode: bool):
 
             synced = sync_honcho_profiles_quiet()
             if synced:
-                print(f"\n-> Honcho: synced {synced} profile(s)")
+                print(f"\n-> Honcho：已同步 {synced} 个 profile")
         except Exception:
             pass  # honcho plugin not installed or not configured
 
         # Check for config migrations
         print()
-        print("→ Checking configuration for new options...")
+        print("→ 正在检查新的配置选项...")
 
         from hermes_cli.config import (
             get_missing_env_vars,
@@ -6889,19 +6889,19 @@ def _cmd_update_impl(args, gateway_mode: bool):
                     f"  ⚠️  {len(missing_env)} new required setting(s) need configuration"
                 )
             if missing_config:
-                print(f"  ℹ️  {len(missing_config)} new config option(s) available")
+                print(f"  ℹ️  发现 {len(missing_config)} 个新的配置项")
 
             print()
             if gateway_mode:
                 response = (
                     _gateway_prompt(
-                        "Would you like to configure new options now? [Y/n]", "n"
+                        "现在要配置新的选项吗？[Y/n]", "n"
                     )
                     .strip()
                     .lower()
                 )
             elif not (sys.stdin.isatty() and sys.stdout.isatty()):
-                print("  ℹ Non-interactive session — skipping config migration prompt.")
+                print("  ℹ 非交互式会话 - 跳过配置迁移提示。")
                 print(
                     "    Run 'hermes config migrate' later to apply any new config/env options."
                 )
@@ -6924,17 +6924,17 @@ def _cmd_update_impl(args, gateway_mode: bool):
 
                 if results["env_added"] or results["config_added"]:
                     print()
-                    print("✓ Configuration updated!")
+                    print("✓ 配置已更新！")
                 if gateway_mode and missing_env:
-                    print("  ℹ API keys require manual entry: hermes config migrate")
+                    print("  ℹ API 密钥需要手动输入：hermes config migrate")
             else:
                 print()
-                print("Skipped. Run 'hermes config migrate' later to configure.")
+                print("已跳过。稍后运行 `hermes config migrate` 配置。")
         else:
-            print("  ✓ Configuration is up to date")
+            print("  ✓ 配置已是最新")
 
         print()
-        print("✓ Update complete!")
+        print("✓ 更新完成！")
 
         # Repair RHEL-family root installs where /usr/local/bin isn't on PATH
         # for non-login interactive shells.  No-op on every other platform.
@@ -7328,7 +7328,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
         _warn_stale_dashboard_processes()
 
         print()
-        print("Tip: You can now select a CPA model:")
+        print("提示：现在可以选择一个 CPA 模型：")
         print("  hermes model              # Select CPA model")
 
     except subprocess.CalledProcessError as e:
@@ -7465,11 +7465,11 @@ def cmd_profile(args):
         active = get_active_profile_name()
 
         if not profiles:
-            print("No profiles found.")
+            print("未找到任何配置档。")
             return
 
         # Header
-        print(f"\n {'Profile':<16} {'Model':<28} {'Gateway':<12} {'Alias'}")
+        print(f"\n {'配置档':<16} {'模型':<28} {'网关':<12} {'别名'}")
         print(f" {'─' * 15}    {'─' * 27}    {'─' * 11}    {'─' * 12}")
 
         for p in profiles:
@@ -7576,19 +7576,19 @@ def cmd_profile(args):
                 profile_dir_display = str(profile_dir)
 
             # Next steps
-            print(f"\nNext steps:")
-            print(f"  {name} setup              Configure API keys and model")
-            print(f"  {name} chat               Start chatting")
-            print(f"  {name} gateway start      Start the messaging gateway")
+            print(f"\n下一步：")
+            print(f"  {name} setup              配置 API 密钥和模型")
+            print(f"  {name} chat               开始聊天")
+            print(f"  {name} gateway start      启动消息网关")
             if clone or clone_all:
-                print(f"\n  Edit {profile_dir_display}/.env for different API keys")
-                print(f"  Edit {profile_dir_display}/SOUL.md for different personality")
+                print(f"\n  编辑 {profile_dir_display}/.env 以使用不同的 API 密钥")
+                print(f"  编辑 {profile_dir_display}/SOUL.md 以设置不同人格")
             else:
                 print(
-                    f"\n  ⚠ This profile has no API keys yet. Run '{name} setup' first,"
+                    f"\n  ⚠ 这个 profile 还没有 API 密钥。请先执行 `{name} setup`，"
                 )
-                print(f"    or it will inherit keys from your shell environment.")
-                print(f"  Edit {profile_dir_display}/SOUL.md to customize personality")
+                print(f"    否则它会继承你当前 shell 环境中的密钥。")
+                print(f"  编辑 {profile_dir_display}/SOUL.md 可自定义人格")
             print()
 
         except (ValueError, FileExistsError, FileNotFoundError) as e:
@@ -7722,14 +7722,14 @@ def cmd_dashboard(args):
         import fastapi  # noqa: F401
         import uvicorn  # noqa: F401
     except ImportError as e:
-        print("Web UI dependencies not installed (need fastapi + uvicorn).")
+        print("尚未安装 Web UI 依赖（需要 fastapi 和 uvicorn）。")
         print(
-            f"Re-install the package into this interpreter so metadata updates apply:\n"
+            f"请在当前解释器中重新安装本包，以确保元数据更新生效：\n"
             f"  cd {PROJECT_ROOT}\n"
             f"  {sys.executable} -m pip install -e .\n"
-            "If `pip` is missing in this venv, use:  uv pip install -e ."
+            "如果这个虚拟环境里没有 `pip`，可以改用：uv pip install -e ."
         )
-        print(f"Import error: {e}")
+        print(f"导入错误：{e}")
         sys.exit(1)
 
     if "HERMES_WEB_DIST" not in os.environ:
@@ -7748,8 +7748,8 @@ def cmd_dashboard(args):
     cpa_api_proxy = bool(args.cpa_api_proxy or cfg_get(config, "dashboard", "cpa_api_proxy", default=False))
     embedded_chat = bool(args.tui or cfg_get(config, "dashboard", "tui", default=False) or os.environ.get("HERMES_DASHBOARD_TUI") == "1")
     if public_enabled and not password and not getattr(args, "insecure", False):
-        print("Error: public dashboard requires dashboard.password or --password.")
-        print("Set it in ~/.hermes/config.yaml or run: hermes dashboard --public --password <key>")
+        print("错误：公开仪表盘需要设置 `dashboard.password` 或 `--password`。")
+        print("请在 `~/.hermes/config.yaml` 中设置，或运行：`hermes dashboard --public --password <key>`")
         sys.exit(1)
     start_server(
         host=host,
@@ -9304,7 +9304,7 @@ Examples:
 
             db = SessionDB()
         except Exception as e:
-            print(f"Error: Could not open session database: {e}")
+            print(f"错误：无法打开会话数据库：{e}")
             return
 
         action = args.sessions_action
@@ -9318,14 +9318,14 @@ Examples:
                 source=args.source, exclude_sources=_exclude, limit=args.limit
             )
             if not sessions:
-                print("No sessions found.")
+                print("未找到任何会话。")
                 return
             has_titles = any(s.get("title") for s in sessions)
             if has_titles:
-                print(f"{'Title':<32} {'Preview':<40} {'Last Active':<13} {'ID'}")
+                print(f"{'标题':<32} {'预览':<40} {'最近活动':<13} {'ID'}")
                 print("─" * 110)
             else:
-                print(f"{'Preview':<50} {'Last Active':<13} {'Src':<6} {'ID'}")
+                print(f"{'预览':<50} {'最近活动':<13} {'来源':<6} {'ID'}")
                 print("─" * 95)
             for s in sessions:
                 last_active = _relative_time(s.get("last_active"))
@@ -9426,7 +9426,7 @@ Examples:
             )
             db.close()
             if not sessions:
-                print("No sessions found.")
+                print("未找到任何会话。")
                 return
 
             selected_id = _session_browse_picker(sessions)

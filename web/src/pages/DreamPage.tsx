@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Toast } from "@/components/Toast";
 import { useToast } from "@/hooks/useToast";
+import { Input } from "@/components/ui/input";
 
 const PROFILE_LABELS: Record<string, string> = {
   off: "关闭",
@@ -23,15 +24,25 @@ function fmtTime(ts?: number | null): string {
   return isoTimeAgo(new Date(ts * 1000).toISOString());
 }
 
+function sleepIdleMinutes(sleepMode: Record<string, unknown> | undefined): string {
+  const raw = sleepMode?.idle_before_maintenance_seconds;
+  const seconds = typeof raw === "number" ? raw : Number(raw ?? 0);
+  if (!Number.isFinite(seconds) || seconds <= 0) return "0";
+  return String(Math.round(seconds / 60));
+}
+
 export default function DreamPage() {
   const [status, setStatus] = useState<DreamStatusResponse | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [idleMinutes, setIdleMinutes] = useState("30");
   const { toast, showToast } = useToast();
 
   const load = async () => {
     setBusy("load");
     try {
-      setStatus(await api.getDreamStatus());
+      const next = await api.getDreamStatus();
+      setStatus(next);
+      setIdleMinutes(sleepIdleMinutes(next.sleep_mode));
     } catch (error) {
       showToast(error instanceof Error ? error.message : "加载梦境状态失败", "error");
     } finally {
@@ -43,11 +54,12 @@ export default function DreamPage() {
     load();
   }, []);
 
-  const save = async (patch: { enabled?: boolean; profile?: string; report_actions?: boolean }) => {
+  const save = async (patch: { enabled?: boolean; profile?: string; report_actions?: boolean; idle_before_maintenance_seconds?: number }) => {
     setBusy("save");
     try {
       const next = await api.saveDreamConfig(patch);
       setStatus(next);
+      setIdleMinutes(sleepIdleMinutes(next.sleep_mode));
       showToast("梦境配置已保存", "success");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "保存梦境配置失败", "error");
@@ -76,6 +88,15 @@ export default function DreamPage() {
   const last = status.state.last_result;
   const sleep = status.sleep_mode;
   const selectedProfile = status.profile.includes(":") ? status.profile.split(":")[0] : status.profile;
+
+  const saveIdleThreshold = async () => {
+    const minutes = Number(idleMinutes);
+    if (!Number.isFinite(minutes) || minutes < 0) {
+      showToast("静止时长必须是大于或等于 0 的分钟数", "error");
+      return;
+    }
+    await save({ idle_before_maintenance_seconds: Math.round(minutes * 60) });
+  };
 
   return (
     <div className="flex flex-col gap-6">
@@ -155,6 +176,24 @@ export default function DreamPage() {
                 <p className="mt-1 text-xs text-muted-foreground">在网关/后台场景中保留整理摘要。</p>
               </div>
               <Switch checked={Boolean(sleep.report_actions)} onCheckedChange={(v) => save({ report_actions: v })} disabled={busy !== null} />
+            </div>
+            <div className="grid gap-3 rounded-2xl border border-border p-4">
+              <div>
+                <Label>静止多久后自动整理</Label>
+                <p className="mt-1 text-xs text-muted-foreground">网关最近一次活动静止达到这个时长后，梦境维护任务才会开始执行。填 0 表示不等待静止。</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={idleMinutes}
+                  onChange={(event) => setIdleMinutes(event.target.value)}
+                  disabled={busy !== null}
+                />
+                <span className="text-sm text-muted-foreground">分钟</span>
+                <Button variant="outline" onClick={saveIdleThreshold} disabled={busy !== null}>保存</Button>
+              </div>
             </div>
           </CardContent>
         </Card>

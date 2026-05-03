@@ -557,6 +557,38 @@ class TestSendMethods(unittest.TestCase):
             mock_server.send_message.assert_called_once()
             mock_server.quit.assert_called_once()
 
+    def test_send_uses_smtp_ssl_for_implicit_tls_port(self):
+        """Port 465 should use SMTP_SSL instead of STARTTLS."""
+        import asyncio
+        from gateway.config import PlatformConfig
+
+        with patch.dict(os.environ, {
+            "EMAIL_ADDRESS": "hermes@test.com",
+            "EMAIL_PASSWORD": "secret",
+            "EMAIL_IMAP_HOST": "imap.test.com",
+            "EMAIL_SMTP_HOST": "smtp.test.com",
+            "EMAIL_SMTP_PORT": "465",
+        }):
+            from gateway.platforms.email import EmailAdapter
+            adapter = EmailAdapter(PlatformConfig(enabled=True))
+
+        with patch("smtplib.SMTP") as mock_smtp, \
+             patch("smtplib.SMTP_SSL") as mock_smtp_ssl:
+            mock_server = MagicMock()
+            mock_smtp_ssl.return_value = mock_server
+
+            result = asyncio.run(
+                adapter.send("user@test.com", "Hello from Hermes!")
+            )
+
+            self.assertTrue(result.success)
+            mock_smtp.assert_not_called()
+            mock_smtp_ssl.assert_called_once()
+            mock_server.starttls.assert_not_called()
+            mock_server.login.assert_called_once_with("hermes@test.com", "secret")
+            mock_server.send_message.assert_called_once()
+            mock_server.quit.assert_called_once()
+
     def test_send_failure_returns_error(self):
         """SMTP failure should return SendResult with error."""
         import asyncio
@@ -678,6 +710,42 @@ class TestConnectDisconnect(unittest.TestCase):
             # Should have skipped existing messages
             self.assertEqual(len(adapter._seen_uids), 3)
             # Cleanup
+            adapter._running = False
+            if adapter._poll_task:
+                adapter._poll_task.cancel()
+
+    def test_connect_uses_smtp_ssl_when_enabled(self):
+        """EMAIL_SMTP_SSL should use implicit TLS for the connection test."""
+        import asyncio
+        from gateway.config import PlatformConfig
+
+        with patch.dict(os.environ, {
+            "EMAIL_ADDRESS": "hermes@test.com",
+            "EMAIL_PASSWORD": "secret",
+            "EMAIL_IMAP_HOST": "imap.test.com",
+            "EMAIL_SMTP_HOST": "smtp.test.com",
+            "EMAIL_SMTP_PORT": "587",
+            "EMAIL_SMTP_SSL": "true",
+        }):
+            from gateway.platforms.email import EmailAdapter
+            adapter = EmailAdapter(PlatformConfig(enabled=True))
+
+        mock_imap = MagicMock()
+        mock_imap.uid.return_value = ("OK", [b""])
+
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap), \
+             patch("smtplib.SMTP") as mock_smtp, \
+             patch("smtplib.SMTP_SSL") as mock_smtp_ssl:
+            mock_server = MagicMock()
+            mock_smtp_ssl.return_value = mock_server
+
+            result = asyncio.run(adapter.connect())
+
+            self.assertTrue(result)
+            mock_smtp.assert_not_called()
+            mock_smtp_ssl.assert_called_once()
+            mock_server.starttls.assert_not_called()
+            mock_server.login.assert_called_once_with("hermes@test.com", "secret")
             adapter._running = False
             if adapter._poll_task:
                 adapter._poll_task.cancel()

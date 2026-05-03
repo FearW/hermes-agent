@@ -70,7 +70,7 @@ export const api = {
   getCPAConfig: () => fetchJSON<CPAConfigResponse>("/api/cpa/config"),
   getDreamStatus: () => fetchJSON<DreamStatusResponse>("/api/dream/status"),
   runDreamNow: () => fetchJSON<DreamRunResult>("/api/dream/run", { method: "POST" }),
-  saveDreamConfig: (config: { enabled?: boolean; profile?: string; report_actions?: boolean }) =>
+  saveDreamConfig: (config: { enabled?: boolean; profile?: string; report_actions?: boolean; idle_before_maintenance_seconds?: number }) =>
     fetchJSON<DreamStatusResponse>("/api/dream/config", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -173,12 +173,15 @@ export const api = {
     fetchJSON<{ ok: boolean }>(`/api/cron/jobs/${id}`, { method: "DELETE" }),
 
   // Skills & Toolsets
-  getSkills: () => fetchJSON<SkillInfo[]>("/api/skills"),
-  toggleSkill: (name: string, enabled: boolean) =>
+  getSkillPlatforms: () =>
+    fetchJSON<{ platforms: SkillPlatformInfo[] }>("/api/skills/platforms"),
+  getSkills: (platform = "cli") =>
+    fetchJSON<SkillInfo[]>(`/api/skills?platform=${encodeURIComponent(platform)}`),
+  toggleSkill: (name: string, enabled: boolean, platform = "cli") =>
     fetchJSON<{ ok: boolean }>("/api/skills/toggle", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, enabled }),
+      body: JSON.stringify({ name, enabled, platform }),
     }),
   getToolsets: () => fetchJSON<ToolsetInfo[]>("/api/tools/toolsets"),
 
@@ -554,6 +557,11 @@ export interface SkillInfo {
   description: string;
   category: string;
   enabled: boolean;
+}
+
+export interface SkillPlatformInfo {
+  key: string;
+  label: string;
 }
 
 export interface ToolsetInfo {

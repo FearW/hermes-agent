@@ -704,27 +704,27 @@ def cmd_list() -> None:
     console = Console()
     entries = _discover_all_plugins()
     if not entries:
-        console.print("[dim]No plugins installed.[/dim]")
-        console.print("[dim]Install with:[/dim] hermes plugins install owner/repo")
+        console.print("[dim]当前未安装任何插件。[/dim]")
+        console.print("[dim]安装方式：[/dim] hermes plugins install owner/repo")
         return
 
     enabled = _get_enabled_set()
     disabled = _get_disabled_set()
 
-    table = Table(title="Plugins", show_lines=False)
-    table.add_column("Name", style="bold")
-    table.add_column("Status")
-    table.add_column("Version", style="dim")
-    table.add_column("Description")
-    table.add_column("Source", style="dim")
+    table = Table(title="插件", show_lines=False)
+    table.add_column("名称", style="bold")
+    table.add_column("状态")
+    table.add_column("版本", style="dim")
+    table.add_column("描述")
+    table.add_column("来源", style="dim")
 
     for name, version, description, source, _dir in entries:
         if name in disabled:
-            status = "[red]disabled[/red]"
+            status = "[red]已禁用[/red]"
         elif name in enabled:
-            status = "[green]enabled[/green]"
+            status = "[green]已启用[/green]"
         else:
-            status = "[yellow]not enabled[/yellow]"
+            status = "[yellow]未启用[/yellow]"
         table.add_row(name, status, str(version), description, source)
 
     console.print()

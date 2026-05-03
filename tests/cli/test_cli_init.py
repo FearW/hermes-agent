@@ -213,7 +213,7 @@ class TestHistoryDisplay:
         cli.show_history()
         output = capsys.readouterr().out
 
-        assert "No messages in the current chat yet" in output
+        assert "当前聊天里还没有消息" in output
         assert "Checking Running Hermes Agent" in output
         assert "20260401_201329_d85961" in output
         assert "/resume" in output
@@ -241,9 +241,9 @@ class TestHistoryDisplay:
         cli._handle_resume_command("/resume")
         output = capsys.readouterr().out
 
-        assert "Recent sessions" in output
+        assert "最近会话" in output
         assert "Checking Running Hermes Agent" in output
-        assert "Use /resume <session id or title> to continue" in output
+        assert "使用 /resume <session id 或标题> 可从上次中断处继续" in output
 
 
 class TestRootLevelProviderOverride:

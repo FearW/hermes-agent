@@ -52,15 +52,15 @@ def busy_input_hint_gateway(mode: str) -> str:
     mode = str(mode or "interrupt").strip().lower()
     if mode == "queue":
         suggestion = "/busy interrupt"
-        desc = "switch future busy messages to interrupt the current run"
+        desc = "把后续忙碌时收到的消息改为打断当前运行"
     elif mode == "steer":
         suggestion = "/busy interrupt"
-        desc = "switch future busy messages to interrupt instead of steering"
+        desc = "把后续忙碌时收到的消息改为打断，而不是引导当前运行"
     else:
         suggestion = "/busy queue"
-        desc = "queue future busy messages for the next turn"
-    return f"First-time tip: use `{suggestion}` to {desc}."
+        desc = "把后续忙碌时收到的消息排到下一轮处理"
+    return f"首次提示：可使用 `{suggestion}` 来{desc}。"
 
 
 def tool_progress_hint_gateway() -> str:
-    return "First-time tip: use `/verbose` to show more live tool progress updates."
+    return "首次提示：可使用 `/verbose` 显示更多实时工具进度更新。"

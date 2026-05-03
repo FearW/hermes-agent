@@ -8,7 +8,7 @@ Subcommands:
   hermes fallback [list]   Show the current fallback chain (default when no subcommand)
   hermes fallback add      Add a CPA model name to the chain
   hermes fallback remove   Pick an entry to delete from the chain
-  hermes fallback clear    Remove all fallback entries
+  hermes fallback clear    Remove all fallback 条目
 
 Storage: ``fallback_providers`` in ``~/.hermes/config.yaml`` (top-level, list
 of model strings). The legacy ``fallback_model`` format is migrated on write.
@@ -81,21 +81,21 @@ def cmd_fallback_list(args) -> None:  # noqa: ARG001
 
     print()
     if not chain:
-        print("  No CPA fallback models configured.")
+        print("  当前未配置 CPA 兜底模型。")
         print()
-        print("  Add one with:  hermes fallback add")
+        print("  可运行：hermes fallback add")
         print()
         return
 
     primary = _describe_primary(config)
     if primary:
-        print(f"  Primary:   {primary}")
+        print(f"  主模型：   {primary}")
         print()
-    print(f"  Fallback chain ({len(chain)} {'entry' if len(chain) == 1 else 'entries'}):")
+    print(f"  兜底链路（共 {len(chain)} 项）：")
     for i, entry in enumerate(chain, 1):
         print(f"    {i}. {_format_entry(entry)}")
     print()
-    print("  Tried in order when the primary CPA model fails (rate-limit, 5xx, connection errors).")
+    print("  当主 CPA 模型失败时（限流、5xx、连接错误），将按顺序依次尝试。")
     print()
 
 
@@ -119,17 +119,17 @@ def cmd_fallback_add(args) -> None:
     _require_tty("fallback add")
 
     print()
-    print("  Adding a CPA fallback model. Hermes keeps the same CPA endpoint")
-    print("  and only switches the model name sent to CPA.")
+    print("  正在添加 CPA 兜底模型。Hermes 会保持同一个 CPA 端点，")
+    print("  只切换发送给 CPA 的模型名称。")
     print()
     try:
-        model = input("  CPA fallback model name: ").strip()
+        model = input("  CPA 兜底模型名称：").strip()
     except (KeyboardInterrupt, EOFError):
         print()
-        print("  No fallback added.")
+        print("  未添加兜底模型。")
         return
     if not model:
-        print("  No fallback added.")
+        print("  未添加兜底模型。")
         return
 
     final_cfg = load_config()
@@ -138,16 +138,16 @@ def cmd_fallback_add(args) -> None:
     for existing in chain:
         if existing.get("model") == model:
             print()
-            print(f"  {_format_entry(new_entry)} is already in the fallback chain — skipped.")
+            print(f"  {_format_entry(new_entry)} 已存在于兜底链路中，已跳过。")
             return
     chain.append(new_entry)
     _write_chain(final_cfg, chain)
     save_config(final_cfg)
     print()
-    print(f"  Added fallback: {_format_entry(new_entry)}")
-    print(f"  Chain is now {len(chain)} {'entry' if len(chain) == 1 else 'entries'} long.")
+    print(f"  已添加兜底模型：{_format_entry(new_entry)}")
+    print(f"  当前兜底链路共 {len(chain)} 项。")
     print()
-    print("  Run `hermes fallback list` to view, or `hermes fallback remove` to delete.")
+    print("  可运行 `hermes fallback list` 查看，或用 `hermes fallback remove` 删除。")
 
 
 def cmd_fallback_remove(args) -> None:  # noqa: ARG001
@@ -159,22 +159,22 @@ def cmd_fallback_remove(args) -> None:  # noqa: ARG001
 
     if not chain:
         print()
-        print("  No CPA fallback models configured — nothing to remove.")
+        print("  当前未配置 CPA 兜底模型，无需删除。")
         print()
         return
 
     choices = [_format_entry(e) for e in chain]
-    choices.append("Cancel")
+    choices.append("取消")
 
     try:
         from hermes_cli.setup import _curses_prompt_choice
-        idx = _curses_prompt_choice("Select a fallback to remove:", choices, 0)
+        idx = _curses_prompt_choice("选择要删除的兜底模型：", choices, 0)
     except Exception:
-        idx = _numbered_pick("Select a fallback to remove:", choices)
+        idx = _numbered_pick("选择要删除的兜底模型：", choices)
 
     if idx is None or idx < 0 or idx >= len(chain):
         print()
-        print("  Cancelled — no change.")
+        print("  已取消，未做任何修改。")
         return
 
     removed = chain.pop(idx)
@@ -182,16 +182,16 @@ def cmd_fallback_remove(args) -> None:  # noqa: ARG001
     save_config(config)
 
     print()
-    print(f"  Removed fallback: {_format_entry(removed)}")
+    print(f"  已删除兜底模型：{_format_entry(removed)}")
     if chain:
-        print(f"  Chain is now {len(chain)} {'entry' if len(chain) == 1 else 'entries'} long.")
+        print(f"  当前兜底链路共 {len(chain)} 项。")
     else:
-        print("  Fallback chain is now empty.")
+        print("  兜底链路现已清空。")
     print()
 
 
 def cmd_fallback_clear(args) -> None:  # noqa: ARG001
-    """Remove all fallback entries (with confirmation)."""
+    """Remove all fallback 条目 (with confirmation)."""
     from hermes_cli.config import load_config, save_config
 
     config = load_config()
@@ -199,29 +199,29 @@ def cmd_fallback_clear(args) -> None:  # noqa: ARG001
 
     if not chain:
         print()
-        print("  No CPA fallback models configured — nothing to clear.")
+        print("  当前未配置 CPA 兜底模型，无需清空。")
         print()
         return
 
     print()
-    print(f"  Current fallback chain ({len(chain)} {'entry' if len(chain) == 1 else 'entries'}):")
+    print(f"  当前兜底链路（共 {len(chain)} 项）：")
     for i, entry in enumerate(chain, 1):
         print(f"    {i}. {_format_entry(entry)}")
     print()
     try:
-        resp = input("  Clear all entries? [y/N]: ").strip().lower()
+        resp = input("  确认清空全部条目吗？[y/N]: ").strip().lower()
     except (KeyboardInterrupt, EOFError):
         print()
-        print("  Cancelled.")
+        print("  已取消。")
         return
     if resp not in ("y", "yes"):
-        print("  Cancelled — no change.")
+        print("  已取消，未做任何修改。")
         return
 
     _write_chain(config, [])
     save_config(config)
     print()
-    print("  Fallback chain cleared.")
+    print("  已清空兜底链路。")
     print()
 
 
@@ -233,15 +233,15 @@ def _numbered_pick(question: str, choices: List[str]) -> Optional[int]:
     print()
     while True:
         try:
-            val = input(f"Choice [1-{len(choices)}]: ").strip()
+            val = input(f"请选择 [1-{len(choices)}]：").strip()
             if not val:
                 return None
             idx = int(val) - 1
             if 0 <= idx < len(choices):
                 return idx
-            print(f"Please enter 1-{len(choices)}")
+            print(f"请输入 1 到 {len(choices)} 之间的数字")
         except ValueError:
-            print("Please enter a number")
+            print("请输入数字")
         except (KeyboardInterrupt, EOFError):
             print()
             return None
@@ -263,6 +263,6 @@ def cmd_fallback(args) -> None:
     elif sub == "clear":
         cmd_fallback_clear(args)
     else:
-        print(f"Unknown fallback subcommand: {sub}")
-        print("Use one of: list, add, remove, clear")
+        print(f"未知 fallback 子命令：{sub}")
+        print("可用子命令：list、add、remove、clear")
         raise SystemExit(2)

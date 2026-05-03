@@ -230,7 +230,7 @@ def scan_skill_commands() -> Dict[str, Dict[str, Any]]:
                     name = frontmatter.get('name', skill_md.parent.name)
                     if name in seen_names:
                         continue
-                    # Respect user's disabled skills config
+                    # Respect user's disabled skills config for the CLI surface.
                     if name in disabled:
                         continue
                     description = frontmatter.get('description', '')

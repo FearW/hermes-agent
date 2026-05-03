@@ -180,7 +180,7 @@ async def test_btw_dispatches_mid_run():
     """
     runner = _make_runner()
     runner._handle_background_command = AsyncMock(
-        return_value='🚀 Background task started: "what module owns titles?"'
+        return_value='🚀 后台任务已启动：“what module owns titles?”'
     )
 
     result = await runner._handle_message(_make_event("/btw what module owns titles?"))

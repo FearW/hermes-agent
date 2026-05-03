@@ -21,3 +21,12 @@ def test_dream_cycle_disabled_is_recorded(tmp_path, monkeypatch):
     state = load_dream_state()
     assert state["runs"] == 1
     assert state["last_result"]["reason"] == "test"
+
+
+def test_dream_cycle_off_profile_is_still_disabled(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+
+    result = run_dream_cycle({"sleep_mode": {"profile": "off", "enabled": True}}, reason="test")
+
+    assert result["ok"] is False
+    assert result["skipped"] == "sleep mode is disabled"

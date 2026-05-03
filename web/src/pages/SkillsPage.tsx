@@ -9,12 +9,13 @@ import {
   X,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import type { SkillInfo, ToolsetInfo } from "@/lib/api";
+import type { SkillInfo, SkillPlatformInfo, ToolsetInfo } from "@/lib/api";
 import { useToast } from "@/hooks/useToast";
 import { Toast } from "@/components/Toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 
 /* ------------------------------------------------------------------ */
@@ -63,7 +64,10 @@ function prettyCategory(raw: string | null | undefined): string {
 export default function SkillsPage() {
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [toolsets, setToolsets] = useState<ToolsetInfo[]>([]);
+  const [platforms, setPlatforms] = useState<SkillPlatformInfo[]>([]);
+  const [selectedPlatform, setSelectedPlatform] = useState("cli");
   const [loading, setLoading] = useState(true);
+  const [initialized, setInitialized] = useState(false);
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [togglingSkills, setTogglingSkills] = useState<Set<string>>(new Set());
@@ -72,27 +76,38 @@ export default function SkillsPage() {
   const { toast, showToast } = useToast();
 
   useEffect(() => {
-    Promise.all([api.getSkills(), api.getToolsets()])
-      .then(([s, t]) => {
+    Promise.all([api.getSkillPlatforms(), api.getToolsets(), api.getSkills(selectedPlatform)])
+      .then(([platformData, t, s]) => {
+        setPlatforms(platformData.platforms);
         setSkills(s);
         setToolsets(t);
+        setInitialized(true);
       })
       .catch(() => showToast("加载技能/工具集失败", "error"))
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    if (!initialized) return;
+    setLoading(true);
+    api.getSkills(selectedPlatform)
+      .then((data) => {
+        setSkills(data);
+        setActiveCategory(null);
+      })
+      .catch(() => showToast("加载技能失败", "error"))
+      .finally(() => setLoading(false));
+  }, [initialized, selectedPlatform]);
+
   /* ---- Toggle skill ---- */
   const handleToggleSkill = async (skill: SkillInfo) => {
     setTogglingSkills((prev) => new Set(prev).add(skill.name));
     try {
-      await api.toggleSkill(skill.name, !skill.enabled);
-      setSkills((prev) =>
-        prev.map((s) =>
-          s.name === skill.name ? { ...s, enabled: !s.enabled } : s
-        )
-      );
+      await api.toggleSkill(skill.name, !skill.enabled, selectedPlatform);
+      const refreshed = await api.getSkills(selectedPlatform);
+      setSkills(refreshed);
       showToast(
-        `${skill.name} ${skill.enabled ? "disabled" : "enabled"}`,
+        `${skill.name} ${skill.enabled ? "已停用" : "已启用"}`,
         "success"
       );
     } catch {
@@ -160,6 +175,8 @@ export default function SkillsPage() {
   }, [skills]);
 
   const enabledCount = skills.filter((s) => s.enabled).length;
+  const selectedPlatformLabel =
+    platforms.find((platform) => platform.key === selectedPlatform)?.label ?? selectedPlatform;
 
   const filteredToolsets = useMemo(() => {
     return toolsets.filter(
@@ -210,10 +227,26 @@ export default function SkillsPage() {
           <Package className="h-5 w-5 text-muted-foreground" />
           <h1 className="text-base font-semibold">技能</h1>
           <span className="text-xs text-muted-foreground">
-            {enabledCount}/{skills.length} enabled
+            {enabledCount}/{skills.length} 已启用
           </span>
         </div>
+        <div className="w-full max-w-xs">
+          <Select
+            value={selectedPlatform}
+            onChange={(event) => setSelectedPlatform(event.target.value)}
+          >
+            {platforms.map((platform) => (
+              <option key={platform.key} value={platform.key}>
+                {platform.label}
+              </option>
+            ))}
+          </Select>
+        </div>
       </div>
+
+      <p className="text-xs text-muted-foreground">
+        当前管理平台: {selectedPlatformLabel}。下方 Toolsets 仍显示 CLI 的启用状态。
+      </p>
 
       {/* ═══════════════ Search + Category Filter ═══════════════ */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -221,7 +254,7 @@ export default function SkillsPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             className="pl-9"
-            placeholder="Search skills and toolsets..."
+            placeholder="搜索技能和工具集..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -250,7 +283,7 @@ export default function SkillsPage() {
             }`}
             onClick={() => setActiveCategory(null)}
           >
-            All ({skills.length})
+            全部 ({skills.length})
           </button>
           {allCategories.map(({ key, name, count }) => (
             <button
@@ -301,14 +334,14 @@ export default function SkillsPage() {
                       )}
                       <CardTitle className="text-sm font-medium">{name}</CardTitle>
                       <Badge variant="secondary" className="text-[10px] font-normal">
-                        {catSkills.length} skill{catSkills.length !== 1 ? "s" : ""}
+                        {catSkills.length} 个技能
                       </Badge>
                     </div>
                     <Badge
                       variant={catEnabled === catSkills.length ? "success" : "outline"}
                       className="text-[10px]"
                     >
-                      {catEnabled}/{catSkills.length} enabled
+                      {catEnabled}/{catSkills.length} 已启用
                     </Badge>
                   </div>
                 </CardHeader>
@@ -318,7 +351,7 @@ export default function SkillsPage() {
                   <div className="px-4 pb-3 flex items-center min-h-[28px]">
                     <p className="text-xs text-muted-foreground/60 truncate leading-normal">
                       {catSkills.slice(0, 4).map((s) => s.name).join(", ")}
-                      {catSkills.length > 4 && `, +${catSkills.length - 4} more`}
+                      {catSkills.length > 4 && `，另外 ${catSkills.length - 4} 个`}
                     </p>
                   </div>
                 ) : (
@@ -350,7 +383,7 @@ export default function SkillsPage() {
                               </span>
                             </div>
                             <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">
-                              {skill.description || "No description available."}
+                              {skill.description || "暂无描述。"}
                             </p>
                           </div>
                         </div>
@@ -368,13 +401,13 @@ export default function SkillsPage() {
       <section className="flex flex-col gap-4">
         <h2 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
           <Wrench className="h-4 w-4" />
-          Toolsets ({filteredToolsets.length})
+          工具集（{filteredToolsets.length}）
         </h2>
 
         {filteredToolsets.length === 0 ? (
           <Card>
             <CardContent className="py-8 text-center text-sm text-muted-foreground">
-              No toolsets match the search.
+              没有工具集匹配当前搜索。
             </CardContent>
           </Card>
         ) : (
@@ -396,7 +429,7 @@ export default function SkillsPage() {
                             variant={ts.enabled ? "success" : "outline"}
                             className="text-[10px]"
                           >
-                            {ts.enabled ? "active" : "inactive"}
+                            {ts.enabled ? "已启用" : "已停用"}
                           </Badge>
                         </div>
                         <p className="text-xs text-muted-foreground mb-2">
@@ -404,7 +437,7 @@ export default function SkillsPage() {
                         </p>
                         {ts.enabled && !ts.configured && (
                           <p className="text-[10px] text-amber-300/80 mb-2">
-                            Setup needed
+                            需要配置
                           </p>
                         )}
                         {ts.tools.length > 0 && (
@@ -422,7 +455,7 @@ export default function SkillsPage() {
                         )}
                         {ts.tools.length === 0 && (
                           <span className="text-[10px] text-muted-foreground/60">
-                            {ts.enabled ? `${ts.name} 工具集` : "CLI 已禁用"}
+                            {ts.enabled ? `${ts.name} 工具集` : "CLI 已停用"}
                           </span>
                         )}
                       </div>

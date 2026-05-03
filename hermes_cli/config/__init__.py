@@ -650,6 +650,7 @@ DEFAULT_CONFIG = {
         "l4_compaction": True,
         "maintenance_interval_seconds": 14400,
         "l4_interval_seconds": 5400,
+        "idle_before_maintenance_seconds": 1800,
         "report_actions": True,
     },
     # Subagent delegation — override the model or direct endpoint used by
@@ -1381,6 +1382,22 @@ OPTIONAL_ENV_VARS = {
         "prompt": "Allow all users (true/false)",
         "url": None,
         "password": False,
+        "category": "messaging",
+        "advanced": True,
+    },
+    "GATEWAY_PROXY_URL": {
+        "description": "Remote Hermes API server base URL for gateway proxy mode (for example http://host:8642).",
+        "prompt": "Gateway proxy URL",
+        "url": None,
+        "password": False,
+        "category": "messaging",
+        "advanced": True,
+    },
+    "GATEWAY_PROXY_KEY": {
+        "description": "Bearer token used by gateway proxy mode when the remote Hermes API server requires authentication.",
+        "prompt": "Gateway proxy auth key",
+        "url": None,
+        "password": True,
         "category": "messaging",
         "advanced": True,
     },
@@ -2711,9 +2728,9 @@ def config_command(args):
         key = getattr(args, "key", None)
         value = getattr(args, "value", None)
         if not key or value is None:
-            print("Usage: hermes config set <key> <value>")
+            print("用法：hermes config set <key> <value>")
             print()
-            print("Examples:")
+            print("示例：")
             print("  hermes config set model anthropic/claude-sonnet-4")
             print("  hermes config set terminal.backend docker")
             print("  hermes config set OPENROUTER_API_KEY sk-or-...")
@@ -2739,7 +2756,7 @@ def config_command(args):
         current_ver, latest_ver = check_config_version()
 
         if not missing_env and not missing_config and current_ver >= latest_ver:
-            print(color("✓ Configuration is up to date!", Colors.GREEN))
+            print(color("✓ 配置已是最新！", Colors.GREEN))
             print()
             return
 

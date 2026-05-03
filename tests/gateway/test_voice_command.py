@@ -98,7 +98,7 @@ class TestHandleVoiceCommand:
     async def test_voice_on(self, runner):
         event = _make_event("/voice on")
         result = await runner._handle_voice_command(event)
-        assert "enabled" in result.lower()
+        assert "已开启" in result
         assert runner._voice_mode["telegram:123"] == "voice_only"
 
     @pytest.mark.asyncio
@@ -106,7 +106,7 @@ class TestHandleVoiceCommand:
         runner._voice_mode["telegram:123"] = "voice_only"
         event = _make_event("/voice off")
         result = await runner._handle_voice_command(event)
-        assert "disabled" in result.lower()
+        assert "已关闭" in result
         assert runner._voice_mode["telegram:123"] == "off"
 
     @pytest.mark.asyncio
@@ -120,20 +120,20 @@ class TestHandleVoiceCommand:
     async def test_voice_status_off(self, runner):
         event = _make_event("/voice status")
         result = await runner._handle_voice_command(event)
-        assert "off" in result.lower()
+        assert "关闭" in result
 
     @pytest.mark.asyncio
     async def test_voice_status_on(self, runner):
         runner._voice_mode["telegram:123"] = "voice_only"
         event = _make_event("/voice status")
         result = await runner._handle_voice_command(event)
-        assert "voice reply" in result.lower()
+        assert "语音回复" in result
 
     @pytest.mark.asyncio
     async def test_toggle_off_to_on(self, runner):
         event = _make_event("/voice")
         result = await runner._handle_voice_command(event)
-        assert "enabled" in result.lower()
+        assert "已开启" in result
         assert runner._voice_mode["telegram:123"] == "voice_only"
 
     @pytest.mark.asyncio
@@ -141,7 +141,7 @@ class TestHandleVoiceCommand:
         runner._voice_mode["telegram:123"] = "voice_only"
         event = _make_event("/voice")
         result = await runner._handle_voice_command(event)
-        assert "disabled" in result.lower()
+        assert "已关闭" in result
         assert runner._voice_mode["telegram:123"] == "off"
 
     @pytest.mark.asyncio
@@ -739,7 +739,7 @@ class TestVoiceChannelCommands:
         event = self._make_discord_event()
         runner.adapters[event.source.platform] = mock_adapter
         result = await runner._handle_voice_channel_join(event)
-        assert "not supported" in result.lower()
+        assert "不支持语音频道" in result
 
     @pytest.mark.asyncio
     async def test_join_no_guild_id(self, runner):
@@ -750,7 +750,7 @@ class TestVoiceChannelCommands:
         event.raw_message = None  # no guild info
         runner.adapters[event.source.platform] = mock_adapter
         result = await runner._handle_voice_channel_join(event)
-        assert "discord server" in result.lower()
+        assert "Discord 服务器" in result
 
     @pytest.mark.asyncio
     async def test_join_user_not_in_vc(self, runner):
@@ -761,7 +761,7 @@ class TestVoiceChannelCommands:
         event = self._make_discord_event()
         runner.adapters[event.source.platform] = mock_adapter
         result = await runner._handle_voice_channel_join(event)
-        assert "need to be in a voice channel" in result.lower()
+        assert "先进入一个语音频道" in result
 
     @pytest.mark.asyncio
     async def test_join_success(self, runner):
@@ -779,7 +779,7 @@ class TestVoiceChannelCommands:
         event.source.chat_name = "Hermes Server / #general"
         runner.adapters[event.source.platform] = mock_adapter
         result = await runner._handle_voice_channel_join(event)
-        assert "joined" in result.lower()
+        assert "已加入语音频道" in result
         assert "General" in result
         assert runner._voice_mode["discord:123"] == "all"
         assert mock_adapter._voice_sources[111]["chat_id"] == "123"
@@ -796,7 +796,7 @@ class TestVoiceChannelCommands:
         event = self._make_discord_event()
         runner.adapters[event.source.platform] = mock_adapter
         result = await runner._handle_voice_channel_join(event)
-        assert "failed" in result.lower()
+        assert "失败" in result
 
     @pytest.mark.asyncio
     async def test_join_exception(self, runner):
@@ -809,7 +809,7 @@ class TestVoiceChannelCommands:
         event = self._make_discord_event()
         runner.adapters[event.source.platform] = mock_adapter
         result = await runner._handle_voice_channel_join(event)
-        assert "failed" in result.lower()
+        assert "失败" in result
 
     @pytest.mark.asyncio
     async def test_join_missing_voice_dependencies(self, runner):
@@ -826,7 +826,7 @@ class TestVoiceChannelCommands:
 
         result = await runner._handle_voice_channel_join(event)
 
-        assert "voice dependencies are missing" in result.lower()
+        assert "缺少语音依赖" in result
         assert "PyNaCl" in result
 
     # -- _handle_voice_channel_leave --
@@ -839,7 +839,7 @@ class TestVoiceChannelCommands:
         event = self._make_discord_event("/voice leave")
         runner.adapters[event.source.platform] = mock_adapter
         result = await runner._handle_voice_channel_leave(event)
-        assert "not in" in result.lower()
+        assert "当前不在语音频道中" in result
 
     @pytest.mark.asyncio
     async def test_leave_no_guild(self, runner):
@@ -849,7 +849,7 @@ class TestVoiceChannelCommands:
         event.raw_message = None
         runner.adapters[event.source.platform] = mock_adapter
         result = await runner._handle_voice_channel_leave(event)
-        assert "not in" in result.lower()
+        assert "当前不在语音频道中" in result
 
     @pytest.mark.asyncio
     async def test_leave_success(self, runner):
@@ -861,7 +861,7 @@ class TestVoiceChannelCommands:
         runner.adapters[event.source.platform] = mock_adapter
         runner._voice_mode["discord:123"] = "all"
         result = await runner._handle_voice_channel_leave(event)
-        assert "left" in result.lower()
+        assert "已离开语音频道" in result
         assert runner._voice_mode["discord:123"] == "off"
         mock_adapter.leave_voice_channel.assert_called_once_with(111)
 
@@ -1318,7 +1318,7 @@ class TestCallbackWiringOrder:
         runner.adapters[event.source.platform] = mock_adapter
 
         result = await runner._handle_voice_channel_join(event)
-        assert "failed" in result.lower()
+        assert "失败" in result
         assert mock_adapter._voice_input_callback is None
 
     @pytest.mark.asyncio
@@ -1338,7 +1338,7 @@ class TestCallbackWiringOrder:
         runner.adapters[event.source.platform] = mock_adapter
 
         result = await runner._handle_voice_channel_join(event)
-        assert "failed" in result.lower()
+        assert "失败" in result
         assert mock_adapter._voice_input_callback is None
 
 
@@ -1369,7 +1369,7 @@ class TestLeaveExceptionHandling:
         runner._voice_mode["telegram:123"] = "all"
 
         result = await runner._handle_voice_channel_leave(event)
-        assert "left" in result.lower()
+        assert "已离开语音频道" in result
         assert runner._voice_mode["telegram:123"] == "off"
         assert mock_adapter._voice_input_callback is None
 

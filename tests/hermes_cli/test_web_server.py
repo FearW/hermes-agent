@@ -225,7 +225,12 @@ class TestWebServerEndpoints:
 
         resp = self.client.put(
             "/api/dream/config",
-            json={"enabled": False, "profile": "deep", "report_actions": False},
+            json={
+                "enabled": False,
+                "profile": "deep",
+                "report_actions": False,
+                "idle_before_maintenance_seconds": 900,
+            },
         )
 
         assert resp.status_code == 200
@@ -236,6 +241,7 @@ class TestWebServerEndpoints:
         assert sleep_mode["enabled"] is False
         assert sleep_mode["profile"] == "deep"
         assert sleep_mode["report_actions"] is False
+        assert sleep_mode["idle_before_maintenance_seconds"] == 900
 
     def test_dream_run_endpoint_records_disabled_cycle(self):
         self.client.put("/api/dream/config", json={"enabled": False})
@@ -246,6 +252,17 @@ class TestWebServerEndpoints:
         data = resp.json()
         assert data["ok"] is False
         assert data["skipped"] == "sleep mode is disabled"
+
+    def test_dream_off_profile_disables_status_even_with_stale_enabled(self):
+        self.client.put("/api/dream/config", json={"enabled": True, "profile": "balanced"})
+        self.client.put("/api/dream/config", json={"profile": "off"})
+
+        resp = self.client.get("/api/dream/status")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["enabled"] is False
+        assert data["profile"] == "off"
 
     def test_get_env_vars(self):
         resp = self.client.get("/api/env")
@@ -643,6 +660,8 @@ class TestNewEndpoints:
         import hermes_cli.skills_config as skills_config
         import hermes_cli.web_server as web_server
 
+        captured = {}
+
         def _fake_find_all_skills(*, skip_disabled=False):
             if skip_disabled:
                 return [
@@ -653,13 +672,18 @@ class TestNewEndpoints:
                 {"name": "active-skill", "description": "active", "category": "demo"},
             ]
 
+        def _fake_get_disabled_skills(config, platform=None):
+            captured["platform"] = platform
+            return {"disabled-skill"}
+
         monkeypatch.setattr(skills_tool, "_find_all_skills", _fake_find_all_skills)
-        monkeypatch.setattr(skills_config, "get_disabled_skills", lambda config: {"disabled-skill"})
+        monkeypatch.setattr(skills_config, "get_disabled_skills", _fake_get_disabled_skills)
         monkeypatch.setattr(web_server, "load_config", lambda: {"skills": {"disabled": ["disabled-skill"]}})
 
         resp = self.client.get("/api/skills")
 
         assert resp.status_code == 200
+        assert captured["platform"] == "cli"
         assert resp.json() == [
             {
                 "name": "active-skill",
@@ -674,6 +698,91 @@ class TestNewEndpoints:
                 "enabled": False,
             },
         ]
+
+    def test_toggle_skill_updates_cli_platform_disabled(self, monkeypatch):
+        import hermes_cli.skills_config as skills_config
+        import hermes_cli.web_server as web_server
+
+        captured = {}
+
+        def _fake_get_disabled_skills(config, platform=None):
+            captured["get_platform"] = platform
+            return {"existing-skill"}
+
+        def _fake_save_disabled_skills(config, disabled, platform=None):
+            captured["save_platform"] = platform
+            captured["disabled"] = set(disabled)
+
+        monkeypatch.setattr(skills_config, "get_disabled_skills", _fake_get_disabled_skills)
+        monkeypatch.setattr(skills_config, "save_disabled_skills", _fake_save_disabled_skills)
+        monkeypatch.setattr(web_server, "load_config", lambda: {"skills": {"platform_disabled": {"cli": ["existing-skill"]}}})
+
+        resp = self.client.put(
+            "/api/skills/toggle",
+            json={"name": "new-skill", "enabled": False},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["platform"] == "cli"
+        assert captured == {
+            "get_platform": "cli",
+            "save_platform": "cli",
+            "disabled": {"existing-skill", "new-skill"},
+        }
+
+    def test_toggle_skill_global_override_is_supported(self, monkeypatch):
+        import hermes_cli.skills_config as skills_config
+        import hermes_cli.web_server as web_server
+
+        captured = {}
+
+        def _fake_get_disabled_skills(config, platform=None):
+            captured["get_platform"] = platform
+            return {"global-skill"}
+
+        def _fake_save_disabled_skills(config, disabled, platform=None):
+            captured["save_platform"] = platform
+            captured["disabled"] = set(disabled)
+
+        monkeypatch.setattr(skills_config, "get_disabled_skills", _fake_get_disabled_skills)
+        monkeypatch.setattr(skills_config, "save_disabled_skills", _fake_save_disabled_skills)
+        monkeypatch.setattr(web_server, "load_config", lambda: {"skills": {"disabled": ["global-skill"]}})
+
+        resp = self.client.put(
+            "/api/skills/toggle",
+            json={"name": "global-skill", "enabled": True, "platform": "global"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["platform"] == "global"
+        assert captured == {
+            "get_platform": None,
+            "save_platform": None,
+            "disabled": set(),
+        }
+
+    def test_skill_platforms_endpoint(self, monkeypatch):
+        import hermes_cli.skills_config as skills_config
+
+        monkeypatch.setattr(
+            skills_config,
+            "PLATFORMS",
+            {
+                "cli": "CLI",
+                "telegram": "Telegram",
+            },
+        )
+
+        resp = self.client.get("/api/skills/platforms")
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "platforms": [
+                {"key": "global", "label": "All platforms (global default)"},
+                {"key": "cli", "label": "CLI"},
+                {"key": "telegram", "label": "Telegram"},
+            ]
+        }
 
     def test_toolsets_list(self):
         resp = self.client.get("/api/tools/toolsets")
@@ -1066,7 +1175,7 @@ class TestCPAConfigAPI:
         resp = self.client.get("/api/cpa/providers/gemini")
 
         assert resp.status_code == 200
-        assert captured["url"] == "http://127.0.0.1:8080/v0/management/gemini-api-key"
+        assert captured["url"] == "http://127.0.0.1:8080/gemini-api-key"
         assert captured["method"] == "GET"
         assert captured["auth"] == "Bearer secret"
 
@@ -1103,10 +1212,60 @@ class TestCPAConfigAPI:
         resp = self.client.get("/api/cpa/oauth/codex/start")
 
         assert resp.status_code == 200
-        assert captured["url"] == "http://127.0.0.1:8080/v0/management/codex-auth-url?is_webui=true"
+        assert captured["url"] == "http://127.0.0.1:8080/codex-auth-url?is_webui=true"
         assert captured["management_key"] == "panel-secret"
         assert captured["auth"] == "Bearer panel-secret"
         assert resp.json()["authUrl"] == "https://example.test/oauth"
+
+    def test_cpa_proxy_falls_back_to_legacy_management_path(self, monkeypatch):
+        from hermes_cli import web_server
+
+        captured = {"urls": []}
+
+        class LegacyResponse:
+            headers = {"Content-Type": "application/json"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b"[]"
+
+        class NotFoundResponse:
+            def read(self):
+                return b"not found"
+
+            def close(self):
+                return None
+
+        def fake_urlopen(request, timeout):
+            captured["urls"].append(request.full_url)
+            if "/v0/management/" not in request.full_url and request.full_url.endswith("/gemini-api-key"):
+                raise web_server.urllib.error.HTTPError(
+                    request.full_url,
+                    404,
+                    "not found",
+                    hdrs={},
+                    fp=NotFoundResponse(),
+                )
+            return LegacyResponse()
+
+        monkeypatch.setattr(web_server, "load_config", lambda: {
+            "model": {"default": "x", "base_url": "http://127.0.0.1:8080/v1"}
+        })
+        monkeypatch.setattr(web_server, "load_env", lambda: {"CLIPROXY_API_KEY": "secret"})
+        monkeypatch.setattr(web_server.urllib.request, "urlopen", fake_urlopen)
+
+        resp = self.client.get("/api/cpa/providers/gemini")
+
+        assert resp.status_code == 200
+        assert captured["urls"] == [
+            "http://127.0.0.1:8080/gemini-api-key",
+            "http://127.0.0.1:8080/v0/management/gemini-api-key",
+        ]
 
     def test_cpa_auth_files_proxy(self, monkeypatch):
         from hermes_cli import web_server

@@ -22,6 +22,7 @@ _PROFILES: dict[str, dict[str, Any]] = {
         "l4_compaction": False,
         "maintenance_interval_seconds": 0,
         "l4_interval_seconds": 0,
+        "idle_before_maintenance_seconds": 0,
         "report_actions": False,
     },
     "light": {
@@ -34,6 +35,7 @@ _PROFILES: dict[str, dict[str, Any]] = {
         "l4_compaction": True,
         "maintenance_interval_seconds": 21600,
         "l4_interval_seconds": 7200,
+        "idle_before_maintenance_seconds": 1800,
         "report_actions": True,
     },
     "balanced": {
@@ -46,6 +48,7 @@ _PROFILES: dict[str, dict[str, Any]] = {
         "l4_compaction": True,
         "maintenance_interval_seconds": 14400,
         "l4_interval_seconds": 5400,
+        "idle_before_maintenance_seconds": 1800,
         "report_actions": True,
     },
     "deep": {
@@ -58,6 +61,7 @@ _PROFILES: dict[str, dict[str, Any]] = {
         "l4_compaction": True,
         "maintenance_interval_seconds": 7200,
         "l4_interval_seconds": 3600,
+        "idle_before_maintenance_seconds": 1800,
         "report_actions": True,
     },
 }
@@ -86,7 +90,12 @@ def resolve_sleep_mode(config: Dict[str, Any] | None) -> dict[str, Any]:
         if key in resolved:
             resolved[key] = value
 
-    if not bool(resolved.get("enabled", True)):
+    # The explicit "off" profile is authoritative and must stay disabled even
+    # if an older config entry still carries enabled=true.
+    if profile == "off":
+        resolved.update(_PROFILES["off"])
+        resolved["profile"] = "off"
+    elif not bool(resolved.get("enabled", True)):
         resolved.update(_PROFILES["off"])
         resolved["profile"] = profile if profile == "off" else f"{profile}:disabled"
 
@@ -95,6 +104,7 @@ def resolve_sleep_mode(config: Dict[str, Any] | None) -> dict[str, Any]:
         "skill_review_interval",
         "maintenance_interval_seconds",
         "l4_interval_seconds",
+        "idle_before_maintenance_seconds",
     ):
         try:
             resolved[key] = max(0, int(resolved.get(key, 0)))
@@ -133,4 +143,7 @@ def apply_sleep_mode_to_maintenance_config(config: Dict[str, Any] | None) -> dic
         maintenance["interval_seconds"] = sleep["maintenance_interval_seconds"]
     if sleep.get("l4_interval_seconds", 0):
         maintenance["l4_interval_seconds"] = sleep["l4_interval_seconds"]
+    maintenance["idle_before_maintenance_seconds"] = int(
+        sleep.get("idle_before_maintenance_seconds", 0) or 0
+    )
     return maintenance

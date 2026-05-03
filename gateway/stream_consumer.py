@@ -43,6 +43,7 @@ class StreamConsumerConfig:
     edit_interval: float = 1.0
     buffer_threshold: int = 40
     cursor: str = " ▉"
+    buffer_only: bool = False
     fresh_final_after_seconds: float = 0.0
 
 
@@ -71,11 +72,13 @@ class GatewayStreamConsumer:
         chat_id: str,
         config: Optional[StreamConsumerConfig] = None,
         metadata: Optional[dict] = None,
+        on_new_message: Optional[callable] = None,
     ):
         self.adapter = adapter
         self.chat_id = chat_id
         self.cfg = config or StreamConsumerConfig()
         self.metadata = metadata
+        self._on_new_message = on_new_message
         self._queue: queue.Queue = queue.Queue()
         self._accumulated = ""
         self._message_id: Optional[str] = None
@@ -89,6 +92,29 @@ class GatewayStreamConsumer:
         self._current_edit_interval = self.cfg.edit_interval  # Adaptive backoff
         self._final_response_sent = False
         self._message_created_ts: Optional[float] = None
+        self._think_buf = ""
+        self._inside_think_block = False
+
+    _THINK_OPEN_RE = re.compile(
+        r"<(think|thinking|thought|reasoning_scratchpad)>",
+        re.IGNORECASE,
+    )
+    _THINK_CLOSE_RE = re.compile(
+        r"</(think|thinking|thought|reasoning_scratchpad)>",
+        re.IGNORECASE,
+    )
+    _THINK_OPEN_TAGS = (
+        "<think>",
+        "<thinking>",
+        "<thought>",
+        "<reasoning_scratchpad>",
+    )
+    _THINK_CLOSE_TAGS = (
+        "</think>",
+        "</thinking>",
+        "</thought>",
+        "</reasoning_scratchpad>",
+    )
 
     @property
     def already_sent(self) -> bool:
@@ -130,6 +156,75 @@ class GatewayStreamConsumer:
         elif text is None:
             self.on_segment_break()
 
+    @staticmethod
+    def _is_think_boundary(text: str, idx: int) -> bool:
+        if idx == 0:
+            return True
+        line_start = text.rfind("\n", 0, idx)
+        prefix = text[line_start + 1:idx] if line_start != -1 else text[:idx]
+        return prefix.strip() == ""
+
+    @staticmethod
+    def _partial_suffix_len(text: str, candidates: tuple[str, ...]) -> int:
+        lowered = text.lower()
+        best = 0
+        for candidate in candidates:
+            candidate_lower = candidate.lower()
+            limit = min(len(lowered), len(candidate_lower) - 1)
+            for size in range(limit, 0, -1):
+                if candidate_lower.startswith(lowered[-size:]):
+                    best = max(best, size)
+                    break
+        return best
+
+    def _flush_think_buffer(self) -> None:
+        if not self._inside_think_block and self._think_buf:
+            self._accumulated += self._think_buf
+        self._think_buf = ""
+
+    def _filter_and_accumulate(self, text: str) -> None:
+        if not text:
+            return
+
+        buf = self._think_buf + text
+        self._think_buf = ""
+        out: list[str] = []
+        i = 0
+
+        while i < len(buf):
+            if self._inside_think_block:
+                close_match = self._THINK_CLOSE_RE.search(buf, i)
+                if close_match is None:
+                    held = self._partial_suffix_len(buf[i:], self._THINK_CLOSE_TAGS)
+                    self._think_buf = buf[-held:] if held else ""
+                    break
+                i = close_match.end()
+                self._inside_think_block = False
+                continue
+
+            open_match = self._THINK_OPEN_RE.search(buf, i)
+            if open_match is None:
+                tail = buf[i:]
+                held = self._partial_suffix_len(tail, self._THINK_OPEN_TAGS)
+                if held:
+                    out.append(tail[:-held])
+                    self._think_buf = tail[-held:]
+                else:
+                    out.append(tail)
+                break
+
+            start = open_match.start()
+            if start != i and not self._is_think_boundary(buf, start):
+                out.append(buf[i:open_match.end()])
+                i = open_match.end()
+                continue
+
+            out.append(buf[i:start])
+            i = open_match.end()
+            self._inside_think_block = True
+
+        self._accumulated += "".join(out)
+
     def finish(self) -> None:
         """Signal that the stream is complete."""
         self._queue.put(_DONE)
@@ -158,7 +253,7 @@ class GatewayStreamConsumer:
                         if isinstance(item, tuple) and len(item) == 2 and item[0] is _COMMENTARY:
                             commentary_text = item[1]
                             break
-                        self._accumulated += item
+                        self._filter_and_accumulate(item)
                     except queue.Empty:
                         break
 
@@ -169,9 +264,9 @@ class GatewayStreamConsumer:
                     got_done
                     or got_segment_break
                     or commentary_text is not None
-                    or (elapsed >= self._current_edit_interval
+                    or ((not self.cfg.buffer_only) and elapsed >= self._current_edit_interval
                         and self._accumulated)
-                    or len(self._accumulated) >= self.cfg.buffer_threshold
+                    or ((not self.cfg.buffer_only) and len(self._accumulated) >= self.cfg.buffer_threshold)
                 )
 
                 current_update_visible = False
@@ -235,6 +330,7 @@ class GatewayStreamConsumer:
                     self._last_edit_time = time.monotonic()
 
                 if got_done:
+                    self._flush_think_buffer()
                     # Final edit without cursor. If progressive editing failed
                     # mid-stream, send a single continuation/fallback message
                     # here instead of letting the base gateway path send the
@@ -245,9 +341,11 @@ class GatewayStreamConsumer:
                         elif current_update_visible:
                             self._final_response_sent = True
                         elif self._message_id:
-                            self._final_response_sent = await self._send_or_edit(self._accumulated)
+                            self._final_response_sent = await self._send_or_edit(self._accumulated, finalize=True)
+                            if not self._final_response_sent and self._already_sent:
+                                await self._send_fallback_final(self._accumulated)
                         elif not self._already_sent:
-                            self._final_response_sent = await self._send_or_edit(self._accumulated)
+                            self._final_response_sent = await self._send_or_edit(self._accumulated, finalize=True)
                     return
 
                 if commentary_text is not None:
@@ -271,6 +369,12 @@ class GatewayStreamConsumer:
                 # a real string like "msg_1", not "__no_edit__", so that case
                 # still resets and creates a fresh segment as intended.)
                 if got_segment_break:
+                    if self._message_id not in (None, "__no_edit__") and self._already_sent and not current_update_visible and self._accumulated:
+                        await self._send_fallback_final(self._accumulated)
+                        self._accumulated = ""
+                    elif self._fallback_final_send and self._accumulated and self._message_id != "__no_edit__":
+                        await self._send_fallback_final(self._accumulated)
+                        self._accumulated = ""
                     self._reset_segment_state(preserve_no_edit=True)
 
                 await asyncio.sleep(0.05)  # Small yield to not busy-loop
@@ -280,8 +384,11 @@ class GatewayStreamConsumer:
             if self._accumulated and self._message_id:
                 try:
                     await self._send_or_edit(self._accumulated)
+                    self._final_response_sent = True
                 except Exception:
                     pass
+            elif self._already_sent:
+                self._final_response_sent = True
         except Exception as e:
             logger.error("Stream consumer error: %s", e)
 
@@ -330,6 +437,7 @@ class GatewayStreamConsumer:
                 self._message_id = str(result.message_id)
                 self._already_sent = True
                 self._last_sent_text = text
+                self._fire_on_new_message()
                 return str(result.message_id)
             else:
                 self._edit_supported = False
@@ -378,6 +486,8 @@ class GatewayStreamConsumer:
         continuation = self._continuation_text(final_text)
         self._fallback_final_send = False
         if not continuation.strip():
+            if self.cfg.cursor:
+                await self._try_strip_cursor()
             # Nothing new to send — the visible partial already matches final text.
             self._already_sent = True
             self._final_response_sent = True
@@ -455,12 +565,13 @@ class GatewayStreamConsumer:
         if not prefix or not prefix.strip():
             return
         try:
-            await self.adapter.edit_message(
+            result = await self.adapter.edit_message(
                 chat_id=self.chat_id,
                 message_id=self._message_id,
                 content=prefix,
             )
-            self._last_sent_text = prefix
+            if getattr(result, "success", False):
+                self._last_sent_text = prefix
         except Exception:
             pass  # best-effort — don't let this block the fallback path
 
@@ -477,10 +588,19 @@ class GatewayStreamConsumer:
             )
             if result.success:
                 self._already_sent = True
+                self._fire_on_new_message()
                 return True
         except Exception as e:
             logger.error("Commentary send error: %s", e)
         return False
+
+    def _fire_on_new_message(self) -> None:
+        if not self._on_new_message:
+            return
+        try:
+            self._on_new_message()
+        except Exception:
+            pass
 
     def _should_send_fresh_final(self) -> bool:
         """Return True when final delivery should use a fresh message."""
@@ -512,13 +632,23 @@ class GatewayStreamConsumer:
         # Media files are delivered as native attachments after the stream
         # finishes (via _deliver_media_from_response in gateway/run.py).
         text = self._clean_for_display(text)
+        if self.cfg.cursor and text == self.cfg.cursor:
+            return True
+        if (
+            self._message_id is None
+            and self.cfg.cursor
+            and text.endswith(self.cfg.cursor)
+            and len(text[:-len(self.cfg.cursor)].strip()) < 4
+        ):
+            return True
         if not text.strip():
             return True  # nothing to send is "success"
         try:
             if self._message_id is not None:
                 if self._edit_supported:
                     # Skip if text is identical to what we last sent
-                    if text == self._last_sent_text:
+                    requires_finalize = bool(getattr(self.adapter, "REQUIRES_EDIT_FINALIZE", False))
+                    if text == self._last_sent_text and not (finalize and requires_finalize):
                         return True
                     if finalize and self._should_send_fresh_final():
                         old_message_id = self._message_id
@@ -541,6 +671,7 @@ class GatewayStreamConsumer:
                         chat_id=self.chat_id,
                         message_id=self._message_id,
                         content=text,
+                        finalize=finalize,
                     )
                     if result.success:
                         self._already_sent = True
@@ -610,6 +741,7 @@ class GatewayStreamConsumer:
                     if finalize:
                         self._final_response_sent = True
                     self._last_sent_text = text
+                    self._fire_on_new_message()
                     if not result.message_id:
                         self._fallback_prefix = self._visible_prefix()
                         self._fallback_final_send = True

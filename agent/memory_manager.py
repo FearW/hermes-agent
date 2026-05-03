@@ -43,11 +43,16 @@ logger = logging.getLogger(__name__)
 # Context fencing helpers
 # ---------------------------------------------------------------------------
 
+_FENCE_BLOCK_RE = re.compile(
+    r'<\s*memory-context\s*>.*?<\s*/\s*memory-context\s*>',
+    re.IGNORECASE | re.DOTALL,
+)
 _FENCE_TAG_RE = re.compile(r'</?\s*memory-context\s*>', re.IGNORECASE)
 
 
 def sanitize_context(text: str) -> str:
     """Strip fence-escape sequences from provider output."""
+    text = _FENCE_BLOCK_RE.sub('', text)
     return _FENCE_TAG_RE.sub('', text)
 
 

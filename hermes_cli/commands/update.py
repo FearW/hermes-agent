@@ -181,13 +181,13 @@ def _update_via_zip(args):
                 shutil.copy2(src, dst)
             update_count += 1
         
-        print(f"✓ Updated {update_count} items from ZIP")
+        print(f"✓ 已从 ZIP 更新 {update_count} 个项目")
         
         # Cleanup
         shutil.rmtree(tmp_dir, ignore_errors=True)
         
     except Exception as e:
-        print(f"✗ ZIP update failed: {e}")
+        print(f"✗ ZIP 更新失败：{e}")
         sys.exit(1)
 
     # Clear stale bytecode after ZIP extraction
@@ -198,7 +198,7 @@ def _update_via_zip(args):
     # Reinstall Python dependencies. Prefer .[all], but if one optional extra
     # breaks on this machine, keep base deps and reinstall the remaining extras
     # individually so update does not silently strip working capabilities.
-    print("→ Updating Python dependencies...")
+    print("→ 正在更新 Python 依赖...")
     import subprocess
     uv_bin = shutil.which("uv")
     if uv_bin:
@@ -226,7 +226,7 @@ def _update_via_zip(args):
     # Sync skills
     try:
         from tools.skills_sync import sync_skills
-        print("→ Syncing bundled skills...")
+        print("→ 正在同步内置技能...")
         result = sync_skills(quiet=True)
         if result["copied"]:
             print(f"  + {len(result['copied'])} new: {', '.join(result['copied'])}")
@@ -237,12 +237,12 @@ def _update_via_zip(args):
         if result.get("cleaned"):
             print(f"  − {len(result['cleaned'])} removed from manifest")
         if not result["copied"] and not result.get("updated"):
-            print("  ✓ Skills are up to date")
+            print("  ✓ 技能已是最新")
     except Exception:
         pass
     
     print()
-    print("✓ Update complete!")
+    print("✓ 更新完成！")
 
 
 def _stash_local_changes_if_needed(git_cmd: list[str], cwd: Path) -> Optional[str]:
@@ -942,7 +942,7 @@ def cmd_update(args):
         # Reinstall Python dependencies. Prefer .[all], but if one optional extra
         # breaks on this machine, keep base deps and reinstall the remaining extras
         # individually so update does not silently strip working capabilities.
-        print("→ Updating Python dependencies...")
+        print("→ 正在更新 Python 依赖...")
         uv_bin = shutil.which("uv")
         if uv_bin:
             uv_env = {**os.environ, "VIRTUAL_ENV": str(PROJECT_ROOT / "venv")}
@@ -991,7 +991,7 @@ def cmd_update(args):
         try:
             from tools.skills_sync import sync_skills
             print()
-            print("→ Syncing bundled skills...")
+            print("→ 正在同步内置技能...")
             result = sync_skills(quiet=True)
             if result["copied"]:
                 print(f"  + {len(result['copied'])} new: {', '.join(result['copied'])}")
@@ -1002,7 +1002,7 @@ def cmd_update(args):
             if result.get("cleaned"):
                 print(f"  − {len(result['cleaned'])} removed from manifest")
             if not result["copied"] and not result.get("updated"):
-                print("  ✓ Skills are up to date")
+                print("  ✓ 技能已是最新")
         except Exception as e:
             logger.debug("Skills sync during update failed: %s", e)
 
@@ -1013,7 +1013,7 @@ def cmd_update(args):
             other_profiles = [p for p in list_profiles() if p.name != active]
             if other_profiles:
                 print()
-                print("→ Syncing bundled skills to other profiles...")
+                print("→ 正在同步其他 profile 的内置技能...")
                 for p in other_profiles:
                     try:
                         r = seed_profile_skills(p.path, quiet=True)
@@ -1025,12 +1025,12 @@ def cmd_update(args):
                             if copied: parts.append(f"+{copied} new")
                             if updated: parts.append(f"↑{updated} updated")
                             if modified: parts.append(f"~{modified} user-modified")
-                            status = ", ".join(parts) if parts else "up to date"
+                            status = ", ".join(parts) if parts else "已是最新"
                         else:
                             status = "sync failed"
                         print(f"  {p.name}: {status}")
                     except Exception as pe:
-                        print(f"  {p.name}: error ({pe})")
+                        print(f"  {p.name}: 错误（{pe}）")
         except Exception:
             pass  # profiles module not available or no profiles
 
@@ -1039,13 +1039,13 @@ def cmd_update(args):
             from plugins.memory.honcho.cli import sync_honcho_profiles_quiet
             synced = sync_honcho_profiles_quiet()
             if synced:
-                print(f"\n-> Honcho: synced {synced} profile(s)")
+                print(f"\n-> Honcho：已同步 {synced} 个 profile")
         except Exception:
             pass  # honcho plugin not installed or not configured
 
         # Check for config migrations
         print()
-        print("→ Checking configuration for new options...")
+        print("→ 正在检查新的配置选项...")
         
         from hermes_cli.config import (
             get_missing_env_vars, get_missing_config_fields, 
@@ -1061,9 +1061,9 @@ def cmd_update(args):
         if needs_migration:
             print()
             if missing_env:
-                print(f"  ⚠️  {len(missing_env)} new required setting(s) need configuration")
+                print(f"  ⚠️  发现 {len(missing_env)} 个新的必填项需要配置")
             if missing_config:
-                print(f"  ℹ️  {len(missing_config)} new config option(s) available")
+                print(f"  ℹ️  发现 {len(missing_config)} 个新的配置项")
             
             print()
             if gateway_mode:
@@ -1071,12 +1071,12 @@ def cmd_update(args):
                     "Would you like to configure new options now? [Y/n]", "n"
                 ).strip().lower()
             elif not (sys.stdin.isatty() and sys.stdout.isatty()):
-                print("  ℹ Non-interactive session — skipping config migration prompt.")
-                print("    Run 'hermes config migrate' later to apply any new config/env options.")
+                print("  ℹ 非交互式会话 - 跳过配置迁移提示。")
+                print("    稍后运行 `hermes config migrate` 应用新的配置/环境变量选项。")
                 response = "n"
             else:
                 try:
-                    response = input("Would you like to configure them now? [Y/n]: ").strip().lower()
+                    response = input("现在要立即配置吗？[Y/n]：").strip().lower()
                 except EOFError:
                     response = "n"
             
@@ -1088,17 +1088,17 @@ def cmd_update(args):
                 
                 if results["env_added"] or results["config_added"]:
                     print()
-                    print("✓ Configuration updated!")
+                    print("✓ 配置已更新！")
                 if gateway_mode and missing_env:
-                    print("  ℹ API keys require manual entry: hermes config migrate")
+                    print("  ℹ API 密钥需要手动输入：hermes config migrate")
             else:
                 print()
-                print("Skipped. Run 'hermes config migrate' later to configure.")
+                print("已跳过。稍后运行 `hermes config migrate` 配置。")
         else:
-            print("  ✓ Configuration is up to date")
+            print("  ✓ 配置已是最新")
         
         print()
-        print("✓ Update complete!")
+        print("✓ 更新完成！")
         
         # Write exit code *before* the gateway restart attempt.
         # When running as ``hermes update --gateway`` (spawned by the gateway's
@@ -1225,8 +1225,8 @@ def cmd_update(args):
             logger.debug("Gateway restart during update failed: %s", e)
         
         print()
-        print("Tip: You can now select a provider and model:")
-        print("  hermes model              # Select provider and model")
+        print("提示：现在可以选择 provider 和模型：")
+        print("  hermes model              # 选择 provider 和模型")
         
     except subprocess.CalledProcessError as e:
         if sys.platform == "win32":
@@ -1237,5 +1237,4 @@ def cmd_update(args):
         else:
             print(f"✗ Update failed: {e}")
             sys.exit(1)
-
 

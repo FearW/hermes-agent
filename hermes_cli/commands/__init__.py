@@ -55,112 +55,112 @@ class CommandDef:
 
 COMMAND_REGISTRY: list[CommandDef] = [
     # Session
-    CommandDef("new", "Start a new session (fresh session ID + history)", "Session",
+    CommandDef("new", "开始新会话（全新会话 ID 与历史）", "Session",
                aliases=("reset",)),
-    CommandDef("clear", "Clear screen and start a new session", "Session",
+    CommandDef("clear", "清屏并开始新会话", "Session",
                cli_only=True),
-    CommandDef("history", "Show conversation history", "Session",
+    CommandDef("history", "查看对话历史", "Session",
                cli_only=True),
-    CommandDef("save", "Save the current conversation", "Session",
+    CommandDef("save", "保存当前对话", "Session",
                cli_only=True),
-    CommandDef("retry", "Retry the last message (resend to agent)", "Session"),
-    CommandDef("undo", "Remove the last user/assistant exchange", "Session"),
-    CommandDef("title", "Set a title for the current session", "Session",
+    CommandDef("retry", "重试上一条消息（重新发送给代理）", "Session"),
+    CommandDef("undo", "删除最后一轮用户与助手对话", "Session"),
+    CommandDef("title", "设置当前会话标题", "Session",
                args_hint="[name]"),
-    CommandDef("branch", "Branch the current session (explore a different path)", "Session",
+    CommandDef("branch", "分叉当前会话（探索不同路线）", "Session",
                aliases=("fork",), args_hint="[name]"),
-    CommandDef("compress", "Manually compress conversation context", "Session",
+    CommandDef("compress", "手动压缩对话上下文", "Session",
                args_hint="[focus topic]"),
-    CommandDef("rollback", "List or restore filesystem checkpoints", "Session",
+    CommandDef("rollback", "查看或恢复文件系统检查点", "Session",
                args_hint="[number]"),
-    CommandDef("stop", "Kill all running background processes", "Session"),
-    CommandDef("approve", "Approve a pending dangerous command", "Session",
+    CommandDef("stop", "停止所有正在运行的后台进程", "Session"),
+    CommandDef("approve", "批准待处理的危险命令", "Session",
                gateway_only=True, args_hint="[session|always]"),
-    CommandDef("deny", "Deny a pending dangerous command", "Session",
+    CommandDef("deny", "拒绝待处理的危险命令", "Session",
                gateway_only=True),
-    CommandDef("background", "Run a prompt in the background", "Session",
+    CommandDef("background", "后台运行一个提示词", "Session",
                aliases=("bg",), args_hint="<prompt>"),
-    CommandDef("btw", "Ephemeral side question using session context (no tools, not persisted)", "Session",
+    CommandDef("btw", "基于当前会话上下文提一个临时问题（不用工具，不写入历史）", "Session",
                args_hint="<question>"),
-    CommandDef("queue", "Queue a prompt for the next turn (doesn't interrupt)", "Session",
+    CommandDef("queue", "把提示词排到下一轮处理（不中断当前任务）", "Session",
                aliases=("q",), args_hint="<prompt>"),
-    CommandDef("steer", "Inject guidance into the running turn after the next tool call", "Session",
+    CommandDef("steer", "在下一次工具调用后向当前运行中的回合注入引导", "Session",
                args_hint="<prompt>"),
-    CommandDef("status", "Show session info", "Session"),
-    CommandDef("agents", "Show active agents and background tasks", "Session",
+    CommandDef("status", "查看会话信息", "Session"),
+    CommandDef("agents", "查看活动代理和后台任务", "Session",
                aliases=("tasks",)),
-    CommandDef("profile", "Show active profile name and home directory", "Info"),
-    CommandDef("sethome", "Set this chat as the home channel", "Session",
+    CommandDef("profile", "查看当前 profile 名称和主目录", "Info"),
+    CommandDef("sethome", "把当前聊天设为主频道", "Session",
                gateway_only=True, aliases=("set-home",)),
-    CommandDef("resume", "Resume a previously-named session", "Session",
+    CommandDef("resume", "恢复一个已命名会话", "Session",
                args_hint="[name]"),
 
     # Configuration
-    CommandDef("config", "Show current configuration", "Configuration",
+    CommandDef("config", "查看当前配置", "Configuration",
                cli_only=True),
-    CommandDef("model", "Switch CPA model", "Configuration", args_hint="[model]"),
+    CommandDef("model", "切换 CPA 模型", "Configuration", args_hint="[model]"),
 
-    CommandDef("personality", "Set a predefined personality", "Configuration",
+    CommandDef("personality", "设置预定义人格", "Configuration",
                args_hint="[name]"),
-    CommandDef("statusbar", "Toggle the context/model status bar", "Configuration",
+    CommandDef("statusbar", "切换上下文与模型状态栏", "Configuration",
                cli_only=True, aliases=("sb",)),
-    CommandDef("verbose", "Cycle tool progress display: off -> new -> all -> verbose",
+    CommandDef("verbose", "循环切换工具进度显示：off -> new -> all -> verbose",
                "Configuration", cli_only=True,
                gateway_config_gate="display.tool_progress_command"),
-    CommandDef("yolo", "Toggle YOLO mode (skip all dangerous command approvals)",
+    CommandDef("yolo", "切换 YOLO 模式（跳过所有危险命令审批）",
                "Configuration"),
-    CommandDef("reasoning", "Manage reasoning effort and display", "Configuration",
+    CommandDef("reasoning", "管理推理强度与显示", "Configuration",
                args_hint="[level|show|hide]",
                subcommands=("none", "minimal", "low", "medium", "high", "xhigh", "show", "hide", "on", "off")),
-    CommandDef("fast", "Toggle fast mode — OpenAI Priority Processing / Anthropic Fast Mode (Normal/Fast)", "Configuration",
+    CommandDef("fast", "切换快速模式：OpenAI Priority Processing / Anthropic Fast Mode（Normal/Fast）", "Configuration",
                args_hint="[normal|fast|status]",
                subcommands=("normal", "fast", "status", "on", "off")),
-    CommandDef("skin", "Show or change the display skin/theme", "Configuration",
+    CommandDef("skin", "查看或切换显示皮肤/主题", "Configuration",
                cli_only=True, args_hint="[name]"),
-    CommandDef("voice", "Toggle voice mode", "Configuration",
+    CommandDef("voice", "切换语音模式", "Configuration",
                args_hint="[on|off|tts|status]", subcommands=("on", "off", "tts", "status")),
 
     # Tools & Skills
-    CommandDef("tools", "Manage tools: /tools [list|disable|enable] [name...]", "Tools & Skills",
+    CommandDef("tools", "管理工具：/tools [list|disable|enable] [name...]", "Tools & Skills",
                args_hint="[list|disable|enable] [name...]", cli_only=True),
-    CommandDef("toolsets", "List available toolsets", "Tools & Skills",
+    CommandDef("toolsets", "列出可用工具集", "Tools & Skills",
                cli_only=True),
-    CommandDef("skills", "Search, install, inspect, or manage skills",
+    CommandDef("skills", "搜索、安装、查看或管理技能",
                "Tools & Skills", cli_only=True,
                subcommands=("search", "browse", "inspect", "install")),
-    CommandDef("cron", "Manage scheduled tasks", "Tools & Skills",
+    CommandDef("cron", "管理定时任务", "Tools & Skills",
                cli_only=True, args_hint="[subcommand]",
                subcommands=("list", "add", "create", "edit", "pause", "resume", "run", "remove")),
-    CommandDef("reload", "Reload .env variables into the running session", "Tools & Skills"),
-    CommandDef("reload-mcp", "Reload MCP servers from config", "Tools & Skills",
+    CommandDef("reload", "把 .env 变量重新加载到当前运行会话", "Tools & Skills"),
+    CommandDef("reload-mcp", "从配置中重新加载 MCP 服务器", "Tools & Skills",
                aliases=("reload_mcp",)),
-    CommandDef("browser", "Connect browser tools to your live Chrome via CDP", "Tools & Skills",
+    CommandDef("browser", "通过 CDP 将浏览器工具连接到你当前的 Chrome", "Tools & Skills",
                cli_only=True, args_hint="[connect|disconnect|status]",
                subcommands=("connect", "disconnect", "status")),
-    CommandDef("plugins", "List installed plugins and their status",
+    CommandDef("plugins", "列出已安装插件及其状态",
                "Tools & Skills", cli_only=True),
 
     # Info
-    CommandDef("commands", "Browse all commands and skills (paginated)", "Info",
+    CommandDef("commands", "分页浏览全部命令与技能", "Info",
                gateway_only=True, args_hint="[page]"),
-    CommandDef("help", "Show available commands", "Info"),
-    CommandDef("restart", "Gracefully restart the gateway after draining active runs", "Session",
+    CommandDef("help", "查看可用命令", "Info"),
+    CommandDef("restart", "在排空活动任务后平滑重启网关", "Session",
                gateway_only=True),
-    CommandDef("usage", "Show token usage and rate limits for the current session", "Info"),
-    CommandDef("insights", "Show usage insights and analytics", "Info",
+    CommandDef("usage", "查看当前会话的 token 用量和速率限制", "Info"),
+    CommandDef("insights", "查看用量洞察与分析", "Info",
                args_hint="[days]"),
-    CommandDef("platforms", "Show gateway/messaging platform status", "Info",
+    CommandDef("platforms", "查看网关/消息平台状态", "Info",
                cli_only=True, aliases=("gateway",)),
-    CommandDef("paste", "Check clipboard for an image and attach it", "Info",
+    CommandDef("paste", "检查剪贴板中的图片并附加", "Info",
                cli_only=True),
-    CommandDef("image", "Attach a local image file for your next prompt", "Info",
+    CommandDef("image", "为下一条提示附加本地图片文件", "Info",
                cli_only=True, args_hint="<path>"),
-    CommandDef("update", "Update Hermes Agent to the latest version", "Info",
+    CommandDef("update", "将 Hermes Agent 更新到最新版本", "Info",
                gateway_only=True),
-    CommandDef("debug", "Upload debug report (system info + logs) and get shareable links", "Info"),
+    CommandDef("debug", "上传调试报告（系统信息 + 日志）并获取可分享链接", "Info"),
 
     # Exit
-    CommandDef("quit", "Exit the CLI", "Exit",
+    CommandDef("quit", "退出 CLI", "Exit",
                cli_only=True, aliases=("exit", "q")),
 ]
 
@@ -208,7 +208,7 @@ def rebuild_lookups() -> None:
         if not cmd.gateway_only:
             COMMANDS[f"/{cmd.name}"] = _build_description(cmd)
             for alias in cmd.aliases:
-                COMMANDS[f"/{alias}"] = f"{cmd.description} (alias for /{cmd.name})"
+                COMMANDS[f"/{alias}"] = f"{cmd.description}（/{cmd.name} 的别名）"
 
     COMMANDS_BY_CATEGORY.clear()
     for cmd in COMMAND_REGISTRY:
@@ -241,7 +241,7 @@ def rebuild_lookups() -> None:
 def _build_description(cmd: CommandDef) -> str:
     """Build a CLI-facing description string including usage hint."""
     if cmd.args_hint:
-        return f"{cmd.description} (usage: /{cmd.name} {cmd.args_hint})"
+        return f"{cmd.description}（用法：/{cmd.name} {cmd.args_hint}）"
     return cmd.description
 
 
@@ -251,7 +251,7 @@ for _cmd in COMMAND_REGISTRY:
     if not _cmd.gateway_only:
         COMMANDS[f"/{_cmd.name}"] = _build_description(_cmd)
         for _alias in _cmd.aliases:
-            COMMANDS[f"/{_alias}"] = f"{_cmd.description} (alias for /{_cmd.name})"
+            COMMANDS[f"/{_alias}"] = f"{_cmd.description}（/{_cmd.name} 的别名）"
 
 # Backwards-compatible categorized dict
 COMMANDS_BY_CATEGORY: dict[str, dict[str, str]] = {}
@@ -357,8 +357,8 @@ def gateway_help_lines() -> list[str]:
             if a.replace("-", "_") == cmd.name.replace("-", "_") and a != cmd.name:
                 continue
             alias_parts.append(f"`/{a}`")
-        alias_note = f" (alias: {', '.join(alias_parts)})" if alias_parts else ""
-        lines.append(f"`/{cmd.name}{args}` -- {cmd.description}{alias_note}")
+        alias_note = f"（别名：{', '.join(alias_parts)}）" if alias_parts else ""
+        lines.append(f"`/{cmd.name}{args}` - {cmd.description}{alias_note}")
     return lines
 
 
@@ -679,6 +679,20 @@ def slack_subcommand_map() -> dict[str, str]:
         for alias in cmd.aliases:
             mapping[alias] = f"/{alias}"
     return mapping
+
+
+def slack_native_slashes() -> list[tuple[str, str, str]]:
+    """Return native Slack slash command metadata from COMMAND_REGISTRY.
+
+    Each item is ``(name, description, args_hint)`` without the leading slash.
+    """
+    overrides = _resolve_config_gates()
+    entries: list[tuple[str, str, str]] = [("hermes", "Slack slash command entrypoint", "[subcommand]")]
+    for cmd in COMMAND_REGISTRY:
+        if not _is_gateway_available(cmd, overrides):
+            continue
+        entries.append((cmd.name, cmd.description, cmd.args_hint))
+    return entries
 
 
 # ---------------------------------------------------------------------------

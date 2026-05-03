@@ -395,7 +395,7 @@ class TestPreloadResumedSession:
 
         assert result is False
         output = buf.getvalue()
-        assert "Session not found" in output
+        assert "未找到会话" in output
 
     def test_returns_false_when_session_has_no_messages(self):
         cli = _make_cli(resume="empty_session")
@@ -410,7 +410,7 @@ class TestPreloadResumedSession:
 
         assert result is False
         output = buf.getvalue()
-        assert "no messages" in output
+        assert "没有消息" in output
 
     def test_loads_session_successfully(self):
         cli = _make_cli(resume="good_session")
@@ -427,10 +427,10 @@ class TestPreloadResumedSession:
         assert result is True
         assert cli.conversation_history == messages
         output = buf.getvalue()
-        assert "Resumed session" in output
+        assert "已恢复会话" in output
         assert "good_session" in output
         assert "Test Session" in output
-        assert "2 user messages" in output
+        assert "用户消息 2 条" in output
 
     def test_reopens_session_in_db(self):
         cli = _make_cli(resume="reopen_session")
@@ -453,7 +453,7 @@ class TestPreloadResumedSession:
         mock_conn.commit.assert_called_once()
 
     def test_singular_user_message_grammar(self):
-        """1 user message should say 'message' not 'messages'."""
+        """单条用户消息应显示为中文计数格式。"""
         cli = _make_cli(resume="one_msg_session")
         messages = [
             {"role": "user", "content": "hello"},
@@ -470,8 +470,7 @@ class TestPreloadResumedSession:
         cli._preload_resumed_session()
 
         output = buf.getvalue()
-        assert "1 user message," in output
-        assert "1 user messages" not in output
+        assert "用户消息 1 条" in output
 
 
 # ── Integration: _init_agent skips when preloaded ────────────────────
