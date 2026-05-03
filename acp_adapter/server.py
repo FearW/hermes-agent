@@ -557,29 +557,17 @@ class HermesACPAgent(acp.Agent):
             return f"Current model: {model}\nProvider: {provider}"
 
         new_model = args.strip()
-        target_provider = None
-        current_provider = getattr(state.agent, "provider", None) or "openrouter"
-
-        # Auto-detect provider for the requested model
-        try:
-            from hermes_cli.models import parse_model_input, detect_provider_for_model
-            target_provider, new_model = parse_model_input(new_model, current_provider)
-            if target_provider == current_provider:
-                detected = detect_provider_for_model(new_model, current_provider)
-                if detected:
-                    target_provider, new_model = detected
-        except Exception:
-            logger.debug("Provider detection failed, using model as-is", exc_info=True)
+        target_provider = "cliproxyapi"
 
         state.model = new_model
         state.agent = self.session_manager._make_agent(
             session_id=state.session_id,
             cwd=state.cwd,
             model=new_model,
-            requested_provider=target_provider or current_provider,
+            requested_provider=target_provider,
         )
         self.session_manager.save_session(state.session_id)
-        provider_label = getattr(state.agent, "provider", None) or target_provider or current_provider
+        provider_label = getattr(state.agent, "provider", None) or target_provider
         logger.info("Session %s: model switched to %s", state.session_id, new_model)
         return f"Model switched to: {new_model}\nProvider: {provider_label}"
 

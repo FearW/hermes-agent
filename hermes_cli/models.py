@@ -794,12 +794,11 @@ def get_nous_recommended_aux_model(
 
 
 # ---------------------------------------------------------------------------
-# Canonical provider list — single source of truth for provider identity.
-# Every code path that lists, displays, or iterates providers derives from
-# this list:  hermes model, /model, list_authenticated_providers.
+# Canonical provider metadata. Main inference is CPA-only, but these entries
+# remain for auth/config migration, diagnostics, and CPA-related tooling.
 #
 # Fields:
-#   slug        — internal provider ID (used in config.yaml, --provider flag)
+#   slug        — internal provider ID used by provider metadata/config helpers
 #   label       — short display name
 #   tui_desc    — longer description for the `hermes model` interactive picker
 # ---------------------------------------------------------------------------
@@ -1405,7 +1404,7 @@ def get_pricing_for_provider(provider: str, *, force_refresh: bool = False) -> d
     return {}
 
 
-# All provider IDs and aliases that are valid for the provider:model syntax.
+# Provider IDs and aliases kept for metadata/autocomplete compatibility.
 _KNOWN_PROVIDER_NAMES: set[str] = (
     set(_PROVIDER_LABELS.keys())
     | set(_PROVIDER_ALIASES.keys())
@@ -1414,13 +1413,13 @@ _KNOWN_PROVIDER_NAMES: set[str] = (
 
 
 def list_available_providers() -> list[dict[str, str]]:
-    """Return info about all providers the user could use with ``provider:model``.
+    """Return provider metadata for legacy/autocomplete callers.
 
     Each dict has ``id``, ``label``, and ``aliases``.
     Checks which providers have valid credentials configured.
 
-    Derives the provider list from :data:`CANONICAL_PROVIDERS` (single
-    source of truth shared with ``hermes model``, ``/model``, etc.).
+    Main inference remains CPA-only; this list does not imply runtime provider
+    switching support.
     """
     # Derive display order from canonical list + custom
     provider_order = [p.slug for p in CANONICAL_PROVIDERS] + ["custom"]
@@ -1458,39 +1457,12 @@ def list_available_providers() -> list[dict[str, str]]:
 
 
 def parse_model_input(raw: str, current_provider: str) -> tuple[str, str]:
-    """Parse ``/model`` input into ``(provider, model)``.
+    """Parse model input in CPA-only mode.
 
-    Supports ``provider:model`` syntax to switch providers at runtime::
-
-        openrouter:anthropic/claude-sonnet-4.5  →  ("openrouter", "anthropic/claude-sonnet-4.5")
-        nous:hermes-3                           →  ("nous", "hermes-3")
-        anthropic/claude-sonnet-4.5             →  (current_provider, "anthropic/claude-sonnet-4.5")
-        gpt-5.4                                 →  (current_provider, "gpt-5.4")
-
-    The colon is only treated as a provider delimiter if the left side is a
-    recognized provider name or alias.  This avoids misinterpreting model names
-    that happen to contain colons (e.g. ``anthropic/claude-3.5-sonnet:beta``).
-
-    Returns ``(provider, model)`` where *provider* is either the explicit
-    provider from the input or *current_provider* if none was specified.
+    Provider selection syntax is disabled. Colons are preserved as part of the
+    model string because CPA owns upstream routing.
     """
-    stripped = raw.strip()
-    colon = stripped.find(":")
-    if colon > 0:
-        provider_part = stripped[:colon].strip().lower()
-        model_part = stripped[colon + 1:].strip()
-        if provider_part and model_part and provider_part in _KNOWN_PROVIDER_NAMES:
-            # Support custom:name:model triple syntax for named custom
-            # providers.  ``custom:local:qwen`` → ("custom:local", "qwen").
-            # Single colon ``custom:qwen`` → ("custom", "qwen") as before.
-            if provider_part == "custom" and ":" in model_part:
-                second_colon = model_part.find(":")
-                custom_name = model_part[:second_colon].strip()
-                actual_model = model_part[second_colon + 1:].strip()
-                if custom_name and actual_model:
-                    return (f"custom:{custom_name}", actual_model)
-            return (normalize_provider(provider_part), model_part)
-    return (current_provider, stripped)
+    return ("cliproxyapi", raw.strip())
 
 
 def _get_custom_base_url() -> str:

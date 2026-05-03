@@ -3713,13 +3713,13 @@ def _logout_default_provider_from_config() -> Optional[str]:
     "No provider is currently logged in" and never reset model.provider.
     """
     provider = _get_config_provider()
-    if provider in {"nous", "openai-codex"}:
+    if provider and provider not in {"cliproxyapi", "cpa"}:
         return provider
     return None
 
 
 def _reset_config_provider() -> Path:
-    """Reset config.yaml provider back to auto after logout."""
+    """Reset config.yaml provider back to CPA after logout."""
     config_path = get_config_path()
     if not config_path.exists():
         return config_path
@@ -3730,9 +3730,13 @@ def _reset_config_provider() -> Path:
 
     model = config.get("model")
     if isinstance(model, dict):
-        model["provider"] = "auto"
+        model["provider"] = "cliproxyapi"
         if "base_url" in model:
-            model["base_url"] = OPENROUTER_BASE_URL
+            try:
+                from hermes_cli.runtime_provider import DEFAULT_CPA_BASE_URL
+                model["base_url"] = DEFAULT_CPA_BASE_URL
+            except Exception:
+                model["base_url"] = "http://127.0.0.1:8080/v1"
     config_path.write_text(yaml.safe_dump(config, sort_keys=False))
     return config_path
 

@@ -466,30 +466,14 @@ _AGENT_PENDING_SENTINEL = object()
 
 
 def _resolve_runtime_agent_kwargs() -> dict:
-    """Resolve provider credentials for gateway-created AIAgent instances.
-
-    If the primary provider fails with an authentication error, attempt to
-    resolve credentials using the fallback provider chain from config.yaml
-    before giving up.
-    """
+    """Resolve CPA credentials for gateway-created AIAgent instances."""
     from hermes_cli.runtime_provider import (
         resolve_runtime_provider,
         format_runtime_provider_error,
     )
-    from hermes_cli.auth import AuthError
 
     try:
-        runtime = resolve_runtime_provider(
-            requested=os.getenv("HERMES_INFERENCE_PROVIDER"),
-        )
-    except AuthError as auth_exc:
-        # Primary provider auth failed (expired token, revoked key, etc.).
-        # Try the fallback provider chain before raising.
-        logger.warning("Primary provider auth failed: %s — trying fallback", auth_exc)
-        fb_config = _try_resolve_fallback_provider()
-        if fb_config is not None:
-            return fb_config
-        raise RuntimeError(format_runtime_provider_error(auth_exc)) from auth_exc
+        runtime = resolve_runtime_provider(requested="cliproxyapi")
     except Exception as exc:
         raise RuntimeError(format_runtime_provider_error(exc)) from exc
 
@@ -505,56 +489,7 @@ def _resolve_runtime_agent_kwargs() -> dict:
 
 
 def _try_resolve_fallback_provider() -> dict | None:
-    """Attempt to resolve credentials from the fallback_model/fallback_providers config."""
-    from hermes_cli.runtime_provider import resolve_runtime_provider
-    try:
-        import yaml as _y
-        cfg_path = _hermes_home / "config.yaml"
-        if not cfg_path.exists():
-            return None
-        with open(cfg_path, encoding="utf-8") as _f:
-            cfg = _y.safe_load(_f) or {}
-        fb = cfg.get("fallback_providers") or cfg.get("fallback_model")
-        if not fb:
-            return None
-        # Normalize to list
-        fb_list = fb if isinstance(fb, list) else [fb]
-        for entry in fb_list:
-            if not isinstance(entry, dict):
-                if isinstance(entry, str) and entry.strip():
-                    runtime = resolve_runtime_provider(requested="cliproxyapi")
-                    return {
-                        "api_key": runtime.get("api_key"),
-                        "base_url": runtime.get("base_url"),
-                        "provider": runtime.get("provider"),
-                        "api_mode": runtime.get("api_mode"),
-                        "command": runtime.get("command"),
-                        "args": list(runtime.get("args") or []),
-                        "credential_pool": runtime.get("credential_pool"),
-                    }
-                continue
-            try:
-                requested = entry.get("provider") or "cliproxyapi"
-                runtime = resolve_runtime_provider(
-                    requested=requested,
-                    explicit_base_url=entry.get("base_url"),
-                    explicit_api_key=entry.get("api_key"),
-                )
-                logger.info("Fallback provider resolved: %s", runtime.get("provider"))
-                return {
-                    "api_key": runtime.get("api_key"),
-                    "base_url": runtime.get("base_url"),
-                    "provider": runtime.get("provider"),
-                    "api_mode": runtime.get("api_mode"),
-                    "command": runtime.get("command"),
-                    "args": list(runtime.get("args") or []),
-                    "credential_pool": runtime.get("credential_pool"),
-                }
-            except Exception as fb_exc:
-                logger.debug("Fallback entry %s failed: %s", entry.get("provider"), fb_exc)
-                continue
-    except Exception:
-        pass
+    """Deprecated compatibility shim; fallback now only changes CPA model names."""
     return None
 
 
@@ -1646,10 +1581,11 @@ class GatewayRunner:
     def _parse_reasoning_command_args(raw_args: str) -> tuple[str, bool]:
         """Parse `/reasoning` args into `(value, persist_global)`.
 
-        Reasoning changes are session-scoped. ``persist_global`` is retained
-        for internal API compatibility and is always False.
+        ``persist_global`` is retained for internal API compatibility and is
+        always True because reasoning changes now persist to config.yaml by
+        default.
         """
-        return str(raw_args or "").strip().lower(), False
+        return str(raw_args or "").strip().lower(), True
 
     def _resolve_session_reasoning_config(
         self,
@@ -1823,11 +1759,11 @@ class GatewayRunner:
 
     @staticmethod
     def _load_fallback_model() -> list | dict | None:
-        """Load fallback provider chain from config.yaml.
+        """Load CPA fallback model chain from config.yaml.
 
-        Returns a list of provider dicts (``fallback_providers``), a single
-        dict (legacy ``fallback_model``), or None if not configured.
-        AIAgent.__init__ normalizes both formats into a chain.
+        Returns a list of model strings/dicts (``fallback_providers``), a
+        single legacy ``fallback_model``, or None if not configured.
+        AIAgent.__init__ normalizes provider fields away in CPA-only mode.
         """
         try:
             import yaml as _y
@@ -4378,9 +4314,6 @@ class GatewayRunner:
         if canonical == "model":
             return await self._handle_model_command(event)
 
-        if canonical == "provider":
-            return await self._handle_model_command(event)
-
         if canonical == "personality":
             return await self._handle_personality_command(event)
 
@@ -6336,33 +6269,19 @@ class GatewayRunner:
         return "\n".join(lines)
 
     async def _handle_model_command(self, event: MessageEvent) -> Optional[str]:
-        """Handle /model command — switch model for this session.
-
-        Supports:
-          /model                              — interactive picker (Telegram/Discord) or text list
-          /model <name>                       — switch for this session only
-          /model <name> --provider <provider> — switch provider + model
-          /model --provider <provider>        — switch to provider, auto-detect model
-        """
+        """CPA-only /model command: show or switch the CPA model."""
         import yaml
-        from hermes_cli.model_switch import (
-            switch_model as _switch_model, parse_model_flags,
-            list_authenticated_providers,
-        )
-        from hermes_cli.providers import get_label
+        from hermes_cli.model_switch import switch_model as _switch_model, parse_model_flags
 
         raw_args = event.get_command_args().strip()
+        if "--provider" in raw_args:
+            return "provider 选择已禁用；Hermes 固定使用 CPA/CLIProxyAPI。请在 CPA WebUI 中管理上游渠道。"
 
-        # Parse --provider flag
-        model_input, explicit_provider, persist_global = parse_model_flags(raw_args)
-
-        # Read current model/provider from config
+        model_input, _ignored_provider, _persist_config = parse_model_flags(raw_args)
         current_model = ""
-        current_provider = "openrouter"
+        current_provider = "cliproxyapi"
         current_base_url = ""
         current_api_key = ""
-        user_provs = None
-        custom_provs = None
         config_path = _hermes_home / "config.yaml"
         try:
             cfg = _load_gateway_config()
@@ -6372,16 +6291,9 @@ class GatewayRunner:
                     current_model = model_cfg.get("default", "")
                     current_provider = model_cfg.get("provider", current_provider)
                     current_base_url = model_cfg.get("base_url", "")
-                user_provs = cfg.get("providers")
-                try:
-                    from hermes_cli.config import get_compatible_custom_providers
-                    custom_provs = get_compatible_custom_providers(cfg)
-                except Exception:
-                    custom_provs = cfg.get("custom_providers")
         except Exception:
             pass
 
-        # Check for session override
         source = event.source
         session_key = self._session_key_for_source(source)
         override = self._session_model_overrides.get(session_key, {})
@@ -6391,175 +6303,22 @@ class GatewayRunner:
             current_base_url = override.get("base_url", current_base_url)
             current_api_key = override.get("api_key", current_api_key)
 
-        # No args: show interactive picker (Telegram/Discord) or text list
-        if not model_input and not explicit_provider:
-            # Try interactive picker if the platform supports it
-            adapter = self.adapters.get(source.platform)
-            has_picker = (
-                adapter is not None
-                and getattr(type(adapter), "send_model_picker", None) is not None
-            )
+        if not model_input:
+            return "\n".join([
+                f"Current CPA model: `{current_model or 'unknown'}`",
+                f"CPA endpoint: `{current_base_url or 'http://127.0.0.1:8080/v1'}`",
+                "",
+                "`/model <name>` — 切换 CPA 模型并保存到 config.yaml",
+                "上游 provider 请在 CPA WebUI 中配置。",
+            ])
 
-            if has_picker:
-                try:
-                    providers = list_authenticated_providers(
-                        current_provider=current_provider,
-                        current_base_url=current_base_url,
-                        current_model=current_model,
-                        user_providers=user_provs,
-                        custom_providers=custom_provs,
-                        max_models=50,
-                    )
-                except Exception:
-                    providers = []
-
-                if providers:
-                    # Build a callback closure for when the user picks a model.
-                    # Captures self + locals needed for the switch logic.
-                    _self = self
-                    _session_key = session_key
-                    _cur_model = current_model
-                    _cur_provider = current_provider
-                    _cur_base_url = current_base_url
-                    _cur_api_key = current_api_key
-
-                    async def _on_model_selected(
-                        _chat_id: str, model_id: str, provider_slug: str
-                    ) -> str:
-                        """Perform the model switch and return confirmation text."""
-                        result = _switch_model(
-                            raw_input=model_id,
-                            current_provider=_cur_provider,
-                            current_model=_cur_model,
-                            current_base_url=_cur_base_url,
-                            current_api_key=_cur_api_key,
-                            is_global=False,
-                            explicit_provider=provider_slug,
-                            user_providers=user_provs,
-                            custom_providers=custom_provs,
-                        )
-                        if not result.success:
-                            return f"Error: {result.error_message}"
-
-                        # Update cached agent in-place
-                        cached_entry = None
-                        _cache_lock = getattr(_self, "_agent_cache_lock", None)
-                        _cache = getattr(_self, "_agent_cache", None)
-                        if _cache_lock and _cache is not None:
-                            with _cache_lock:
-                                cached_entry = _cache.get(_session_key)
-                        if cached_entry and cached_entry[0] is not None:
-                            try:
-                                cached_entry[0].switch_model(
-                                    new_model=result.new_model,
-                                    new_provider=result.target_provider,
-                                    api_key=result.api_key,
-                                    base_url=result.base_url,
-                                    api_mode=result.api_mode,
-                                )
-                            except Exception as exc:
-                                logger.warning("Picker model switch failed for cached agent: %s", exc)
-
-                        # Store model note + session override
-                        if not hasattr(_self, "_pending_model_notes"):
-                            _self._pending_model_notes = {}
-                        _self._pending_model_notes[_session_key] = (
-                            f"[Note: model was just switched from {_cur_model} to {result.new_model} "
-                            f"via {result.provider_label or result.target_provider}. "
-                            f"Adjust your self-identification accordingly.]"
-                        )
-                        _self._session_model_overrides[_session_key] = {
-                            "model": result.new_model,
-                            "provider": result.target_provider,
-                            "api_key": result.api_key,
-                            "base_url": result.base_url,
-                            "api_mode": result.api_mode,
-                        }
-
-                        # Evict cached agent so the next turn creates a fresh
-                        # agent from the override rather than relying on the
-                        # stale cache signature to trigger a rebuild.
-                        _self._evict_cached_agent(_session_key)
-
-                        # Build confirmation text
-                        plabel = result.provider_label or result.target_provider
-                        lines = [f"Model switched to `{result.new_model}`"]
-                        lines.append(f"Provider: {plabel}")
-                        mi = result.model_info
-                        from hermes_cli.model_switch import resolve_display_context_length
-                        ctx = resolve_display_context_length(
-                            result.new_model,
-                            result.target_provider,
-                            base_url=result.base_url or current_base_url or "",
-                            api_key=result.api_key or current_api_key or "",
-                            model_info=mi,
-                            custom_providers=custom_provs,
-                        )
-                        if ctx:
-                            lines.append(f"Context: {ctx:,} tokens")
-                        if mi:
-                            if mi.max_output:
-                                lines.append(f"Max output: {mi.max_output:,} tokens")
-                            if mi.has_cost_data():
-                                lines.append(f"Cost: {mi.format_cost()}")
-                            lines.append(f"Capabilities: {mi.format_capabilities()}")
-                        lines.append("_(applies to this session)_")
-                        return "\n".join(lines)
-
-                    metadata = {"thread_id": source.thread_id} if source.thread_id else None
-                    result = await adapter.send_model_picker(
-                        chat_id=source.chat_id,
-                        providers=providers,
-                        current_model=current_model,
-                        current_provider=current_provider,
-                        session_key=session_key,
-                        on_model_selected=_on_model_selected,
-                        metadata=metadata,
-                    )
-                    if result.success:
-                        return None  # Picker sent — adapter handles the response
-
-            # Fallback: text list (for platforms without picker or if picker failed)
-            provider_label = get_label(current_provider)
-            lines = [f"Current: `{current_model or 'unknown'}` on {provider_label}", ""]
-
-            try:
-                providers = list_authenticated_providers(
-                    current_provider=current_provider,
-                    current_base_url=current_base_url,
-                    current_model=current_model,
-                    user_providers=user_provs,
-                    custom_providers=custom_provs,
-                    max_models=5,
-                )
-                for p in providers:
-                    tag = " (current)" if p["is_current"] else ""
-                    lines.append(f"**{p['name']}** `--provider {p['slug']}`{tag}:")
-                    if p["models"]:
-                        model_strs = ", ".join(f"`{m}`" for m in p["models"])
-                        extra = f" (+{p['total_models'] - len(p['models'])} more)" if p["total_models"] > len(p["models"]) else ""
-                        lines.append(f"  {model_strs}{extra}")
-                    elif p.get("api_url"):
-                        lines.append(f"  `{p['api_url']}`")
-                    lines.append("")
-            except Exception:
-                pass
-
-            lines.append("`/model <name>` — switch model")
-            lines.append("`/model <name> --provider <slug>` — switch provider")
-            return "\n".join(lines)
-
-        # Perform the switch
         result = _switch_model(
             raw_input=model_input,
             current_provider=current_provider,
             current_model=current_model,
             current_base_url=current_base_url,
             current_api_key=current_api_key,
-            is_global=persist_global,
-            explicit_provider=explicit_provider,
-            user_providers=user_provs,
-            custom_providers=custom_provs,
+            is_global=True,
         )
 
         if not result.success:
@@ -6623,7 +6382,6 @@ class GatewayRunner:
             base_url=result.base_url or current_base_url or "",
             api_key=result.api_key or current_api_key or "",
             model_info=mi,
-            custom_providers=custom_provs,
         )
         if ctx:
             lines.append(f"Context: {ctx:,} tokens")
@@ -6645,7 +6403,23 @@ class GatewayRunner:
         if result.warning_message:
             lines.append(f"Warning: {result.warning_message}")
 
-        lines.append("_(applies to this session)_")
+        try:
+            if config_path.exists():
+                with open(config_path, encoding="utf-8") as f:
+                    cfg = yaml.safe_load(f) or {}
+            else:
+                cfg = {}
+            model_cfg = cfg.setdefault("model", {})
+            model_cfg["default"] = result.new_model
+            model_cfg["provider"] = result.target_provider
+            if result.base_url:
+                model_cfg["base_url"] = result.base_url
+            from hermes_cli.config import save_config
+            save_config(cfg)
+            lines.append("Saved to config.yaml")
+        except Exception as e:
+            logger.warning("Failed to save model switch: %s", e)
+            lines.append("Saved for this session; config save failed")
 
         return "\n".join(lines)
 
@@ -7458,15 +7232,15 @@ class GatewayRunner:
 
         Usage:
             /reasoning                       Show current effort level and display state
-            /reasoning <level>               Set reasoning effort for this session only
-            /reasoning reset                 Clear this session's reasoning override
+            /reasoning <level>               Set reasoning effort and save to config.yaml
+            /reasoning reset                 Clear saved reasoning effort
             /reasoning show|on               Show model reasoning in responses
             /reasoning hide|off              Hide model reasoning from responses
         """
         import yaml
 
         raw_args = event.get_command_args().strip()
-        args, persist_global = self._parse_reasoning_command_args(raw_args)
+        args, _persist_global = self._parse_reasoning_command_args(raw_args)
         config_path = _hermes_home / "config.yaml"
         session_key = self._session_key_for_source(event.source)
         self._show_reasoning = self._load_show_reasoning()
@@ -7505,12 +7279,10 @@ class GatewayRunner:
             else:
                 level = rc.get("effort", "medium")
             display_state = "on ✓" if self._show_reasoning else "off"
-            has_session_override = session_key in (getattr(self, "_session_reasoning_overrides", {}) or {})
-            scope = "session override" if has_session_override else "global config"
             return (
                 "🧠 **Reasoning Settings**\n\n"
                 f"**Effort:** `{level}`\n"
-                f"**Scope:** {scope}\n"
+                "**Scope:** saved config\n"
                 f"**Display:** {display_state}\n\n"
                 "_Usage:_ `/reasoning <none|minimal|low|medium|high|xhigh|reset|show|hide>`"
             )
@@ -7534,9 +7306,10 @@ class GatewayRunner:
         effort = args.strip()
         if effort == "reset":
             self._set_session_reasoning_override(session_key, None)
+            _save_config_key("agent.reasoning_effort", "")
             self._reasoning_config = self._load_reasoning_config()
             self._evict_cached_agent(session_key)
-            return "🧠 ✓ Session reasoning override cleared; falling back to global config."
+            return "🧠 ✓ Reasoning effort reset to default and saved to config.yaml."
         if effort == "none":
             parsed = {"enabled": False}
         elif effort in ("minimal", "low", "medium", "high", "xhigh"):
@@ -7549,9 +7322,10 @@ class GatewayRunner:
             )
 
         self._reasoning_config = parsed
-        self._set_session_reasoning_override(session_key, parsed)
+        self._set_session_reasoning_override(session_key, None)
+        _save_config_key("agent.reasoning_effort", effort)
         self._evict_cached_agent(session_key)
-        return f"🧠 ✓ Reasoning effort set to `{effort}` (session only)\n_(takes effect on next message)_"
+        return f"🧠 ✓ Reasoning effort set to `{effort}` and saved to config.yaml\n_(takes effect on next message)_"
 
     async def _handle_fast_command(self, event: MessageEvent) -> str:
         """Handle /fast — mirror the CLI Priority Processing toggle in gateway chats."""

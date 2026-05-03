@@ -152,7 +152,7 @@ class TestAdapterSessionCancellation:
 
         # Follow-up must go through normally now that the session is clean.
         await adapter.handle_message(
-            _make_event("/model xiaomi/mimo-v2-pro --provider nous")
+            _make_event("/model xiaomi/mimo-v2-pro")
         )
         await asyncio.sleep(0)
         await asyncio.sleep(0)
@@ -396,4 +396,3 @@ class TestOldTaskCannotClobberNewerGuard:
         # default path) still work.
         adapter._release_session_guard(sk)
         assert sk not in adapter._active_sessions
-

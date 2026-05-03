@@ -781,8 +781,8 @@ def setup_model_provider(config: dict, *, quick: bool = False):
     print_info(f"   Guide: {_DOCS_BASE}/integrations/providers")
     print()
 
-    # Delegate to the shared hermes model flow — handles provider picker,
-    # credential prompting, model selection, and config persistence.
+    # Delegate to the shared CPA-only model flow for model selection and
+    # config persistence.
     from hermes_cli.main import select_provider_and_model
     try:
         select_provider_and_model()
@@ -811,7 +811,7 @@ def setup_model_provider(config: dict, *, quick: bool = False):
     if isinstance(_m, dict):
         selected_provider = _m.get("provider")
 
-    # ── Same-provider fallback & rotation setup (full setup only) ──
+    # ── Same-provider credential rotation setup (full setup only) ──
     if not quick and _supports_same_provider_pool_setup(selected_provider):
         try:
             from types import SimpleNamespace
@@ -843,7 +843,7 @@ def setup_model_provider(config: dict, *, quick: bool = False):
             else:
                 print_info(f"Current pooled credentials for {selected_provider}: {entry_count}")
 
-            while prompt_yes_no("Add another credential for same-provider fallback?", False):
+            while prompt_yes_no("Add another credential for same-provider rotation?", False):
                 auth_add_command(
                     SimpleNamespace(
                         provider=selected_provider,
@@ -886,7 +886,7 @@ def setup_model_provider(config: dict, *, quick: bool = False):
                 _set_credential_pool_strategy(config, selected_provider, strategy_value)
                 print_success(f"Saved {selected_provider} rotation strategy: {strategy_value}")
         except Exception as exc:
-            logger.debug("Could not configure same-provider fallback in setup: %s", exc)
+            logger.debug("Could not configure same-provider credential rotation in setup: %s", exc)
 
     # ── Vision & Image Analysis Setup (full setup only) ──
     if quick:

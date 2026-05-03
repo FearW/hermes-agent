@@ -51,9 +51,9 @@ Examples:
     hermes auth remove <p> <t>    Remove pooled credential by index, id, or label
     hermes auth reset <provider>  Clear exhaustion status for a provider
     hermes model                  Select default model
-    hermes fallback [list]        Show fallback provider chain
-    hermes fallback add           Add a fallback provider (same picker as `hermes model`)
-    hermes fallback remove        Remove a fallback provider from the chain
+    hermes fallback [list]        Show CPA fallback model chain
+    hermes fallback add           Add a CPA fallback model
+    hermes fallback remove        Remove a fallback model from the chain
     hermes config                 View configuration
     hermes config edit            Edit config in $EDITOR
     hermes config set model gpt-4 Set a config value
@@ -106,10 +106,9 @@ def build_top_level_parser():
             "auto-bypassed. Intended for scripts / pipes."
         ),
     )
-    # --model / --provider are accepted at the top level so they can pair
-    # with -z without needing the `chat` subcommand.  If neither -z nor a
-    # subcommand consumes them, they fall through harmlessly as None.
-    # Mirrors `hermes chat --model ... --provider ...` semantics.
+    # --model is accepted at the top level so it can pair with -z without
+    # needing the `chat` subcommand. Provider selection is CPA-only and no
+    # longer exposed as a CLI flag.
     _inherited_flag(
         parser,
         "-m",
@@ -118,15 +117,6 @@ def build_top_level_parser():
         help=(
             "Model override for this invocation (e.g. anthropic/claude-sonnet-4.6). "
             "Applies to -z/--oneshot and --tui. Also settable via HERMES_INFERENCE_MODEL env var."
-        ),
-    )
-    _inherited_flag(
-        parser,
-        "--provider",
-        default=None,
-        help=(
-            "Provider override for this invocation (e.g. openrouter, anthropic). "
-            "Applies to -z/--oneshot and --tui. Also settable via HERMES_INFERENCE_PROVIDER env var."
         ),
     )
     parser.add_argument(
@@ -253,16 +243,6 @@ def build_top_level_parser():
         action="append",
         default=argparse.SUPPRESS,
         help="Preload one or more skills for the session (repeat flag or comma-separate)",
-    )
-    _inherited_flag(
-        chat_parser,
-        "--provider",
-        # No `choices=` here: user-defined providers from config.yaml `providers:`
-        # are also valid values, and runtime resolution (resolve_runtime_provider)
-        # handles validation/error reporting consistently with the top-level
-        # `--provider` flag.
-        default=None,
-        help="Inference provider (default: auto). Built-in or a user-defined name from `providers:` in config.yaml.",
     )
     chat_parser.add_argument(
         "-v", "--verbose", action="store_true", help="Verbose output"

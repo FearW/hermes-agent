@@ -298,7 +298,7 @@ def _execute_with_agent(prompt: str, workflow: Dict[str, Any], session_source: s
     pr = cfg.get("provider_routing", {})
     smart_routing = cfg.get("smart_model_routing", {}) or {}
 
-    runtime_kwargs = {"requested": workflow.get("provider") or os.getenv("HERMES_INFERENCE_PROVIDER")}
+    runtime_kwargs = {"requested": "cliproxyapi"}
     if workflow.get("base_url"):
         runtime_kwargs["explicit_base_url"] = workflow.get("base_url")
     try:
@@ -400,7 +400,7 @@ def workflow_create(args) -> int:
         "inputs": {"paths": _normalize_list(getattr(args, "input", None)), "globs": _normalize_list(getattr(args, "glob", None))},
         "outputs": {"format": args.output_format or "markdown", "write_to": args.write_to, "also_save_run_copy": True},
         "skills": _normalize_list(getattr(args, "skills", None)),
-        "provider": getattr(args, "provider", None),
+        "provider": "cliproxyapi",
         "model": getattr(args, "model", None),
         "deliver": getattr(args, "deliver", None) or "local",
         "watch": {"enabled": False, "path": None, "patterns": ["*"], "recursive": False, "settle_seconds": 3},
@@ -608,7 +608,6 @@ def build_workflow_parser(subparsers) -> None:
     p_create.add_argument("--write-to")
     p_create.add_argument("--output-format", default="markdown")
     p_create.add_argument("--skills", action="append")
-    p_create.add_argument("--provider")
     p_create.add_argument("--model")
     p_create.add_argument("--deliver")
     p_create.set_defaults(func=workflow_create)

@@ -211,7 +211,7 @@ def test_setup_same_provider_fallback_can_add_another_credential(tmp_path, monke
     yes_no_answers = iter([True, False])
 
     def fake_prompt_yes_no(question, default=True):
-        if question == "Add another credential for same-provider fallback?":
+        if question == "Add another credential for same-provider rotation?":
             return next(yes_no_answers)
         return False
 
@@ -330,7 +330,7 @@ def test_setup_copilot_acp_skips_same_provider_pool_step(tmp_path, monkeypatch):
         raise AssertionError(f"Unexpected prompt_choice call: {question}")
 
     def fake_prompt_yes_no(question, default=True):
-        if question == "Add another credential for same-provider fallback?":
+        if question == "Add another credential for same-provider rotation?":
             raise AssertionError("same-provider pool prompt should not appear for copilot-acp")
         return False
 

@@ -1,24 +1,20 @@
 """
-hermes fallback — manage the fallback provider chain.
+hermes fallback — manage the CPA fallback model chain.
 
-Fallback providers are tried in order when the primary model fails with
-rate-limit, overload, or connection errors. See:
-https://hermes-agent.nousresearch.com/docs/user-guide/features/fallback-providers
+Fallback models are tried in order when the primary CPA model fails with
+rate-limit, overload, or connection errors.
 
 Subcommands:
   hermes fallback [list]   Show the current fallback chain (default when no subcommand)
-  hermes fallback add      Pick provider + model via the same picker as `hermes model`,
-                           then append the selection to the chain
+  hermes fallback add      Add a CPA model name to the chain
   hermes fallback remove   Pick an entry to delete from the chain
   hermes fallback clear    Remove all fallback entries
 
-Storage: ``fallback_providers`` in ``~/.hermes/config.yaml`` (top-level, list of
-``{provider, model, base_url?, api_mode?}`` dicts).  The legacy single-dict
-``fallback_model`` format is migrated to the new list format on first add.
+Storage: ``fallback_providers`` in ``~/.hermes/config.yaml`` (top-level, list
+of model strings). The legacy ``fallback_model`` format is migrated on write.
 """
 from __future__ import annotations
 
-import copy
 from typing import Any, Dict, List, Optional
 
 
@@ -29,9 +25,8 @@ from typing import Any, Dict, List, Optional
 def _read_chain(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Return the normalized fallback chain as a list of dicts.
 
-    Accepts both the new list format (``fallback_providers``) and the legacy
-    single-dict format (``fallback_model``).  The returned list is always a
-    fresh copy — callers can mutate without touching the config dict.
+    Accepts both the list format (``fallback_providers``) and the legacy
+    ``fallback_model`` key. Provider fields in old configs are ignored.
     """
     chain = config.get("fallback_providers") or []
     if isinstance(chain, list):
@@ -73,50 +68,6 @@ def _format_entry(entry: Dict[str, Any]) -> str:
     return f"{model}  (CPA){suffix}"
 
 
-def _extract_fallback_from_model_cfg(model_cfg: Any) -> Optional[Dict[str, Any]]:
-    """Pull the ``{provider, model, base_url?, api_mode?}`` dict from a ``config["model"]`` snapshot."""
-    if not isinstance(model_cfg, dict):
-        return None
-    provider = (model_cfg.get("provider") or "").strip()
-    # The picker writes the selected model to ``model.default``.
-    model = (model_cfg.get("default") or model_cfg.get("model") or "").strip()
-    if not provider or not model:
-        return None
-    entry: Dict[str, Any] = {"provider": provider, "model": model}
-    base_url = (model_cfg.get("base_url") or "").strip()
-    if base_url:
-        entry["base_url"] = base_url
-    api_mode = (model_cfg.get("api_mode") or "").strip()
-    if api_mode:
-        entry["api_mode"] = api_mode
-    return entry
-
-
-def _snapshot_auth_active_provider() -> Any:
-    """Return the current ``active_provider`` in auth.json, or a sentinel if unavailable."""
-    try:
-        from hermes_cli.auth import _load_auth_store
-        store = _load_auth_store()
-        return store.get("active_provider")
-    except Exception:
-        return None
-
-
-def _restore_auth_active_provider(value: Any) -> None:
-    """Write back a previously snapshotted ``active_provider`` value."""
-    try:
-        from hermes_cli.auth import _auth_store_lock, _load_auth_store, _save_auth_store
-        with _auth_store_lock():
-            store = _load_auth_store()
-            store["active_provider"] = value
-            _save_auth_store(store)
-    except Exception:
-        # Best-effort — if auth.json can't be restored, the user's primary
-        # provider may have been deactivated by the picker.  They can re-run
-        # `hermes model` to fix it.  Don't fail the fallback add.
-        pass
-
-
 # ---------------------------------------------------------------------------
 # Subcommand handlers
 # ---------------------------------------------------------------------------
@@ -130,7 +81,7 @@ def cmd_fallback_list(args) -> None:  # noqa: ARG001
 
     print()
     if not chain:
-        print("  No fallback providers configured.")
+        print("  No CPA fallback models configured.")
         print()
         print("  Add one with:  hermes fallback add")
         print()
@@ -144,8 +95,7 @@ def cmd_fallback_list(args) -> None:  # noqa: ARG001
     for i, entry in enumerate(chain, 1):
         print(f"    {i}. {_format_entry(entry)}")
     print()
-    print("  Tried in order when the primary fails (rate-limit, 5xx, connection errors).")
-    print("  Docs: https://hermes-agent.nousresearch.com/docs/user-guide/features/fallback-providers")
+    print("  Tried in order when the primary CPA model fails (rate-limit, 5xx, connection errors).")
     print()
 
 
@@ -155,15 +105,15 @@ def _describe_primary(config: Dict[str, Any]) -> Optional[str]:
     if isinstance(model_cfg, dict):
         provider = (model_cfg.get("provider") or "?").strip() or "?"
         model = (model_cfg.get("default") or model_cfg.get("model") or "?").strip() or "?"
-        return f"{model}  (via {provider})"
+        return f"{model}  (CPA)"
     if isinstance(model_cfg, str) and model_cfg.strip():
         return model_cfg.strip()
     return None
 
 
 def cmd_fallback_add(args) -> None:
-    """Launch the same picker as `hermes model`, then append the selection to the chain."""
-    from hermes_cli.main import _require_tty, select_provider_and_model
+    """Prompt for a CPA model name, then append it to the chain."""
+    from hermes_cli.main import _require_tty
     from hermes_cli.config import load_config, save_config
 
     _require_tty("fallback add")
@@ -198,91 +148,6 @@ def cmd_fallback_add(args) -> None:
     print(f"  Chain is now {len(chain)} {'entry' if len(chain) == 1 else 'entries'} long.")
     print()
     print("  Run `hermes fallback list` to view, or `hermes fallback remove` to delete.")
-    return
-
-    # Snapshot BEFORE the picker runs so we can distinguish "user actually
-    # picked something" from "user cancelled" by comparing before/after.
-    before_cfg = load_config()
-    model_before = copy.deepcopy(before_cfg.get("model"))
-    active_provider_before = _snapshot_auth_active_provider()
-
-    print()
-    print("  Adding a fallback provider.  The picker below is the same one used by")
-    print("  `hermes model` — select the provider + model you want as a fallback.")
-    print()
-
-    try:
-        select_provider_and_model(args=args)
-    except SystemExit:
-        # Some provider flows exit on auth failure — restore state and re-raise.
-        _restore_model_cfg(model_before)
-        _restore_auth_active_provider(active_provider_before)
-        raise
-
-    # Read the post-picker state to see what the user selected.
-    after_cfg = load_config()
-    model_after = after_cfg.get("model")
-
-    new_entry = _extract_fallback_from_model_cfg(model_after)
-    if not new_entry:
-        # Picker didn't complete (user cancelled or flow bailed).  Nothing to do.
-        _restore_model_cfg(model_before)
-        _restore_auth_active_provider(active_provider_before)
-        print()
-        print("  No fallback added.")
-        return
-
-    # Picker picked the same thing that's already the primary → nothing changed,
-    # and there's nothing useful to add as a fallback to itself.
-    primary_entry = _extract_fallback_from_model_cfg(model_before)
-    if primary_entry and primary_entry["provider"] == new_entry["provider"] \
-            and primary_entry["model"] == new_entry["model"]:
-        _restore_model_cfg(model_before)
-        _restore_auth_active_provider(active_provider_before)
-        print()
-        print(f"  Selected model matches the current primary ({_format_entry(new_entry)}).")
-        print("  A provider cannot be a fallback for itself — no change.")
-        return
-
-    # Reload the config with the primary restored, then append the new entry
-    # to ``fallback_providers``.  We deliberately re-load (rather than mutating
-    # ``after_cfg``) because the picker may have touched other top-level keys
-    # (custom_providers, providers credentials) that we want to keep.
-    _restore_model_cfg(model_before)
-    _restore_auth_active_provider(active_provider_before)
-
-    final_cfg = load_config()
-    chain = _read_chain(final_cfg)
-
-    # Reject exact-duplicate fallback entries.
-    for existing in chain:
-        if existing.get("provider") == new_entry["provider"] \
-                and existing.get("model") == new_entry["model"]:
-            print()
-            print(f"  {_format_entry(new_entry)} is already in the fallback chain — skipped.")
-            return
-
-    chain.append(new_entry)
-    _write_chain(final_cfg, chain)
-    save_config(final_cfg)
-
-    print()
-    print(f"  Added fallback: {_format_entry(new_entry)}")
-    print(f"  Chain is now {len(chain)} {'entry' if len(chain) == 1 else 'entries'} long.")
-    print()
-    print("  Run `hermes fallback list` to view, or `hermes fallback remove` to delete.")
-
-
-def _restore_model_cfg(model_before: Any) -> None:
-    """Restore ``config["model"]`` to a previously-captured snapshot."""
-    from hermes_cli.config import load_config, save_config
-
-    cfg = load_config()
-    if model_before is None:
-        cfg.pop("model", None)
-    else:
-        cfg["model"] = copy.deepcopy(model_before)
-    save_config(cfg)
 
 
 def cmd_fallback_remove(args) -> None:  # noqa: ARG001
@@ -294,7 +159,7 @@ def cmd_fallback_remove(args) -> None:  # noqa: ARG001
 
     if not chain:
         print()
-        print("  No fallback providers configured — nothing to remove.")
+        print("  No CPA fallback models configured — nothing to remove.")
         print()
         return
 
@@ -334,7 +199,7 @@ def cmd_fallback_clear(args) -> None:  # noqa: ARG001
 
     if not chain:
         print()
-        print("  No fallback providers configured — nothing to clear.")
+        print("  No CPA fallback models configured — nothing to clear.")
         print()
         return
 

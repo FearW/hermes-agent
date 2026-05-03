@@ -480,12 +480,8 @@ DEFAULT_CONFIG = {
         "max_simple_words": 28,
         "cheap_model": {},
     },
-    # Auxiliary model config — provider:model for each side task.
-    # Format: provider is the provider name, model is the model slug.
-    # "auto" for provider = auto-detect best available provider.
-    # Empty model = use provider's default auxiliary model.
-    # All tasks fall back to openrouter:google/gemini-3-flash-preview if
-    # the configured provider is unavailable.
+    # Auxiliary model config. Main inference is CPA-only; aux tasks default to
+    # auto/main-model behavior unless explicitly pinned to a direct endpoint.
     "auxiliary": {
         "vision": {
             "provider": "auto",  # auto | openrouter | nous | codex | custom
@@ -656,10 +652,8 @@ DEFAULT_CONFIG = {
         "l4_interval_seconds": 5400,
         "report_actions": True,
     },
-    # Subagent delegation — override the provider:model used by delegate_task
-    # so child agents can run on a different (cheaper/faster) provider and model.
-    # Uses the same runtime provider resolution as CLI/gateway startup, so all
-    # configured providers (OpenRouter, Nous, Z.ai, Kimi, etc.) are supported.
+    # Subagent delegation — override the model or direct endpoint used by
+    # delegate_task. Main inference provider remains CPA-only.
     "delegation": {
         "model": "",  # e.g. "google/gemini-3-flash-preview" (empty = inherit parent model)
         "provider": "",  # e.g. "openrouter" (empty = inherit parent provider + credentials)
@@ -1766,7 +1760,7 @@ def validate_config_structure(
                         )
                     )
 
-    # ── fallback_model must be a top-level dict with provider + model ────
+    # ── fallback_model must be a CPA model string or dict with model ─────
     fb = config.get("fallback_model")
     if fb is not None:
         if isinstance(fb, str):

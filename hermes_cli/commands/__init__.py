@@ -96,9 +96,7 @@ COMMAND_REGISTRY: list[CommandDef] = [
     # Configuration
     CommandDef("config", "Show current configuration", "Configuration",
                cli_only=True),
-    CommandDef("model", "Switch model for this session", "Configuration", args_hint="[model]"),
-    CommandDef("provider", "Show available providers and current provider",
-               "Configuration"),
+    CommandDef("model", "Switch CPA model", "Configuration", args_hint="[model]"),
 
     CommandDef("personality", "Set a predefined personality", "Configuration",
                args_hint="[name]"),

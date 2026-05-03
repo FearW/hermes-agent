@@ -63,6 +63,17 @@ function Write-Err {
     Write-Host "✗ $Message" -ForegroundColor Red
 }
 
+function Invoke-CheckedCommand {
+    param(
+        [Parameter(Mandatory=$true)][string]$FilePath,
+        [Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments
+    )
+    & $FilePath @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "$FilePath $($Arguments -join ' ') failed with exit code $LASTEXITCODE"
+    }
+}
+
 # ============================================================================
 # Dependency checks
 # ============================================================================
@@ -570,32 +581,68 @@ function Install-CPA {
     Write-Info "Installing CLIProxyAPI (CPA)..."
     $cpaDir = Join-Path $HermesHome "cpa"
     New-Item -ItemType Directory -Force -Path $cpaDir | Out-Null
+    New-Item -ItemType Directory -Force -Path "$HermesHome\logs" | Out-Null
     $exe = Join-Path $cpaDir "CLIProxyAPI.exe"
-    if (Test-Path $exe) {
+
+    if (-not (Test-Path $exe)) {
+        $asset = "CLIProxyAPI_6.9.49_windows_amd64.zip"
+        $url = "https://github.com/Fwindy/CLIProxyAPI/releases/download/v6.9.49/$asset"
+        $zip = Join-Path $env:TEMP $asset
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+            Expand-Archive -Path $zip -DestinationPath $cpaDir -Force
+            $found = Get-ChildItem -Path $cpaDir -Recurse -Filter "CLIProxyAPI*.exe" | Select-Object -First 1
+            if ($found -and $found.FullName -ne $exe) {
+                Copy-Item $found.FullName $exe -Force
+            }
+            if (Test-Path $exe) {
+                Write-Success "CPA installed: $exe"
+            } else {
+                Write-Warn "CPA archive downloaded but executable was not found. Check: $cpaDir"
+                return
+            }
+        } catch {
+            Write-Warn "CPA install failed: $_"
+            Write-Info "You can install manually from https://github.com/Fwindy/CLIProxyAPI/releases"
+            return
+        } finally {
+            Remove-Item $zip -Force -ErrorAction SilentlyContinue
+        }
+    } else {
         Write-Success "CPA already installed: $exe"
+    }
+
+    $args = "--config `"$HermesHome\cpa\config.yaml`""
+    $taskName = "Hermes CLIProxyAPI"
+    try {
+        $action = New-ScheduledTaskAction -Execute $exe -Argument $args -WorkingDirectory $cpaDir
+        $trigger = New-ScheduledTaskTrigger -AtLogOn
+        $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+        Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null
+        Write-Success "CPA registered for user logon startup"
+    } catch {
+        Write-Warn "Could not register CPA startup task: $_"
+        Write-Info "Hermes will start CPA for this session only."
+    }
+
+    $running = Get-CimInstance Win32_Process -Filter "name = 'CLIProxyAPI.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.ExecutablePath -eq $exe }
+    if ($running) {
+        Write-Success "CPA is already running"
         return
     }
-    $asset = "CLIProxyAPI_6.9.49_windows_amd64.zip"
-    $url = "https://github.com/Fwindy/CLIProxyAPI/releases/download/v6.9.49/$asset"
-    $zip = Join-Path $env:TEMP $asset
+
     try {
-        Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
-        Expand-Archive -Path $zip -DestinationPath $cpaDir -Force
-        $found = Get-ChildItem -Path $cpaDir -Recurse -Filter "CLIProxyAPI*.exe" | Select-Object -First 1
-        if ($found -and $found.FullName -ne $exe) {
-            Copy-Item $found.FullName $exe -Force
-        }
-        if (Test-Path $exe) {
-            Write-Success "CPA installed: $exe"
-            Write-Info "Run CPA: $exe --config `"$HermesHome\cpa\config.yaml`""
-        } else {
-            Write-Warn "CPA archive downloaded but executable was not found. Check: $cpaDir"
-        }
+        Start-Process -FilePath $exe -ArgumentList $args `
+            -WorkingDirectory $cpaDir `
+            -RedirectStandardOutput "$HermesHome\logs\cpa.log" `
+            -RedirectStandardError "$HermesHome\logs\cpa-error.log" `
+            -WindowStyle Hidden
+        Write-Success "CPA started in background"
+        Write-Info "CPA endpoint: http://127.0.0.1:8080/v1"
     } catch {
-        Write-Warn "CPA install failed: $_"
-        Write-Info "You can install manually from https://github.com/Fwindy/CLIProxyAPI/releases"
-    } finally {
-        Remove-Item $zip -Force -ErrorAction SilentlyContinue
+        Write-Warn "Failed to start CPA automatically: $_"
+        Write-Info "Run manually: $exe --config `"$HermesHome\cpa\config.yaml`""
     }
 }
 
@@ -736,11 +783,38 @@ function Install-NodeDeps {
     if (Test-Path "package.json") {
         Write-Info "Installing Node.js dependencies (browser tools)..."
         try {
-            npm install --silent 2>&1 | Out-Null
+            Invoke-CheckedCommand npm install --silent 2>&1 | Out-Null
             Write-Success "Node.js dependencies installed"
         } catch {
             Write-Warn "npm install failed (browser tools may not work)"
         }
+    }
+
+    # 单独安装 WebUI 依赖。Vite/Rollup/esbuild 使用平台相关的
+    # native optional packages；git clean 后需要重新安装，确保恢复
+    # 当前机器所需的 native 二进制文件。
+    $webDir = "$InstallDir\web"
+    if (Test-Path "$webDir\package.json") {
+        Write-Info "正在安装 WebUI 依赖..."
+        Push-Location $webDir
+        try {
+            if (Test-Path "package-lock.json") {
+                Invoke-CheckedCommand npm ci --include=optional --silent 2>&1 | Out-Null
+            } else {
+                Invoke-CheckedCommand npm install --include=optional --silent 2>&1 | Out-Null
+            }
+            Write-Success "WebUI 依赖已安装"
+            try {
+                Invoke-CheckedCommand npm run build --silent 2>&1 | Out-Null
+                Write-Success "WebUI 资源已构建"
+            } catch {
+                Write-Warn "WebUI 构建失败；请手动运行：cd $webDir; npm ci --include=optional; npm run build"
+            }
+        } catch {
+            Write-Warn "WebUI npm 安装失败（dashboard 可能会使用过期或缺失的资源）"
+            Write-Info "  请手动尝试：cd $webDir; npm ci --include=optional"
+        }
+        Pop-Location
     }
     
     # Install WhatsApp bridge dependencies
@@ -749,7 +823,7 @@ function Install-NodeDeps {
         Write-Info "Installing WhatsApp bridge dependencies..."
         Push-Location $bridgeDir
         try {
-            npm install --silent 2>&1 | Out-Null
+            Invoke-CheckedCommand npm install --silent 2>&1 | Out-Null
             Write-Success "WhatsApp bridge dependencies installed"
         } catch {
             Write-Warn "WhatsApp bridge npm install failed (WhatsApp may not work)"

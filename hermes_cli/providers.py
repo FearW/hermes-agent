@@ -491,7 +491,8 @@ def resolve_provider_full(
 ) -> Optional[ProviderDef]:
     """Full resolution chain: built-in → models.dev → user config.
 
-    This is the main entry point for --provider flag resolution.
+    Kept for provider metadata and CPA/import tooling. Main inference no
+    longer uses this to switch providers.
 
     Args:
         name: Provider name or alias.

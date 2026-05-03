@@ -634,16 +634,16 @@ class TestSlashCommands:
 
         assert resp.stop_reason == "end_turn"
 
-    def test_model_switch_uses_requested_provider(self, tmp_path, monkeypatch):
-        """`/model provider:model` should rebuild the ACP agent on that provider."""
+    def test_model_switch_is_cpa_only(self, tmp_path, monkeypatch):
+        """`/model` preserves colon-containing model text and rebuilds on CPA."""
         runtime_calls = []
 
         def fake_resolve_runtime_provider(requested=None, **kwargs):
             runtime_calls.append(requested)
-            provider = requested or "openrouter"
+            provider = requested or "cliproxyapi"
             return {
                 "provider": provider,
-                "api_mode": "anthropic_messages" if provider == "anthropic" else "chat_completions",
+                "api_mode": "chat_completions",
                 "base_url": f"https://{provider}.example/v1",
                 "api_key": f"{provider}-key",
                 "command": None,
@@ -672,10 +672,11 @@ class TestSlashCommands:
             state = manager.create_session(cwd="/tmp")
             result = acp_agent._cmd_model("anthropic:claude-sonnet-4-6", state)
 
-        assert "Provider: anthropic" in result
-        assert state.agent.provider == "anthropic"
-        assert state.agent.base_url == "https://anthropic.example/v1"
-        assert runtime_calls[-1] == "anthropic"
+        assert "Provider: cliproxyapi" in result
+        assert state.model == "anthropic:claude-sonnet-4-6"
+        assert state.agent.provider == "cliproxyapi"
+        assert state.agent.base_url == "https://cliproxyapi.example/v1"
+        assert runtime_calls[-1] == "cliproxyapi"
 
 
 # ---------------------------------------------------------------------------

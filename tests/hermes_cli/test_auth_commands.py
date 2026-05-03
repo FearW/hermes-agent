@@ -505,11 +505,11 @@ def test_clear_provider_auth_removes_provider_pool_entries(tmp_path, monkeypatch
 
 
 def test_logout_resets_codex_config_when_auth_state_already_cleared(tmp_path, monkeypatch, capsys):
-    """`hermes logout --provider openai-codex` must still clear model.provider.
+    """`hermes logout` must reset stale model.provider values to CPA.
 
     Users can end up with auth.json already cleared but config.yaml still set to
-    openai-codex.  Previously logout reported no auth state and left the agent
-    pinned to the Codex provider.
+    a legacy provider. Logout should never leave the agent pinned to that
+    provider now that inference is CPA-only.
     """
     hermes_home = tmp_path / "hermes"
     monkeypatch.setenv("HERMES_HOME", str(hermes_home))
@@ -529,8 +529,8 @@ def test_logout_resets_codex_config_when_auth_state_already_cleared(tmp_path, mo
     out = capsys.readouterr().out
     assert "Logged out of OpenAI Codex." in out
     config_text = (hermes_home / "config.yaml").read_text()
-    assert "provider: auto" in config_text
-    assert "base_url: https://openrouter.ai/api/v1" in config_text
+    assert "provider: cliproxyapi" in config_text
+    assert "base_url: http://127.0.0.1:8080/v1" in config_text
 
 
 def test_logout_defaults_to_configured_codex_when_no_active_provider(tmp_path, monkeypatch, capsys):
@@ -553,7 +553,7 @@ def test_logout_defaults_to_configured_codex_when_no_active_provider(tmp_path, m
     out = capsys.readouterr().out
     assert "Logged out of OpenAI Codex." in out
     config_text = (hermes_home / "config.yaml").read_text()
-    assert "provider: auto" in config_text
+    assert "provider: cliproxyapi" in config_text
 
 
 def test_logout_clears_stale_active_codex_without_provider_credentials(tmp_path, monkeypatch, capsys):
@@ -586,7 +586,7 @@ def test_logout_clears_stale_active_codex_without_provider_credentials(tmp_path,
     auth_payload = json.loads((hermes_home / "auth.json").read_text())
     assert auth_payload.get("active_provider") is None
     config_text = (hermes_home / "config.yaml").read_text()
-    assert "provider: auto" in config_text
+    assert "provider: cliproxyapi" in config_text
 
 
 def test_auth_list_does_not_call_mutating_select(monkeypatch, capsys):

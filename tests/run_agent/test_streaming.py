@@ -1,7 +1,7 @@
 """Tests for streaming token delivery infrastructure.
 
 Tests the unified streaming API call, delta callbacks, tool-call
-suppression, provider fallback, and CLI streaming display.
+suppression, CPA model fallback, and CLI streaming display.
 """
 import json
 import threading

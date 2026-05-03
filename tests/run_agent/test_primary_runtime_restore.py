@@ -137,7 +137,7 @@ class TestRestorePrimaryRuntime:
 
         assert agent._fallback_activated is True
         assert agent.model == "anthropic/claude-sonnet-4"
-        assert agent.provider == "openrouter"
+        assert agent.provider == "cliproxyapi"
 
         # Restore should bring back the primary
         with patch("run_agent.OpenAI", return_value=MagicMock()):
@@ -435,7 +435,7 @@ class TestRestoreInRunConversation:
 
         assert agent._fallback_activated is True
         assert agent.model == "anthropic/claude-sonnet-4"
-        assert agent.provider == "openrouter"
+        assert agent.provider == "cliproxyapi"
         assert agent._fallback_index == 1
 
         # Turn 2: restore primary

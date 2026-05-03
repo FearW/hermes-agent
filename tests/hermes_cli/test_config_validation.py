@@ -97,13 +97,13 @@ class TestCustomProvidersValidation:
 
 
 class TestFallbackModelValidation:
-    """fallback_model should be a top-level dict with provider + model."""
+    """fallback_model should be a CPA model string or dict with model."""
 
-    def test_missing_provider(self):
+    def test_missing_provider_is_valid(self):
         issues = validate_config_structure({
             "fallback_model": {"model": "anthropic/claude-sonnet-4"},
         })
-        assert any("missing 'provider'" in i.message for i in issues)
+        assert not any("fallback" in i.message.lower() for i in issues)
 
     def test_missing_model(self):
         issues = validate_config_structure({
@@ -122,11 +122,11 @@ class TestFallbackModelValidation:
         fb_issues = [i for i in issues if "fallback" in i.message.lower()]
         assert len(fb_issues) == 0
 
-    def test_non_dict_fallback(self):
+    def test_string_fallback_is_valid(self):
         issues = validate_config_structure({
-            "fallback_model": "openrouter:anthropic/claude-sonnet-4",
+            "fallback_model": "gpt-5-mini",
         })
-        assert any("should be a dict" in i.message for i in issues)
+        assert not any("fallback" in i.message.lower() for i in issues)
 
     def test_empty_fallback_dict_no_issues(self):
         """Empty fallback_model dict means disabled — no warnings needed."""

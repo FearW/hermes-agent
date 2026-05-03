@@ -113,7 +113,7 @@ TIPS = [
     "Set agent.max_turns: 200 to let the agent take more tool-calling steps per turn.",
     "Set file_read_max_chars: 200000 to increase the max content per read_file call.",
     "Set approvals.mode: smart to let an LLM auto-approve safe commands and auto-deny dangerous ones.",
-    "Set fallback_model in config.yaml to automatically fail over to a backup provider.",
+    "Set fallback_model in config.yaml to automatically fail over to a backup CPA model.",
     "Set privacy.redact_pii: true to hash user IDs and phone numbers before sending to the LLM.",
     "Set browser.record_sessions: true to auto-record browser sessions as WebM videos.",
     "Set worktree: true in config.yaml to always create a git worktree (same as hermes -w).",

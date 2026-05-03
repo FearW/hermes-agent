@@ -2053,12 +2053,12 @@ class HermesCLI:
         self._provider_require_params = pr.get("require_parameters", False)
         self._provider_data_collection = pr.get("data_collection")
         
-        # Fallback provider chain — tried in order when primary fails after retries.
-        # Supports new list format (fallback_providers) and legacy single-dict (fallback_model).
+        # CPA fallback model chain — tried in order when the primary model fails after retries.
+        # Supports list format (fallback_providers) and legacy single-dict/string (fallback_model).
         fb = CLI_CONFIG.get("fallback_providers") or CLI_CONFIG.get("fallback_model") or []
         # Normalize legacy single-dict to a one-element list
         if isinstance(fb, dict):
-            fb = [fb] if fb.get("provider") and fb.get("model") else []
+            fb = [fb] if fb.get("model") else []
         self._fallback_model = fb
 
         # Signature of the currently-initialised agent's runtime.  Used to
@@ -2553,6 +2553,9 @@ class HermesCLI:
 
     def _normalize_model_for_provider(self, resolved_provider: str) -> bool:
         """Normalize provider-specific model IDs and routing."""
+        if (resolved_provider or "").strip().lower() in {"cliproxyapi", "cpa"}:
+            return False
+
         current_model = (self.model or "").strip()
         changed = False
 
@@ -3190,29 +3193,11 @@ class HermesCLI:
         except Exception as exc:
             _primary_exc = exc
 
-        # Primary provider auth failed — try fallback providers before giving up.
+        # CPA-only: auth failures are reported directly. Fallback entries only
+        # switch model names after the agent is running; they do not resolve a
+        # different provider at startup.
         if runtime is None and _primary_exc is not None:
-            from hermes_cli.auth import AuthError
-            if isinstance(_primary_exc, AuthError):
-                _fb_chain = self._fallback_model if isinstance(self._fallback_model, list) else []
-                for _fb in _fb_chain:
-                    _fb_provider = (_fb.get("provider") or "").strip().lower()
-                    _fb_model = (_fb.get("model") or "").strip()
-                    if not _fb_provider or not _fb_model:
-                        continue
-                    try:
-                        runtime = resolve_runtime_provider(requested=_fb_provider)
-                        logger.warning(
-                            "Primary provider auth failed (%s). Falling through to fallback: %s/%s",
-                            _primary_exc, _fb_provider, _fb_model,
-                        )
-                        _cprint(f"⚠️  Primary auth failed — switching to fallback: {_fb_provider} / {_fb_model}")
-                        self.requested_provider = _fb_provider
-                        self.model = _fb_model
-                        _primary_exc = None
-                        break
-                    except Exception:
-                        continue
+            pass
 
         if runtime is None:
             message = format_runtime_provider_error(_primary_exc) if _primary_exc else "Provider resolution failed."
@@ -5228,15 +5213,30 @@ class HermesCLI:
         return result[0]
 
     def _open_model_picker(self, providers: list, current_model: str, current_provider: str, user_provs=None, custom_provs=None) -> None:
-        """Open prompt_toolkit-native /model picker modal."""
+        """Open the CPA-only /model picker modal."""
         self._capture_modal_input_snapshot()
-        default_idx = next((i for i, p in enumerate(providers) if p.get("is_current")), 0)
+        cpa_provider = next(
+            (
+                p for p in providers or []
+                if str(p.get("slug", "")).strip().lower() in {"cliproxyapi", "cpa"}
+            ),
+            None,
+        ) or {
+            "slug": "cliproxyapi",
+            "name": "CLIProxyAPI / CPA",
+            "models": [],
+        }
+        model_list = list(cpa_provider.get("models") or [])
+        if current_model and current_model not in model_list:
+            model_list.insert(0, current_model)
         self._model_picker_state = {
-            "stage": "provider",
-            "providers": providers,
-            "selected": default_idx,
+            "stage": "model",
+            "providers": [cpa_provider],
+            "selected": 0,
             "current_model": current_model,
-            "current_provider": current_provider,
+            "current_provider": "cliproxyapi",
+            "provider_data": cpa_provider,
+            "model_list": model_list,
             "user_provs": user_provs,
             "custom_provs": custom_provs,
         }
@@ -5275,7 +5275,7 @@ class HermesCLI:
         scroll_offset = max(0, min(scroll_offset, n - visible))
         return scroll_offset, visible
 
-    def _apply_model_switch_result(self, result, persist_global: bool = False) -> None:
+    def _apply_model_switch_result(self, result, persist_global: bool = True) -> None:
         if not result.success:
             _cprint(f"  ✗ {result.error_message}")
             return
@@ -5347,132 +5347,76 @@ class HermesCLI:
             _cprint("    Prompt caching: enabled")
         if result.warning_message:
             _cprint(f"    ⚠ {result.warning_message}")
-        _cprint("    Applies to this session")
+        save_config_value("model.default", result.new_model)
+        if result.provider_changed:
+            save_config_value("model.provider", result.target_provider)
+        if result.base_url:
+            save_config_value("model.base_url", result.base_url)
+        _cprint("    Saved to config.yaml")
 
-    def _handle_model_picker_selection(self, persist_global: bool = False) -> None:
+    def _handle_model_picker_selection(self, persist_global: bool = True) -> None:
         state = self._model_picker_state
         if not state:
             return
         selected = state.get("selected", 0)
         stage = state.get("stage")
-        if stage == "provider":
-            providers = state.get("providers") or []
-            if selected >= len(providers):
-                self._close_model_picker()
-                return
-            provider_data = providers[selected]
-            # Use the curated model list from list_authenticated_providers()
-            # (same lists as `hermes model` and gateway pickers).
-            # Only fall back to the live provider catalog when the curated
-            # list is empty (e.g. user-defined endpoints with no curated list).
-            model_list = provider_data.get("models", [])
-            if not model_list:
-                try:
-                    from hermes_cli.models import provider_model_ids
-                    live = provider_model_ids(provider_data["slug"])
-                    if live:
-                        model_list = live
-                except Exception:
-                    pass
-            state["stage"] = "model"
-            state["provider_data"] = provider_data
-            state["model_list"] = model_list
-            state["selected"] = 0
-            self._invalidate(min_interval=0.0)
-            return
-        if stage == "model":
-            provider_data = state.get("provider_data") or {}
-            model_list = state.get("model_list") or []
-            back_idx = len(model_list)
-            cancel_idx = len(model_list) + 1
-            if selected == back_idx:
-                state["stage"] = "provider"
-                state["selected"] = next((i for i, p in enumerate(state.get("providers") or []) if p.get("slug") == provider_data.get("slug")), 0)
-                self._invalidate(min_interval=0.0)
-                return
-            if selected >= cancel_idx:
-                self._close_model_picker()
-                return
-            if selected < len(model_list):
-                from hermes_cli.model_switch import switch_model
-                chosen_model = model_list[selected]
-                result = switch_model(
-                    raw_input=chosen_model,
-                    current_provider=self.provider or "",
-                    current_model=self.model or "",
-                    current_base_url=self.base_url or "",
-                    current_api_key=self.api_key or "",
-                    is_global=persist_global,
-                    explicit_provider=provider_data.get("slug"),
-                    user_providers=state.get("user_provs"),
-                    custom_providers=state.get("custom_provs"),
-                )
-                self._close_model_picker()
-                self._apply_model_switch_result(result, persist_global)
-                return
+        if stage != "model":
             self._close_model_picker()
+            return
+        model_list = state.get("model_list") or []
+        manual_idx = len(model_list)
+        cancel_idx = len(model_list) + 1
+        if selected == manual_idx:
+            chosen_model = self._prompt_text_input("  请输入模型名：")
+            if not chosen_model:
+                self._close_model_picker()
+                return
+        elif selected >= cancel_idx:
+            self._close_model_picker()
+            return
+        else:
+            chosen_model = model_list[selected]
+
+        from hermes_cli.model_switch import switch_model
+        result = switch_model(
+            raw_input=chosen_model,
+            current_provider=self.provider or "",
+            current_model=self.model or "",
+            current_base_url=self.base_url or "",
+            current_api_key=self.api_key or "",
+            is_global=persist_global,
+        )
+        self._close_model_picker()
+        self._apply_model_switch_result(result, persist_global)
 
     def _handle_model_switch(self, cmd_original: str):
-        """Handle /model command — switch model for this session.
+        """Handle /model command in CPA-only mode.
 
         Supports:
-          /model                              — show current model + usage hints
-          /model <name>                       — switch for this session only
-          /model <name> --provider <provider> — switch provider + model
-          /model --provider <provider>        — switch to provider, auto-detect model
+          /model        — show current CPA model + usage hints
+          /model <name> — switch CPA model and save to config.yaml
         """
-        from hermes_cli.model_switch import switch_model, parse_model_flags, list_authenticated_providers
-        from hermes_cli.providers import get_label
+        from hermes_cli.model_switch import switch_model, parse_model_flags
 
         # Parse args from the original command
         parts = cmd_original.split(None, 1)  # split off '/model'
         raw_args = parts[1].strip() if len(parts) > 1 else ""
+        if "--provider" in raw_args:
+            _cprint("  ✗ provider 选择已禁用；Hermes 固定使用 CPA/CLIProxyAPI。")
+            _cprint("    请在 CPA WebUI 中管理上游渠道。")
+            return
 
-        # Parse --provider flag
-        model_input, explicit_provider, persist_global = parse_model_flags(raw_args)
+        model_input, _ignored_provider, _persist_config = parse_model_flags(raw_args)
+        persist_global = True
 
-        # Load providers for switch_model (picker path needs them below)
-        user_provs = None
-        custom_provs = None
-        try:
-            from hermes_cli.config import get_compatible_custom_providers, load_config
-            cfg = load_config()
-            user_provs = cfg.get("providers")
-            custom_provs = get_compatible_custom_providers(cfg)
-        except Exception:
-            pass
-
-        # No args at all: open prompt_toolkit-native picker modal
-        if not model_input and not explicit_provider:
+        # No args: show CPA-only status and usage.
+        if not model_input:
             model_display = self.model or "unknown"
-            provider_display = get_label(self.provider) if self.provider else "unknown"
-
-            try:
-                providers = list_authenticated_providers(
-                    current_provider=self.provider or "",
-                    current_base_url=self.base_url or "",
-                    current_model=self.model or "",
-                    user_providers=user_provs,
-                    custom_providers=custom_provs,
-                    max_models=50,
-                )
-            except Exception:
-                providers = []
-
-            if not providers:
-                _cprint("  No authenticated providers found.")
-                _cprint("")
-                _cprint("  /model <name>                        switch model")
-                _cprint("  /model --provider <slug>             switch provider")
-                return
-
-            self._open_model_picker(
-                providers,
-                model_display,
-                provider_display,
-                user_provs=user_provs,
-                custom_provs=custom_provs,
-            )
+            _cprint(f"  Current CPA model: {model_display}")
+            _cprint(f"  CPA endpoint: {self.base_url or 'http://127.0.0.1:8080/v1'}")
+            _cprint("")
+            _cprint("  /model <name>    切换 CPA 模型并保存到 config.yaml")
+            _cprint("  上游 provider 请在 CPA WebUI 中配置。")
             return
 
         # Perform the switch
@@ -5483,9 +5427,6 @@ class HermesCLI:
             current_base_url=self.base_url or "",
             current_api_key=self.api_key or "",
             is_global=persist_global,
-            explicit_provider=explicit_provider,
-            user_providers=user_provs,
-            custom_providers=custom_provs,
         )
 
         if not result.success:
@@ -5568,7 +5509,12 @@ class HermesCLI:
         if result.warning_message:
             _cprint(f"    ⚠ {result.warning_message}")
 
-        _cprint("    Applies to this session")
+        save_config_value("model.default", result.new_model)
+        if result.provider_changed:
+            save_config_value("model.provider", result.target_provider)
+        if result.base_url:
+            save_config_value("model.base_url", result.base_url)
+        _cprint("    Saved to config.yaml")
 
     def _should_handle_model_command_inline(self, text: str, has_images: bool = False) -> bool:
         """Return True when /model should be handled immediately on the UI thread."""
@@ -7030,7 +6976,7 @@ class HermesCLI:
         if save_config_value("agent.reasoning_effort", arg):
             _cprint(f"  {_ACCENT}✓ Reasoning effort set to '{arg}' (saved to config){_RST}")
         else:
-            _cprint(f"  {_ACCENT}✓ Reasoning effort set to '{arg}' (session only){_RST}")
+            _cprint(f"  {_ACCENT}✓ Reasoning effort set to '{arg}' (config save failed; in-memory only){_RST}")
 
     def _handle_busy_command(self, cmd: str):
         """Handle /busy — control what Enter does while Hermes is working.
@@ -9890,10 +9836,7 @@ class HermesCLI:
             state = self._model_picker_state
             if not state:
                 return
-            if state.get("stage") == "provider":
-                max_idx = len(state.get("providers") or [])
-            else:
-                max_idx = len(state.get("model_list") or []) + 1
+            max_idx = len(state.get("model_list") or []) + 1
             state["selected"] = min(max_idx, state.get("selected", 0) + 1)
             event.app.invalidate()
 
@@ -10779,28 +10722,13 @@ class HermesCLI:
             state = cli_ref._model_picker_state
             if not state:
                 return []
-            stage = state.get("stage", "provider")
-            if stage == "provider":
-                title = "⚙ Model Picker — Select Provider"
-                choices = []
-                _providers = state.get("providers")
-                for p in _providers if isinstance(_providers, list) else []:
-                    count = p.get("total_models", len(p.get("models", [])))
-                    label = f"{p['name']} ({count} model{'s' if count != 1 else ''})"
-                    if p.get("is_current"):
-                        label += "  ← current"
-                    choices.append(label)
-                choices.append("Cancel")
-                hint = f"Current: {state.get('current_model', 'unknown')} on {state.get('current_provider', 'unknown')}"
+            model_list = state.get("model_list") or []
+            title = "⚙ CPA 模型选择"
+            choices = list(model_list) + ["手动输入模型名", "取消"]
+            if model_list:
+                hint = f"当前模型：{state.get('current_model', 'unknown')}；provider 固定为 CPA/CLIProxyAPI"
             else:
-                provider_data = state.get("provider_data") or {}
-                model_list = state.get("model_list") or []
-                title = f"⚙ Model Picker — {provider_data.get('name', provider_data.get('slug', 'Provider'))}"
-                choices = list(model_list) + ["← Back", "Cancel"]
-                if model_list:
-                    hint = f"Select a model ({len(model_list)} available)"
-                else:
-                    hint = "No models listed for this provider. Use Back or Cancel."
+                hint = "当前没有可列出的模型；可以手动输入模型名。"
 
             box_width = _panel_box_width(title, [hint] + choices, min_width=46, max_width=84)
             inner_text_width = max(8, box_width - 6)

@@ -74,12 +74,12 @@ class TestSlashCommands:
         send_status.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_provider_shows_current_provider(self, adapter, platform):
-        send = await send_and_capture(adapter, "/provider", platform)
+    async def test_help_does_not_expose_provider_command(self, adapter, platform):
+        send = await send_and_capture(adapter, "/help", platform)
 
         send.assert_called_once()
         response_text = send.call_args[1].get("content") or send.call_args[0][1]
-        assert "provider" in response_text.lower()
+        assert "/provider" not in response_text
 
     @pytest.mark.asyncio
     async def test_verbose_responds(self, adapter, platform):

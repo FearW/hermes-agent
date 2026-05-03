@@ -759,38 +759,7 @@ def _resolve_model() -> str:
 
 
 def _resolve_startup_runtime() -> tuple[str, str | None]:
-    model = _resolve_model()
-    explicit_provider = os.environ.get("HERMES_TUI_PROVIDER", "").strip()
-    if explicit_provider:
-        return model, explicit_provider
-
-    explicit_model = (
-        os.environ.get("HERMES_MODEL", "")
-        or os.environ.get("HERMES_INFERENCE_MODEL", "")
-    ).strip()
-    if not explicit_model:
-        return model, None
-
-    try:
-        from hermes_cli.models import detect_static_provider_for_model
-
-        cfg = _load_cfg().get("model") or {}
-        current_provider = (
-            (
-                str(cfg.get("provider") or "").strip().lower()
-                if isinstance(cfg, dict)
-                else ""
-            )
-            or os.environ.get("HERMES_INFERENCE_PROVIDER", "").strip().lower()
-            or "auto"
-        )
-        detected = detect_static_provider_for_model(explicit_model, current_provider)
-        if detected:
-            provider, detected_model = detected
-            return detected_model, provider
-    except Exception:
-        pass
-    return model, None
+    return _resolve_model(), None
 
 
 def _write_config_key(key_path: str, value):
@@ -1030,7 +999,10 @@ def _apply_model_switch(sid: str, session: dict, raw_input: str) -> dict:
     from hermes_cli.model_switch import parse_model_flags, switch_model
     from hermes_cli.runtime_provider import resolve_runtime_provider
 
-    model_input, explicit_provider, persist_global = parse_model_flags(raw_input)
+    if "--provider" in (raw_input or ""):
+        raise ValueError("provider 选择已禁用；Hermes 固定使用 CPA/CLIProxyAPI。请在 CPA WebUI 中管理上游渠道。")
+
+    model_input, _ignored_provider, persist_global = parse_model_flags(raw_input)
     if not model_input:
         raise ValueError("model value required")
 
@@ -1047,21 +1019,6 @@ def _apply_model_switch(sid: str, session: dict, raw_input: str) -> dict:
         current_base_url = str(runtime.get("base_url", "") or "")
         current_api_key = str(runtime.get("api_key", "") or "")
 
-    # Load user-defined providers so switch_model can resolve named custom
-    # endpoints (e.g. "ollama-launch") and validate against saved model lists.
-    user_provs = None
-    custom_provs = None
-    try:
-        from hermes_cli.config import get_compatible_custom_providers, load_config
-
-        cfg = load_config()
-        user_provs = [
-            {"provider": k, **v} for k, v in (cfg.get("providers") or {}).items()
-        ]
-        custom_provs = get_compatible_custom_providers(cfg)
-    except Exception:
-        pass
-
     result = switch_model(
         raw_input=model_input,
         current_provider=current_provider,
@@ -1069,9 +1026,6 @@ def _apply_model_switch(sid: str, session: dict, raw_input: str) -> dict:
         current_base_url=current_base_url,
         current_api_key=current_api_key,
         is_global=persist_global,
-        explicit_provider=explicit_provider,
-        user_providers=user_provs,
-        custom_providers=custom_provs,
     )
     if not result.success:
         raise ValueError(result.error_message or "model switch failed")
@@ -4672,28 +4626,13 @@ def _(rid, params: dict) -> dict:
 
         session = _sessions.get(params.get("session_id", ""))
         agent = session.get("agent") if session else None
-        cfg = _load_cfg()
         current_provider = getattr(agent, "provider", "") or ""
         current_model = getattr(agent, "model", "") or _resolve_model()
         current_base_url = getattr(agent, "base_url", "") or ""
-        # list_authenticated_providers already populates each provider's
-        # "models" with the curated list (same source as `hermes model` and
-        # classic CLI's /model picker). Do NOT overwrite with live
-        # provider_model_ids() — that bypasses curation and pulls in
-        # non-agentic models (e.g. Nous /models returns ~400 IDs including
-        # TTS, embeddings, rerankers, image/video generators).
         providers = list_authenticated_providers(
             current_provider=current_provider,
             current_base_url=current_base_url,
             current_model=current_model,
-            user_providers=(
-                cfg.get("providers") if isinstance(cfg.get("providers"), dict) else {}
-            ),
-            custom_providers=(
-                cfg.get("custom_providers")
-                if isinstance(cfg.get("custom_providers"), list)
-                else []
-            ),
             max_models=50,
         )
         return _ok(

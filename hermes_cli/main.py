@@ -62,9 +62,15 @@ _BUILTIN_TOP_LEVEL_COMMANDS = frozenset({
 })
 
 _TOP_LEVEL_FLAGS_WITH_VALUES = frozenset({
-    "-m", "--model", "--provider", "-t", "--toolsets", "--resume", "-r",
+    "-m", "--model", "-t", "--toolsets", "--resume", "-r",
     "--continue", "-c", "--skills", "-s", "-z", "--oneshot", "--profile", "-p",
 })
+
+
+def _reject_provider_flag() -> None:
+    print("provider 选择已禁用；Hermes 固定使用 CPA/CLIProxyAPI。")
+    print("请在 CPA WebUI 中管理上游渠道。")
+    sys.exit(2)
 
 
 def _first_cli_command(argv: list[str]) -> str | None:
@@ -885,6 +891,42 @@ def _print_tui_exit_summary(session_id: Optional[str], active_session_file: Opti
 _NPM_LOCK_RUNTIME_KEYS = frozenset({"ideallyInert"})
 
 
+def _npm_package_lock_matches(cwd: Path, *, required_files: tuple[Path, ...] = ()) -> bool:
+    """当 npm 已安装依赖与 package-lock.json 基本匹配时返回 True。"""
+    for required in required_files:
+        if not required.is_file():
+            return False
+
+    lock = cwd / "package-lock.json"
+    if not lock.is_file():
+        return (cwd / "node_modules").is_dir()
+
+    marker = cwd / "node_modules" / ".package-lock.json"
+    if not marker.is_file():
+        return False
+
+    try:
+        wanted = json.loads(lock.read_text(encoding="utf-8")).get("packages") or {}
+        installed = json.loads(marker.read_text(encoding="utf-8")).get("packages") or {}
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return lock.stat().st_mtime <= marker.stat().st_mtime
+
+    def comparable(pkg: dict) -> dict:
+        return {k: v for k, v in pkg.items() if k not in _NPM_LOCK_RUNTIME_KEYS}
+
+    for name, pkg in wanted.items():
+        if not name or not isinstance(pkg, dict):
+            continue
+        if name not in installed:
+            if pkg.get("optional") or pkg.get("peer"):
+                continue
+            return False
+        if isinstance(installed[name], dict) and comparable(pkg) != comparable(installed[name]):
+            return False
+
+    return True
+
+
 def _tui_need_npm_install(root: Path) -> bool:
     """True when @hermes/ink is missing or node_modules is behind package-lock.json.
 
@@ -908,41 +950,7 @@ def _tui_need_npm_install(root: Path) -> bool:
     ink = root / "node_modules" / "@hermes" / "ink" / "package.json"
     if not ink.is_file():
         return True
-    lock = root / "package-lock.json"
-    if not lock.is_file():
-        return False
-    marker = root / "node_modules" / ".package-lock.json"
-    if not marker.is_file():
-        return True
-
-    # Compare lockfile contents, not mtimes: git checkouts and npm rewrites
-    # can bump the root lockfile timestamp even when installed deps already
-    # match. Fall back to mtime when either file is unparseable.
-    try:
-        wanted = json.loads(lock.read_text(encoding="utf-8")).get("packages") or {}
-        installed = json.loads(marker.read_text(encoding="utf-8")).get("packages") or {}
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return lock.stat().st_mtime > marker.stat().st_mtime
-
-    def comparable(pkg: dict) -> dict:
-        return {k: v for k, v in pkg.items() if k not in _NPM_LOCK_RUNTIME_KEYS}
-
-    for name, pkg in wanted.items():
-        if not name:
-            continue
-
-        if not isinstance(pkg, dict):
-            continue
-
-        if name not in installed:
-            if pkg.get("optional") or pkg.get("peer"):
-                continue
-            return True
-
-        if isinstance(installed[name], dict) and comparable(pkg) != comparable(installed[name]):
-            return True
-
-    return False
+    return not _npm_package_lock_matches(root)
 
 
 def _find_bundled_tui(tui_dir: Path) -> Optional[Path]:
@@ -1179,6 +1187,9 @@ def _launch_tui(
     toolsets: object = None,
 ):
     """Replace current process with the TUI."""
+    if provider:
+        _reject_provider_flag()
+
     tui_dir = PROJECT_ROOT / "ui-tui"
 
     import tempfile
@@ -1198,9 +1209,6 @@ def _launch_tui(
     if model:
         env["HERMES_MODEL"] = model
         env["HERMES_INFERENCE_MODEL"] = model
-    if provider:
-        env["HERMES_TUI_PROVIDER"] = provider
-        env["HERMES_INFERENCE_PROVIDER"] = provider
     tui_toolsets = _normalize_tui_toolsets(toolsets)
     if tui_toolsets:
         env["HERMES_TUI_TOOLSETS"] = ",".join(tui_toolsets)
@@ -1239,6 +1247,9 @@ def _launch_tui(
 
 def cmd_chat(args):
     """Run interactive chat CLI."""
+    if getattr(args, "provider", None):
+        _reject_provider_flag()
+
     use_tui = getattr(args, "tui", False) or os.environ.get("HERMES_TUI") == "1"
 
     # Resolve --continue into --resume with the latest session or by name
@@ -1605,30 +1616,14 @@ def cmd_setup(args):
 
 
 def cmd_model(args):
-    """Select default model — starts with provider selection, then model picker."""
+    """Select the default CPA model."""
     _require_tty("model")
     select_provider_and_model(args=args)
 
 
 def select_provider_and_model(args=None):
-    """Core provider selection + model picking logic.
-
-    Shared by ``cmd_model`` (``hermes model``) and the setup wizard
-    (``setup_model_provider`` in setup.py).  Handles the full flow:
-    provider picker, credential prompting, model selection, and config
-    persistence.
-    """
-    from hermes_cli.auth import (
-        resolve_provider,
-        AuthError,
-        format_auth_error,
-    )
-    from hermes_cli.config import (
-        get_compatible_custom_providers,
-        load_config,
-        get_env_value,
-    )
-    from hermes_cli.providers import resolve_provider_full
+    """CPA-only model setup used by ``hermes model`` and setup wizard."""
+    from hermes_cli.config import load_config
 
     config = load_config()
     current_model = config.get("model")
@@ -1636,291 +1631,12 @@ def select_provider_and_model(args=None):
         current_model = current_model.get("default", "")
     current_model = current_model or "(not set)"
 
-    # Read effective provider the same way the CLI does at startup:
-    # config.yaml model.provider > env var > auto-detect
-    config_provider = None
-    model_cfg = config.get("model")
-    if isinstance(model_cfg, dict):
-        config_provider = model_cfg.get("provider")
-
-    effective_provider = (
-        config_provider or os.getenv("HERMES_INFERENCE_PROVIDER") or "auto"
-    )
-    compatible_custom_providers = get_compatible_custom_providers(config)
-    active = None
-    if effective_provider != "auto":
-        active_def = resolve_provider_full(
-            effective_provider,
-            config.get("providers"),
-            compatible_custom_providers,
-        )
-        if active_def is not None:
-            active = active_def.id
-        else:
-            warning = (
-                f"Unknown provider '{effective_provider}'. Check 'hermes model' for "
-                "available providers, or run 'hermes doctor' to diagnose config "
-                "issues."
-            )
-            print(f"Warning: {warning} Falling back to auto provider detection.")
-    if active is None:
-        try:
-            active = resolve_provider("auto")
-        except AuthError as exc:
-            if effective_provider == "auto":
-                warning = format_auth_error(exc)
-                print(f"Warning: {warning} Falling back to auto provider detection.")
-            active = None  # no provider yet; default to first in list
-
-    # Detect custom endpoint
-    if active == "openrouter" and get_env_value("OPENAI_BASE_URL"):
-        active = "custom"
-
-    from hermes_cli.models import CANONICAL_PROVIDERS, _PROVIDER_LABELS
-
-    provider_labels = dict(_PROVIDER_LABELS)  # derive from canonical list
-    active_label = provider_labels.get(active, active) if active else "none"
-
     print()
     print(f"  Current model:    {current_model}")
-    print(f"  Active provider:  {active_label}")
+    print("  Active provider:  CLIProxyAPI / CPA")
     print()
 
     return _model_flow_cpa_only(config, current_model)
-
-    # Step 1: Provider selection — flat list from CANONICAL_PROVIDERS
-    all_providers = [(p.slug, p.tui_desc) for p in CANONICAL_PROVIDERS]
-
-    def _named_custom_provider_map(cfg) -> dict[str, dict[str, str]]:
-        from hermes_cli.config import read_raw_config
-
-        # Build a lookup of raw (un-expanded) api_key templates keyed by a
-        # stable identity. We intentionally bypass
-        # ``get_compatible_custom_providers(read_raw_config())`` here because
-        # its ``_normalize_custom_provider_entry`` step calls ``urlparse()``
-        # on ``base_url`` and drops any entry whose ``base_url`` is itself an
-        # env-ref template (e.g. ``${NEURALWATT_API_BASE}``). Dropping those
-        # entries is exactly how env-ref preservation fails for the user
-        # config that motivated this fix.
-        raw_api_key_refs: dict[tuple, str] = {}
-        raw_cfg = read_raw_config()
-
-        def _record_raw(
-            name: str,
-            provider_key: str,
-            model: str,
-            api_key: str,
-        ) -> None:
-            template = str(api_key or "").strip()
-            if "${" not in template:
-                return
-            name = str(name or "").strip()
-            provider_key = str(provider_key or "").strip()
-            model = str(model or "").strip()
-            # Index by every plausible identity the loaded (expanded) config
-            # might present: (name), (name, model), (provider_key), and
-            # (provider_key, model). Case-insensitive on name/provider_key so
-            # the loaded entry matches regardless of display casing.
-            if name:
-                raw_api_key_refs.setdefault((name.lower(),), template)
-                raw_api_key_refs.setdefault((name.lower(), model), template)
-            if provider_key:
-                raw_api_key_refs.setdefault((provider_key.lower(),), template)
-                raw_api_key_refs.setdefault(
-                    (provider_key.lower(), model), template
-                )
-
-        raw_list = raw_cfg.get("custom_providers")
-        if isinstance(raw_list, list):
-            for raw_entry in raw_list:
-                if not isinstance(raw_entry, dict):
-                    continue
-                _record_raw(
-                    raw_entry.get("name", ""),
-                    "",
-                    raw_entry.get("model", "")
-                    or raw_entry.get("default_model", ""),
-                    raw_entry.get("api_key", ""),
-                )
-        raw_providers = raw_cfg.get("providers")
-        if isinstance(raw_providers, dict):
-            for raw_key, raw_entry in raw_providers.items():
-                if not isinstance(raw_entry, dict):
-                    continue
-                _record_raw(
-                    raw_entry.get("name", "") or raw_key,
-                    raw_key,
-                    raw_entry.get("model", "")
-                    or raw_entry.get("default_model", ""),
-                    raw_entry.get("api_key", ""),
-                )
-
-        def _lookup_ref(name: str, provider_key: str, model: str) -> str:
-            name_lc = str(name or "").strip().lower()
-            pkey_lc = str(provider_key or "").strip().lower()
-            model = str(model or "").strip()
-            for identity in (
-                (pkey_lc, model),
-                (pkey_lc,),
-                (name_lc, model),
-                (name_lc,),
-            ):
-                if identity[0] and identity in raw_api_key_refs:
-                    return raw_api_key_refs[identity]
-            return ""
-
-        custom_provider_map = {}
-        for entry in get_compatible_custom_providers(cfg):
-            if not isinstance(entry, dict):
-                continue
-            name = (entry.get("name") or "").strip()
-            base_url = (entry.get("base_url") or "").strip()
-            if not name or not base_url:
-                continue
-            key = "custom:" + name.lower().replace(" ", "-")
-            provider_key = (entry.get("provider_key") or "").strip()
-            if provider_key:
-                try:
-                    resolve_provider(provider_key)
-                except AuthError:
-                    key = provider_key
-            custom_provider_map[key] = {
-                "name": name,
-                "base_url": base_url,
-                "api_key": entry.get("api_key", ""),
-                "key_env": entry.get("key_env", ""),
-                "model": entry.get("model", ""),
-                "api_mode": entry.get("api_mode", ""),
-                "provider_key": provider_key,
-                "api_key_ref": _lookup_ref(
-                    name, provider_key, entry.get("model", "")
-                ),
-            }
-        return custom_provider_map
-
-    # Add user-defined custom providers from config.yaml
-    _custom_provider_map = _named_custom_provider_map(
-        config
-    )  # key → {name, base_url, api_key}
-    for key, provider_info in _custom_provider_map.items():
-        name = provider_info["name"]
-        base_url = provider_info["base_url"]
-        short_url = base_url.replace("https://", "").replace("http://", "").rstrip("/")
-        saved_model = provider_info.get("model", "")
-        model_hint = f" — {saved_model}" if saved_model else ""
-        all_providers.append((key, f"{name} ({short_url}){model_hint}"))
-
-    # Build the menu
-    ordered = []
-    default_idx = 0
-    for key, label in all_providers:
-        if active and key == active:
-            ordered.append((key, f"{label}  ← currently active"))
-            default_idx = len(ordered) - 1
-        else:
-            ordered.append((key, label))
-
-    ordered.append(("custom", "Custom endpoint (enter URL manually)"))
-    _has_saved_custom_list = isinstance(config.get("custom_providers"), list) and bool(
-        config.get("custom_providers")
-    )
-    if _has_saved_custom_list:
-        ordered.append(("remove-custom", "Remove a saved custom provider"))
-    ordered.append(("aux-config", "Configure auxiliary models..."))
-    ordered.append(("cancel", "Leave unchanged"))
-
-    provider_idx = _prompt_provider_choice(
-        [label for _, label in ordered],
-        default=default_idx,
-    )
-    if provider_idx is None or ordered[provider_idx][0] == "cancel":
-        print("No change.")
-        return
-
-    selected_provider = ordered[provider_idx][0]
-
-    if selected_provider == "aux-config":
-        _aux_config_menu()
-        return
-
-    # Step 2: Provider-specific setup + model selection
-    if selected_provider == "openrouter":
-        _model_flow_openrouter(config, current_model)
-    elif selected_provider == "ai-gateway":
-        _model_flow_ai_gateway(config, current_model)
-    elif selected_provider == "nous":
-        _model_flow_nous(config, current_model, args=args)
-    elif selected_provider == "openai-codex":
-        _model_flow_openai_codex(config, current_model)
-    elif selected_provider == "qwen-oauth":
-        _model_flow_qwen_oauth(config, current_model)
-    elif selected_provider == "minimax-oauth":
-        _model_flow_minimax_oauth(config, current_model, args=args)
-    elif selected_provider == "google-gemini-cli":
-        _model_flow_google_gemini_cli(config, current_model)
-    elif selected_provider == "copilot-acp":
-        _model_flow_copilot_acp(config, current_model)
-    elif selected_provider == "copilot":
-        _model_flow_copilot(config, current_model)
-    elif selected_provider == "custom":
-        _model_flow_custom(config)
-    elif (
-        selected_provider.startswith("custom:")
-        or selected_provider in _custom_provider_map
-    ):
-        provider_info = _named_custom_provider_map(load_config()).get(selected_provider)
-        if provider_info is None:
-            print(
-                "Warning: the selected saved custom provider is no longer available. "
-                "It may have been removed from config.yaml. No change."
-            )
-            return
-        _model_flow_named_custom(config, provider_info)
-    elif selected_provider == "remove-custom":
-        _remove_custom_provider(config)
-    elif selected_provider == "anthropic":
-        _model_flow_anthropic(config, current_model)
-    elif selected_provider == "kimi-coding":
-        _model_flow_kimi(config, current_model)
-    elif selected_provider == "stepfun":
-        _model_flow_stepfun(config, current_model)
-    elif selected_provider == "bedrock":
-        _model_flow_bedrock(config, current_model)
-    elif selected_provider == "azure-foundry":
-        _model_flow_azure_foundry(config, current_model)
-    elif selected_provider in (
-        "gemini",
-        "deepseek",
-        "xai",
-        "zai",
-        "kimi-coding-cn",
-        "minimax",
-        "minimax-cn",
-        "kilocode",
-        "opencode-zen",
-        "opencode-go",
-        "alibaba",
-        "huggingface",
-        "xiaomi",
-        "arcee",
-        "gmi",
-        "nvidia",
-        "ollama-cloud",
-        "tencent-tokenhub",
-        "lmstudio",
-    ):
-        _model_flow_api_key_provider(config, selected_provider, current_model)
-
-    # ── Post-switch cleanup: clear stale OPENAI_BASE_URL ──────────────
-    # When the user switches to a named provider (anything except "custom"),
-    # a leftover OPENAI_BASE_URL in ~/.hermes/.env can poison auxiliary
-    # clients that use provider:auto. Clear it proactively.  (#5161)
-    if selected_provider not in (
-        "custom",
-        "cancel",
-        "remove-custom",
-    ) and not selected_provider.startswith("custom:"):
-        _clear_stale_openai_base_url()
 
 
 def _clear_stale_openai_base_url():
@@ -1960,10 +1676,8 @@ def _clear_stale_openai_base_url():
 # context compression, web extraction, session search, etc.). Each task has
 # its own provider+model pair in config.yaml under `auxiliary.<task>`.
 #
-# The UI lives behind "Configure auxiliary models..." at the bottom of the
-# `hermes model` provider picker. It does NOT re-run credential setup — it
-# only routes already-authenticated providers to specific aux tasks. Users
-# configure new providers through the normal `hermes model` flow first.
+# Main inference is CPA-only. Auxiliary tasks default to the main CPA route;
+# advanced users can still pin a task to a direct OpenAI-compatible endpoint.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # (task_key, display_name, short_description)
@@ -2113,13 +1827,7 @@ def _aux_config_menu() -> None:
 
 
 def _aux_select_for_task(task: str) -> None:
-    """Pick a provider + model for a single auxiliary task and persist it.
-
-    Uses ``list_authenticated_providers()`` to only show providers the user
-    has already configured. This avoids re-running OAuth/credential flows
-    inside the aux picker — users set up new providers through the normal
-    ``hermes model`` flow, then route aux tasks to them here.
-    """
+    """Pick the CPA route, auto mode, or a direct endpoint for one aux task."""
     from hermes_cli.config import load_config
     from hermes_cli.model_switch import list_authenticated_providers
 
@@ -2132,7 +1840,7 @@ def _aux_select_for_task(task: str) -> None:
 
     display_name = next((name for key, name, _ in _AUX_TASKS if key == task), task)
 
-    # Gather authenticated providers (has credentials + curated model list)
+    # CPA-only compatibility provider list.
     try:
         providers = list_authenticated_providers(
             current_provider=current_provider,
@@ -2140,7 +1848,7 @@ def _aux_select_for_task(task: str) -> None:
             current_base_url=current_base_url,
         )
     except Exception as exc:
-        print(f"Could not detect authenticated providers: {exc}")
+        print(f"无法读取 CPA 模型选项：{exc}")
         providers = []
 
     entries: list[tuple[str, str, list[str]]] = []  # (slug, label, models)
@@ -2153,14 +1861,14 @@ def _aux_select_for_task(task: str) -> None:
         name = p.get("name") or slug
         total = p.get("total_models", 0)
         models = p.get("models") or []
-        model_hint = f" — {total} models" if total else ""
+        model_hint = f" — {total} 个模型" if total else ""
         marker = "  ← current" if slug == current_provider and not current_base_url else ""
         entries.append((slug, f"{name}{model_hint}{marker}", list(models)))
 
-    # Custom endpoint (raw base_url)
+    # Direct endpoint (raw base_url)
     custom_marker = "  ← current" if current_base_url else ""
-    entries.append(("__custom__", f"Custom endpoint (direct URL){custom_marker}", []))
-    entries.append(("__back__", "Back", []))
+    entries.append(("__custom__", f"直接端点 URL{custom_marker}", []))
+    entries.append(("__back__", "返回", []))
 
     print()
     print(f"  Configure {display_name} — current: {_format_aux_current(task_cfg)}")
@@ -2183,7 +1891,7 @@ def _aux_select_for_task(task: str) -> None:
         _aux_flow_custom_endpoint(task, task_cfg)
         return
 
-    # Regular provider — pick a model from its curated list
+    # CPA route — pick a model from the available list or enter one manually.
     _aux_flow_provider_model(task, slug, models, current_model)
 
 
@@ -2193,13 +1901,13 @@ def _aux_flow_provider_model(
     curated_models: list,
     current_model: str = "",
 ) -> None:
-    """Prompt for a model under an already-authenticated provider, save to aux."""
+    """Prompt for a model under the CPA route, save to aux."""
     from hermes_cli.auth import _prompt_model_selection
     from hermes_cli.models import get_pricing_for_provider
 
     display_name = next((name for key, name, _ in _AUX_TASKS if key == task), task)
 
-    # Fetch live pricing for this provider (non-blocking)
+    # Fetch live pricing for this route (non-blocking)
     pricing: dict = {}
     try:
         pricing = get_pricing_for_provider(provider_slug) or {}
@@ -2208,12 +1916,11 @@ def _aux_flow_provider_model(
 
     model_list = list(curated_models)
 
-    # Let the user pick a model. _prompt_model_selection supports "Enter custom
-    # model name" and cancel.  When there's no curated list (rare), fall back
-    # to a raw input prompt.
+    # Let the user pick a model. When there's no curated list, fall back to a
+    # raw input prompt.
     if not model_list:
-        print(f"No curated model list for {provider_slug}.")
-        print("Enter a model slug manually (blank = use provider default):")
+        print(f"{provider_slug} 暂无可列出的模型。")
+        print("手动输入模型名（留空 = 使用默认模型）：")
         try:
             val = input("Model: ").strip()
         except (KeyboardInterrupt, EOFError):
@@ -2225,7 +1932,7 @@ def _aux_flow_provider_model(
             model_list, current_model=current_model, pricing=pricing,
         )
         if selected is None:
-            print("No change.")
+            print("未更改。")
             return
 
     _save_aux_choice(task, provider=provider_slug, model=selected or "",
@@ -2233,7 +1940,7 @@ def _aux_flow_provider_model(
     if selected:
         print(f"{display_name}: {provider_slug} · {selected}")
     else:
-        print(f"{display_name}: {provider_slug} (provider default model)")
+        print(f"{display_name}: {provider_slug}（默认模型）")
 
 
 def _aux_flow_custom_endpoint(task: str, task_cfg: dict) -> None:
@@ -5160,17 +4867,15 @@ def _model_flow_anthropic(config, current_model=""):
 
 
 def cmd_login(args):
-    """Authenticate Hermes CLI with a provider."""
-    from hermes_cli.auth import login_command
-
-    login_command(args)
+    """CPA-only mode no longer authenticates inference providers directly."""
+    print("Hermes 已固定使用 CPA/CLIProxyAPI。")
+    print("请在 CPA WebUI 中配置上游 provider、OAuth 和 API Key。")
 
 
 def cmd_logout(args):
-    """Clear provider authentication."""
-    from hermes_cli.auth import logout_command
-
-    logout_command(args)
+    """CPA-only mode no longer manages inference provider logout directly."""
+    print("Hermes 已固定使用 CPA/CLIProxyAPI。")
+    print("请在 CPA WebUI 中管理或删除上游 provider 凭据。")
 
 
 def cmd_auth(args):
@@ -5442,6 +5147,38 @@ def _web_ui_build_needed(web_dir: Path) -> bool:
     return False
 
 
+def _web_ui_required_node_files(web_dir: Path) -> tuple[Path, ...]:
+    """用于确认 npm 已恢复 Vite 当前平台 native 依赖的文件。"""
+    node_modules = web_dir / "node_modules"
+    required = [node_modules / "vite" / "package.json"]
+    arch = os.environ.get("PROCESSOR_ARCHITECTURE", "").lower()
+    wow64_arch = os.environ.get("PROCESSOR_ARCHITEW6432", "").lower()
+    is_arm64 = arch in {"arm64", "aarch64"} or wow64_arch in {"arm64", "aarch64"}
+    if os.name == "nt":
+        suffix = "win32-arm64-msvc" if is_arm64 else "win32-x64-msvc"
+        esbuild_suffix = "win32-arm64" if is_arm64 else "win32-x64"
+        required.extend(
+            [
+                node_modules / "@rollup" / f"rollup-{suffix}" / "package.json",
+                node_modules / "@tailwindcss" / f"oxide-{suffix}" / "package.json",
+                node_modules / "@esbuild" / esbuild_suffix / "package.json",
+                node_modules
+                / "lightningcss"
+                / "node_modules"
+                / f"lightningcss-{suffix}"
+                / "package.json",
+            ]
+        )
+    return tuple(required)
+
+
+def _web_ui_npm_install_needed(web_dir: Path) -> bool:
+    return not _npm_package_lock_matches(
+        web_dir,
+        required_files=_web_ui_required_node_files(web_dir),
+    )
+
+
 def _run_npm_install_deterministic(
     npm: str,
     cwd: Path,
@@ -5495,35 +5232,48 @@ def _build_web_ui(web_dir: Path, *, fatal: bool = False) -> bool:
     if not (web_dir / "package.json").exists():
         return True
 
-    if not _web_ui_build_needed(web_dir):
+    install_needed = _web_ui_npm_install_needed(web_dir)
+    build_needed = _web_ui_build_needed(web_dir)
+    if not install_needed and not build_needed:
         return True
 
     npm = shutil.which("npm")
     if not npm:
         if fatal:
-            print("Web UI frontend not built and npm is not available.")
-            print("Install Node.js, then run:  cd web && npm install && npm run build")
+            print("Web UI 前端尚未构建，且 npm 不可用。")
+            print("请先安装 Node.js，然后运行：cd web && npm install && npm run build")
         return not fatal
-    print("→ Building web UI...")
-    r1 = _run_npm_install_deterministic(npm, web_dir, extra_args=("--silent",))
-    if r1.returncode != 0:
-        print(
-            f"  {'✗' if fatal else '⚠'} Web UI npm install failed"
-            + ("" if fatal else " (hermes web will not be available)")
+    if install_needed:
+        print("→ 正在安装 web UI 依赖...")
+        r1 = _run_npm_install_deterministic(
+            npm,
+            web_dir,
+            extra_args=("--include=optional", "--silent"),
         )
-        if fatal:
-            print("  Run manually:  cd web && npm install && npm run build")
-        return False
+        if r1.returncode != 0:
+            print(
+                f"  {'✗' if fatal else '⚠'} Web UI npm 安装失败"
+                + ("" if fatal else "（hermes web 将不可用）")
+            )
+            if fatal:
+                print("  请手动运行：cd web && npm ci --include=optional && npm run build")
+            return False
+        build_needed = _web_ui_build_needed(web_dir)
+
+    if not build_needed:
+        return True
+
+    print("→ 正在构建 web UI...")
     r2 = subprocess.run([npm, "run", "build"], cwd=web_dir, capture_output=True)
     if r2.returncode != 0:
         print(
-            f"  {'✗' if fatal else '⚠'} Web UI build failed"
-            + ("" if fatal else " (hermes web will not be available)")
+            f"  {'✗' if fatal else '⚠'} Web UI 构建失败"
+            + ("" if fatal else "（hermes web 将不可用）")
         )
         if fatal:
-            print("  Run manually:  cd web && npm install && npm run build")
+            print("  请手动运行：cd web && npm ci --include=optional && npm run build")
         return False
-    print("  ✓ Web UI built")
+    print("  ✓ Web UI 已构建")
     return True
 
 
@@ -7578,8 +7328,8 @@ def _cmd_update_impl(args, gateway_mode: bool):
         _warn_stale_dashboard_processes()
 
         print()
-        print("Tip: You can now select a provider and model:")
-        print("  hermes model              # Select provider and model")
+        print("Tip: You can now select a CPA model:")
+        print("  hermes model              # Select CPA model")
 
     except subprocess.CalledProcessError as e:
         if sys.platform == "win32":
@@ -8061,56 +7811,20 @@ def main():
         help="Configure CPA model and upstream channel",
         description="Configure Hermes to talk only to CPA and optionally add an upstream CPA channel",
     )
-    model_parser.add_argument(
-        "--portal-url",
-        help="Portal base URL for Nous login (default: production portal)",
-    )
-    model_parser.add_argument(
-        "--inference-url",
-        help="Inference API base URL for Nous login (default: production inference API)",
-    )
-    model_parser.add_argument(
-        "--client-id",
-        default=None,
-        help="OAuth client id to use for Nous login (default: hermes-cli)",
-    )
-    model_parser.add_argument(
-        "--scope", default=None, help="OAuth scope to request for Nous login"
-    )
-    model_parser.add_argument(
-        "--no-browser",
-        action="store_true",
-        help="Do not attempt to open the browser automatically during Nous login",
-    )
-    model_parser.add_argument(
-        "--timeout",
-        type=float,
-        default=15.0,
-        help="HTTP request timeout in seconds for Nous login (default: 15)",
-    )
-    model_parser.add_argument(
-        "--ca-bundle", help="Path to CA bundle PEM file for Nous TLS verification"
-    )
-    model_parser.add_argument(
-        "--insecure",
-        action="store_true",
-        help="Disable TLS verification for Nous login (testing only)",
-    )
     model_parser.set_defaults(func=cmd_model)
 
     # =========================================================================
-    # fallback command — manage the fallback provider chain
+    # fallback command — manage the CPA fallback model chain
     # =========================================================================
     from hermes_cli.fallback_cmd import cmd_fallback
 
     fallback_parser = subparsers.add_parser(
         "fallback",
-        help="Manage fallback providers (tried when the primary model fails)",
+        help="Manage CPA fallback models (tried when the primary model fails)",
         description=(
-            "Manage the fallback provider chain.  Fallback providers are tried "
+            "Manage the CPA fallback model chain.  Fallback models are tried "
             "in order when the primary model fails with rate-limit, overload, or "
-            "connection errors.  See: "
-            "https://hermes-agent.nousresearch.com/docs/user-guide/features/fallback-providers"
+            "connection errors."
         ),
     )
     fallback_subparsers = fallback_parser.add_subparsers(dest="fallback_command")
@@ -8121,7 +7835,7 @@ def main():
     )
     fallback_subparsers.add_parser(
         "add",
-        help="Pick a provider + model (same picker as `hermes model`) and append to the chain",
+        help="Add a CPA model name to the chain",
     )
     fallback_subparsers.add_parser(
         "remove",
@@ -8382,14 +8096,8 @@ def main():
     # =========================================================================
     login_parser = subparsers.add_parser(
         "login",
-        help="Authenticate with an inference provider",
-        description="Run OAuth device authorization flow for Hermes CLI",
-    )
-    login_parser.add_argument(
-        "--provider",
-        choices=["nous", "openai-codex"],
-        default=None,
-        help="Provider to authenticate with (default: nous)",
+        help="Show CPA-only authentication guidance",
+        description="Hermes uses CPA/CLIProxyAPI; configure upstream auth in CPA WebUI",
     )
     login_parser.add_argument(
         "--portal-url", help="Portal base URL (default: production portal)"
@@ -8428,14 +8136,8 @@ def main():
     # =========================================================================
     logout_parser = subparsers.add_parser(
         "logout",
-        help="Clear authentication for an inference provider",
-        description="Remove stored credentials and reset provider config",
-    )
-    logout_parser.add_argument(
-        "--provider",
-        choices=["nous", "openai-codex", "spotify"],
-        default=None,
-        help="Provider to log out from (default: active provider)",
+        help="Show CPA-only credential guidance",
+        description="Hermes uses CPA/CLIProxyAPI; manage upstream credentials in CPA WebUI",
     )
     logout_parser.set_defaults(func=cmd_logout)
 

@@ -439,8 +439,8 @@ def run_doctor(args):
                             )
                             issues.append(
                                 f"No credentials found for provider '{runtime_provider}'. "
-                                f"Run 'hermes setup' or set the provider's API key in {_DHH}/.env, "
-                                f"or switch providers with 'hermes config set model.provider <name>'"
+                                f"Hermes inference is CPA-only; set model.provider to cliproxyapi "
+                                f"and configure upstream channels in the CPA WebUI."
                             )
                 except Exception:
                     pass
@@ -1011,7 +1011,7 @@ def run_doctor(args):
                 print(f"\r  {color('✗', Colors.RED)} OpenRouter API {color('(out of credits — payment required)', Colors.DIM)}")
                 issues.append(
                     "OpenRouter account has insufficient credits. "
-                    "Fix: run 'hermes config set model.provider <provider>' to switch providers, "
+                    "Fix: configure a funded upstream channel in the CPA WebUI, "
                     "or fund your OpenRouter account at https://openrouter.ai/settings/credits"
                 )
             elif response.status_code == 429:

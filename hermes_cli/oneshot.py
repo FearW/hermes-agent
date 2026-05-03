@@ -9,15 +9,10 @@ Rules / memory / AGENTS.md / preloaded skills = same as a normal chat turn.
 Approvals = auto-bypassed (HERMES_YOLO_MODE=1 is set for the call).
 Working directory = the user's CWD (AGENTS.md etc. resolve from there as usual).
 
-Model / provider selection mirrors `hermes chat`:
-    - Both optional. If omitted, use the user's configured default.
-    - If both given, pair them exactly as given.
-    - If only --model given, auto-detect the provider that serves it.
-    - If only --provider given, error out (ambiguous — caller must pick a model).
+Model selection mirrors `hermes chat`; provider selection is CPA-only.
 
 Env var fallbacks (used when the corresponding arg is not passed):
     - HERMES_INFERENCE_MODEL
-    - HERMES_INFERENCE_PROVIDER  (already read by resolve_runtime_provider)
 """
 
 from __future__ import annotations
@@ -133,9 +128,8 @@ def run_oneshot(
         prompt: The user message to send.
         model: Optional model override. Falls back to HERMES_INFERENCE_MODEL
             env var, then config.yaml's model.default / model.model.
-        provider: Optional provider override. Falls back to
-            HERMES_INFERENCE_PROVIDER env var, then config.yaml's model.provider,
-            then "auto".
+        provider: Deprecated compatibility argument. Non-empty values are rejected
+            because Hermes is CPA-only.
         toolsets: Optional comma-separated string or iterable of toolsets.
 
     Returns the exit code.  Caller should sys.exit() with the return.
@@ -147,17 +141,8 @@ def run_oneshot(
     # bytes reach the terminal.
     logging.disable(logging.CRITICAL)
 
-    # --provider without --model is ambiguous: carrying the user's configured
-    # model across to a different provider is usually wrong (that provider may
-    # not host it), and silently picking the provider's catalog default hides
-    # the mismatch.  Require the caller to be explicit.  Validate BEFORE the
-    # stderr redirect so the message actually reaches the terminal.
-    env_model_early = os.getenv("HERMES_INFERENCE_MODEL", "").strip()
-    if provider and not ((model or "").strip() or env_model_early):
-        sys.stderr.write(
-            "hermes -z: --provider requires --model (or HERMES_INFERENCE_MODEL). "
-            "Pass both explicitly, or neither to use your configured defaults.\n"
-        )
+    if provider:
+        sys.stderr.write("hermes -z: provider 选择已禁用；Hermes 固定使用 CPA/CLIProxyAPI。\n")
         return 2
 
     explicit_toolsets, toolsets_error = _validate_explicit_toolsets(toolsets)
@@ -211,7 +196,6 @@ def _run_agent(
     # Imports are local so they don't run when hermes is invoked for
     # other commands (keeps top-level CLI startup cheap).
     from hermes_cli.config import load_config
-    from hermes_cli.models import detect_provider_for_model
     from hermes_cli.runtime_provider import resolve_runtime_provider
     from hermes_cli.tools_config import _get_platform_tools
     from run_agent import AIAgent
@@ -228,53 +212,9 @@ def _run_agent(
     env_model = os.getenv("HERMES_INFERENCE_MODEL", "").strip()
     effective_model = (model or "").strip() or env_model or cfg_model
 
-    # Resolve effective provider: explicit arg → (auto-detect from model if
-    # model was explicit) → env / config (handled inside resolve_runtime_provider).
-    #
-    # When --model is given without --provider, auto-detect the provider that
-    # serves that model — same semantic as `/model <name>` in an interactive
-    # session.  Without this, resolve_runtime_provider() would fall back to
-    # the user's configured default provider, which may not host the model
-    # the caller just asked for.
-    effective_provider = (provider or "").strip() or None
-    explicit_base_url_from_alias: Optional[str] = None
-    if effective_provider is None and (model or env_model):
-        # Only auto-detect when the model was explicitly requested via arg or
-        # env var (not when it came from config — that's the "use my defaults"
-        # path and the configured provider is already correct).
-        explicit_model = (model or "").strip() or env_model
-        if explicit_model:
-            # First check DIRECT_ALIASES populated from config.yaml `model_aliases:`.
-            # These map a user-defined alias to (model, provider, base_url) for
-            # endpoints not in any catalog (local servers, custom proxies, etc.).
-            try:
-                from hermes_cli import model_switch as _ms
-                _ms._ensure_direct_aliases()
-                direct = _ms.DIRECT_ALIASES.get(explicit_model.strip().lower())
-            except Exception:
-                direct = None
-            if direct is not None:
-                effective_model = direct.model
-                effective_provider = direct.provider
-                if direct.base_url:
-                    explicit_base_url_from_alias = direct.base_url.rstrip("/")
-            else:
-                cfg_provider = ""
-                if isinstance(model_cfg, dict):
-                    cfg_provider = str(model_cfg.get("provider") or "").strip().lower()
-                current_provider = (
-                    cfg_provider
-                    or os.getenv("HERMES_INFERENCE_PROVIDER", "").strip().lower()
-                    or "auto"
-                )
-                detected = detect_provider_for_model(explicit_model, current_provider)
-                if detected:
-                    effective_provider, effective_model = detected
-
     runtime = resolve_runtime_provider(
-        requested=effective_provider,
+        requested=None,
         target_model=effective_model or None,
-        explicit_base_url=explicit_base_url_from_alias,
     )
 
     # Pull in explicit toolsets when provided; otherwise use whatever the user

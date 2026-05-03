@@ -2441,8 +2441,8 @@ class TestRunConversation:
         assert result["final_response"] == "Here is the actual answer."
         assert result["api_calls"] == 2  # 1 original + 1 nudge retry
 
-    def test_empty_response_triggers_fallback_provider(self, agent):
-        """After 3 empty retries, fallback provider is activated and produces content."""
+    def test_empty_response_triggers_cpa_fallback_model(self, agent):
+        """After 3 empty retries, CPA fallback model is activated and produces content."""
         self._setup_agent(agent)
         agent.base_url = "http://127.0.0.1:1234/v1"
         # Configure a fallback chain
@@ -2466,7 +2466,7 @@ class TestRunConversation:
             agent._fallback_index = 1
             agent._fallback_activated = True
             agent.model = "anthropic/claude-sonnet-4"
-            agent.provider = "openrouter"
+            agent.provider = "cliproxyapi"
             return True
 
         with (
@@ -2502,7 +2502,7 @@ class TestRunConversation:
             agent._fallback_index += 1
             agent._fallback_activated = True
             agent.model = "anthropic/claude-sonnet-4"
-            agent.provider = "openrouter"
+            agent.provider = "cliproxyapi"
             return True
 
         with (
