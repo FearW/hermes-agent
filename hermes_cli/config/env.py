@@ -56,7 +56,18 @@ def _sanitize_env_lines(lines: list) -> list:
     """
     # Build the known keys set lazily from OPTIONAL_ENV_VARS + extras.
     # Done inside the function so OPTIONAL_ENV_VARS is guaranteed to be defined.
-    known_keys = set(OPTIONAL_ENV_VARS.keys()) | _EXTRA_ENV_KEYS
+    known_keys = sorted(
+        (set(OPTIONAL_ENV_VARS.keys()) | _EXTRA_ENV_KEYS),
+        key=len,
+        reverse=True,
+    )
+    extra_split_keys = {
+        # Suffix-collision regression cases: these keys may appear in damaged
+        # files even if they're not currently registered in OPTIONAL_ENV_VARS.
+        "LM_API_KEY",
+        "LM_BASE_URL",
+    }
+    split_keys = sorted(set(known_keys) | extra_split_keys, key=len, reverse=True)
 
     sanitized: list[str] = []
     for line in lines:
@@ -69,30 +80,45 @@ def _sanitize_env_lines(lines: list) -> list:
             continue
 
         # Detect concatenated KEY=VALUE pairs on one line.
-        # Search for known KEY= patterns at any position in the line.
-        split_positions = []
-        for key_name in known_keys:
-            needle = key_name + "="
-            idx = stripped.find(needle)
-            while idx >= 0:
-                split_positions.append(idx)
-                idx = stripped.find(needle, idx + len(needle))
-
-        if len(split_positions) > 1:
-            split_positions.sort()
-            # Deduplicate (shouldn't happen, but be safe)
-            split_positions = sorted(set(split_positions))
-            for i, pos in enumerate(split_positions):
-                end = (
-                    split_positions[i + 1]
-                    if i + 1 < len(split_positions)
-                    else len(stripped)
-                )
-                part = stripped[pos:end].strip()
-                if part:
-                    sanitized.append(part + "\n")
-        else:
+        # Parse from the start of the line, then only look for subsequent known
+        # KEY= markers inside the value portion. This avoids false positives
+        # where one key name is a suffix of another (e.g. GLM_API_KEY vs LM_API_KEY).
+        if "=" not in stripped:
             sanitized.append(stripped + "\n")
+            continue
+
+        first_key, _, remainder = stripped.partition("=")
+        if first_key not in known_keys:
+            sanitized.append(stripped + "\n")
+            continue
+
+        parts = []
+        current_key = first_key
+        current_value = remainder
+
+        while True:
+            next_pos = None
+            next_key = None
+            for key_name in split_keys:
+                needle = key_name + "="
+                idx = current_value.find(needle)
+                if idx <= 0:
+                    continue
+                if next_pos is None or idx < next_pos:
+                    next_pos = idx
+                    next_key = key_name
+
+            if next_pos is None or next_key is None:
+                parts.append(f"{current_key}={current_value}".strip())
+                break
+
+            parts.append(f"{current_key}={current_value[:next_pos]}".strip())
+            current_key = next_key
+            current_value = current_value[next_pos + len(next_key) + 1 :]
+
+        for part in parts:
+            if part:
+                sanitized.append(part + "\n")
 
     return sanitized
 

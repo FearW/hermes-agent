@@ -1761,10 +1761,14 @@ def model_supports_fast_mode(model_id: Optional[str]) -> bool:
 
 
 def _is_anthropic_fast_model(model_id: Optional[str]) -> bool:
-    """Return True if the model is a Claude model eligible for Anthropic Fast Mode."""
+    """Return True if the model is eligible for Anthropic Fast Mode."""
     raw = _strip_vendor_prefix(str(model_id or ""))
     base = raw.split(":")[0]
-    return base.startswith("claude-")
+    normalized = base.replace(".", "-")
+    return (
+        normalized.startswith("claude-opus-4-6")
+        or normalized.startswith("claude-opus-4-7")
+    )
 
 
 def resolve_fast_mode_overrides(model_id: Optional[str]) -> dict[str, Any] | None:

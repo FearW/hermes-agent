@@ -159,7 +159,7 @@ def load_config() -> Dict[str, Any]:
 
 
 _SECURITY_COMMENT = """
-# ── Security ──────────────────────────────────────────────────────────
+# -- Security ----------------------------------------------------------
 # API keys, tokens, and passwords are redacted from tool output by default.
 # Set to false to see full values (useful for debugging auth issues).
 # tirith pre-exec scanning is enabled by default when the tirith binary
@@ -175,19 +175,19 @@ _SECURITY_COMMENT = """
 """
 
 _FALLBACK_COMMENT = """
-# ── Fallback Model ────────────────────────────────────────────────────
+# -- Fallback Model ----------------------------------------------------
 # Automatic provider failover when primary is unavailable.
 # Uncomment and configure to enable. Triggers on rate limits (429),
 # overload (529), service errors (503), or connection failures.
 #
 # Supported providers:
-#   openrouter   (OPENROUTER_API_KEY)  — routes to any model
-#   openai-codex (OAuth — hermes auth) — OpenAI Codex
-#   nous         (OAuth — hermes auth) — Nous Portal
-#   zai          (ZAI_API_KEY)         — Z.AI / GLM
-#   kimi-coding  (KIMI_API_KEY)        — Kimi / Moonshot
-#   minimax      (MINIMAX_API_KEY)     — MiniMax
-#   minimax-cn   (MINIMAX_CN_API_KEY)  — MiniMax (China)
+#   openrouter   (OPENROUTER_API_KEY)  - routes to any model
+#   openai-codex (OAuth - hermes auth) - OpenAI Codex
+#   nous         (OAuth - hermes auth) - Nous Portal
+#   zai          (ZAI_API_KEY)         - Z.AI / GLM
+#   kimi-coding  (KIMI_API_KEY)        - Kimi / Moonshot
+#   minimax      (MINIMAX_API_KEY)     - MiniMax
+#   minimax-cn   (MINIMAX_CN_API_KEY)  - MiniMax (China)
 #
 # For custom OpenAI-compatible endpoints, add base_url and api_key_env.
 #
@@ -195,7 +195,7 @@ _FALLBACK_COMMENT = """
 #   provider: openrouter
 #   model: anthropic/claude-sonnet-4
 #
-# ── Smart Model Routing ────────────────────────────────────────────────
+# -- Smart Model Routing -----------------------------------------------
 # Optional cheap-vs-strong routing for simple turns.
 # Keeps the primary model for complex work, but can route short/simple
 # messages to a cheaper model across providers.
@@ -220,26 +220,26 @@ _FALLBACK_COMMENT = """
 
 
 _COMMENTED_SECTIONS = """
-# ── Security ──────────────────────────────────────────────────────────
+# -- Security ----------------------------------------------------------
 # API keys, tokens, and passwords are redacted from tool output by default.
 # Set to false to see full values (useful for debugging auth issues).
 #
 # security:
 #   redact_secrets: false
 
-# ── Fallback Model ────────────────────────────────────────────────────
+# -- Fallback Model ----------------------------------------------------
 # Automatic provider failover when primary is unavailable.
 # Uncomment and configure to enable. Triggers on rate limits (429),
 # overload (529), service errors (503), or connection failures.
 #
 # Supported providers:
-#   openrouter   (OPENROUTER_API_KEY)  — routes to any model
-#   openai-codex (OAuth — hermes auth) — OpenAI Codex
-#   nous         (OAuth — hermes auth) — Nous Portal
-#   zai          (ZAI_API_KEY)         — Z.AI / GLM
-#   kimi-coding  (KIMI_API_KEY)        — Kimi / Moonshot
-#   minimax      (MINIMAX_API_KEY)     — MiniMax
-#   minimax-cn   (MINIMAX_CN_API_KEY)  — MiniMax (China)
+#   openrouter   (OPENROUTER_API_KEY)  - routes to any model
+#   openai-codex (OAuth - hermes auth) - OpenAI Codex
+#   nous         (OAuth - hermes auth) - Nous Portal
+#   zai          (ZAI_API_KEY)         - Z.AI / GLM
+#   kimi-coding  (KIMI_API_KEY)        - Kimi / Moonshot
+#   minimax      (MINIMAX_API_KEY)     - MiniMax
+#   minimax-cn   (MINIMAX_CN_API_KEY)  - MiniMax (China)
 #
 # For custom OpenAI-compatible endpoints, add base_url and api_key_env.
 #
@@ -247,7 +247,7 @@ _COMMENTED_SECTIONS = """
 #   provider: openrouter
 #   model: anthropic/claude-sonnet-4
 #
-# ── Smart Model Routing ────────────────────────────────────────────────
+# -- Smart Model Routing -----------------------------------------------
 # Optional cheap-vs-strong routing for simple turns.
 # Keeps the primary model for complex work, but can route short/simple
 # messages to a cheaper model across providers.

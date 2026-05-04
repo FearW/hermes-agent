@@ -12,6 +12,7 @@ from hermes_cli.config import (
     ensure_hermes_home,
     get_compatible_custom_providers,
     load_config,
+    resolve_agent_turn_limits,
     load_env,
     migrate_config,
     remove_env_value,
@@ -80,6 +81,13 @@ class TestLoadConfigDefaults:
             assert config["display"]["interim_assistant_messages"] is True
             assert config["agent"]["continuation_policy"]["enabled"] is True
             assert config["agent"]["continuation_policy"]["auto_task_modes"] == ["heavy"]
+
+    def test_resolve_agent_turn_limits_normalizes_defaults(self):
+        limits = resolve_agent_turn_limits({}, env_max_turns="")
+        assert limits["max_turns"] == DEFAULT_CONFIG["agent"]["max_turns"]
+        assert limits["max_turns_with_approval"] == DEFAULT_CONFIG["agent"]["max_turns_with_approval"]
+        assert limits["max_turns_approval_step"] == DEFAULT_CONFIG["agent"]["max_turns_approval_step"]
+        assert limits["continuation_policy"]["auto_task_modes"] == ["heavy"]
 
     def test_legacy_root_level_max_turns_migrates_to_agent_config(self, tmp_path):
         with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):

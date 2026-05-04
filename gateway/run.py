@@ -38,7 +38,7 @@ from typing import Dict, Optional, Any, List
 # gateway is a long-running daemon, so its boot cost matters less than
 # preserving the established test-patch surface.
 from agent.account_usage import fetch_account_usage, render_account_usage_lines
-from hermes_cli.config import cfg_get
+from hermes_cli.config import cfg_get, resolve_agent_turn_limits
 
 # --- Agent cache tuning ---------------------------------------------------
 # Bounds the per-session AIAgent cache to prevent unbounded growth in
@@ -4527,7 +4527,9 @@ class GatewayRunner:
                             f"Unknown command `/{command}`. "
                             f"Type /commands to see what's available, "
                             f"or resend without the leading slash to send "
-                            f"as a regular message."
+                            f"as a regular message.\n"
+                            f"未知命令 `/{command}`。输入 /commands 查看可用命令；"
+                            f"如果只是普通消息，请去掉开头的斜杠后重发。"
                         )
             except Exception as e:
                 logger.debug("Skill command check failed (non-fatal): %s", e)
@@ -5909,6 +5911,8 @@ class GatewayRunner:
         profile_name = get_active_profile_name()
 
         lines = [
+            f"**Profile:** `{profile_name}`",
+            f"**Home:** `{display}`",
             f"👤 **当前 Profile：** `{profile_name}`",
             f"📂 **主目录：** `{display}`",
         ]
@@ -5940,14 +5944,18 @@ class GatewayRunner:
         lines = [
             "📊 **Hermes 网关状态**",
             "",
+            f"**Session ID:** `{session_entry.session_id}`",
             f"**会话 ID：** `{session_entry.session_id}`",
         ]
         if title:
+            lines.append(f"**Title:** {title}")
             lines.append(f"**标题：** {title}")
         lines.extend([
             f"**创建时间：** {session_entry.created_at.strftime('%Y-%m-%d %H:%M')}",
             f"**最近活动：** {session_entry.updated_at.strftime('%Y-%m-%d %H:%M')}",
+            f"**Tokens:** {session_entry.total_tokens:,}",
             f"**Tokens：** {session_entry.total_tokens:,}",
+            f"**Agent Running:** {'Yes ⚡' if is_running else 'No'}",
             f"**代理运行中：** {'是 ⚡' if is_running else '否'}",
         ])
         if queue_depth:
@@ -6001,8 +6009,10 @@ class GatewayRunner:
         ]
 
         lines = [
+            "🤖 **Active Agents & Tasks**",
             "🤖 **活动代理与任务**",
             "",
+            f"**Active agents:** {len(agent_rows)}",
             f"**活动代理数：** {len(agent_rows)}",
         ]
 
@@ -6021,6 +6031,7 @@ class GatewayRunner:
         lines.extend(
             [
                 "",
+                f"**Running background processes:** {len(running_processes)}",
                 f"**运行中的后台进程：** {len(running_processes)}",
             ]
         )
@@ -7080,6 +7091,7 @@ class GatewayRunner:
         if not cp_cfg.get("enabled", False):
             return (
                 "Checkpoints are not enabled.\n"
+                "检查点功能尚未启用。\n"
                 "Enable in config.yaml:\n```\ncheckpoints:\n  enabled: true\n```"
             )
 
@@ -7098,7 +7110,7 @@ class GatewayRunner:
         # Restore by number or hash
         checkpoints = mgr.list_checkpoints(cwd)
         if not checkpoints:
-            return f"No checkpoints found for {cwd}"
+            return f"No checkpoints found for {cwd}\n未找到目录 {cwd} 的检查点。"
 
         target_hash = None
         try:
@@ -7181,27 +7193,18 @@ class GatewayRunner:
 
             pr = self._provider_routing
             agent_config = user_config.get("agent", {}) if isinstance(user_config.get("agent"), dict) else {}
-            try:
-                max_iterations = int(
-                    os.getenv(
-                        "HERMES_MAX_ITERATIONS",
-                        str(agent_config.get("max_turns", 60)),
-                    )
-                )
-            except (TypeError, ValueError):
-                max_iterations = 60
-            try:
-                max_iterations_with_approval = int(
-                    agent_config.get("max_turns_with_approval", max_iterations)
-                )
-            except (TypeError, ValueError):
-                max_iterations_with_approval = max_iterations
-            max_iterations_with_approval = max(max_iterations, max_iterations_with_approval)
-            try:
-                iteration_extension_step = int(agent_config.get("max_turns_approval_step", 30))
-            except (TypeError, ValueError):
-                iteration_extension_step = 30
-            iteration_extension_step = max(0, iteration_extension_step)
+            _turn_limits = resolve_agent_turn_limits(
+                agent_config,
+                env_max_turns=os.getenv(
+                    "HERMES_MAX_ITERATIONS",
+                    str(agent_config.get("max_turns", 60)),
+                ),
+                root_max_turns=user_config.get("max_turns"),
+            )
+            max_iterations = _turn_limits["max_turns"]
+            max_iterations_with_approval = _turn_limits["max_turns_with_approval"]
+            iteration_extension_step = _turn_limits["max_turns_approval_step"]
+            continuation_policy = _turn_limits["continuation_policy"]
             reasoning_config = self._resolve_session_reasoning_config(source=source)
             self._reasoning_config = reasoning_config
             self._service_tier = self._load_service_tier()
@@ -7272,6 +7275,7 @@ class GatewayRunner:
                     verbose_logging=False,
                     enabled_toolsets=turn_toolsets,
                     task_mode=turn_route.get("task_mode"),
+                    continuation_policy=continuation_policy,
                     reasoning_config=reasoning_config,
                     service_tier=self._service_tier,
                     request_overrides=turn_route.get("request_overrides"),
@@ -7423,8 +7427,10 @@ class GatewayRunner:
             display_state = "on ✓" if self._show_reasoning else "off"
             return (
                 "🧠 **推理设置**\n\n"
+                f"**Effort:** `{level}`\n"
                 f"**强度：** `{level}`\n"
                 "**作用范围：** 已保存配置\n"
+                f"**Display:** {display_state}\n"
                 f"**显示：** {display_state}\n\n"
                 "_用法：_ `/reasoning <none|minimal|low|medium|high|xhigh|reset|show|hide>`"
             )
@@ -7451,7 +7457,7 @@ class GatewayRunner:
             _save_config_key("agent.reasoning_effort", "")
             self._reasoning_config = self._load_reasoning_config()
             self._evict_cached_agent(session_key)
-            return "🧠 ✓ 推理强度已重置为默认值，并已保存到 config.yaml。"
+            return "🧠 ✓ 推理强度已重置为默认值，并已保存到 config.yaml。\n_(saved to config.yaml)_"
         if effort == "none":
             parsed = {"enabled": False}
         elif effort in ("minimal", "low", "medium", "high", "xhigh"):
@@ -7467,7 +7473,11 @@ class GatewayRunner:
         self._set_session_reasoning_override(session_key, None)
         _save_config_key("agent.reasoning_effort", effort)
         self._evict_cached_agent(session_key)
-        return f"🧠 ✓ 推理强度已设置为 `{effort}`，并已保存到 config.yaml\n_（下一条消息生效）_"
+        return (
+            f"🧠 ✓ 推理强度已设置为 `{effort}`，并已保存到 config.yaml\n"
+            "_(saved to config.yaml — takes effect on next message)_\n"
+            "_（下一条消息生效）_"
+        )
 
     async def _handle_fast_command(self, event: MessageEvent) -> str:
         """Handle /fast — mirror the CLI Priority Processing toggle in gateway chats."""
@@ -7506,7 +7516,7 @@ class GatewayRunner:
         if not args or args == "status":
             status = "fast" if self._service_tier == "priority" else "normal"
             return (
-                "⚡ Priority Processing\n\n"
+                "⚡ Priority Processing（优先处理）\n\n"
                 f"当前模式：`{status}`\n\n"
                 "_用法：_ `/fast <normal|fast|status>`"
             )
@@ -7526,8 +7536,8 @@ class GatewayRunner:
             )
 
         if _save_config_key("agent.service_tier", saved_value):
-            return f"⚡ ✓ Priority Processing：**{label}**（已保存到配置）\n_（下一条消息生效）_"
-        return f"⚡ ✓ Priority Processing：**{label}**（仅当前会话）"
+            return f"⚡ ✓ Priority Processing（优先处理）：**{label}**（已保存到配置）\n_（下一条消息生效）_"
+        return f"⚡ ✓ Priority Processing（优先处理）：**{label}**（仅当前会话）"
 
     async def _handle_yolo_command(self, event: MessageEvent) -> str:
         """Handle /yolo — toggle dangerous command approval bypass for this session only."""
@@ -7541,10 +7551,10 @@ class GatewayRunner:
         current = is_session_yolo_enabled(session_key)
         if current:
             disable_session_yolo(session_key)
-            return "⚠️ 当前会话的 YOLO 模式已**关闭**，危险命令将重新需要审批。"
+            return "⚠️ YOLO mode: **OFF**\n当前会话的 YOLO 模式已**关闭**，危险命令将重新需要审批。"
         else:
             enable_session_yolo(session_key)
-            return "⚡ 当前会话的 YOLO 模式已**开启**，所有命令都会自动批准，请谨慎使用。"
+            return "⚡ YOLO mode: **ON**\n当前会话的 YOLO 模式已**开启**，所有命令都会自动批准，请谨慎使用。"
 
     async def _handle_verbose_command(self, event: MessageEvent) -> str:
         """Handle /verbose command — cycle tool progress display mode.
@@ -7568,18 +7578,19 @@ class GatewayRunner:
 
         if not gate_enabled:
             return (
-                "The `/verbose` command is not enabled for messaging platforms.\n\n"
-                "Enable it in `config.yaml`:\n```yaml\n"
+                "The `/verbose` command is not enabled for messaging platforms.\n"
+                "`/verbose` 尚未在消息平台启用。\n\n"
+                "Enable it in `config.yaml`（在配置中开启）：\n```yaml\n"
                 "display:\n  tool_progress_command: true\n```"
             )
 
         # --- cycle mode (per-platform) ----------------------------------------
         cycle = ["off", "new", "all", "verbose"]
         descriptions = {
-            "off": "⚙️ Tool progress: **OFF** — no tool activity shown.",
-            "new": "⚙️ Tool progress: **NEW** — shown when tool changes (preview length: `display.tool_preview_length`, default 40).",
-            "all": "⚙️ Tool progress: **ALL** — every tool call shown (preview length: `display.tool_preview_length`, default 40).",
-            "verbose": "⚙️ Tool progress: **VERBOSE** — every tool call with full arguments.",
+            "off": "⚙️ Tool progress: **OFF** — no tool activity shown.\n工具进度：**关闭**，不显示工具活动。",
+            "new": "⚙️ Tool progress: **NEW** — shown when tool changes (preview length: `display.tool_preview_length`, default 40).\n工具进度：**仅新工具**，工具变化时显示简短预览。",
+            "all": "⚙️ Tool progress: **ALL** — every tool call shown (preview length: `display.tool_preview_length`, default 40).\n工具进度：**全部**，每次工具调用都会显示。",
+            "verbose": "⚙️ Tool progress: **VERBOSE** — every tool call with full arguments.\n工具进度：**详细**，显示每次工具调用及完整参数。",
         }
 
         # Read current effective mode for this platform via the resolver
@@ -7991,7 +8002,7 @@ class GatewayRunner:
             )
         except Exception as e:
             logger.error("Failed to create branch session: %s", e)
-            return f"Failed to create branch: {e}"
+            return f"Failed to create branch: {e}\n创建分支会话失败：{e}"
 
         # Copy conversation history to the new session
         for msg in history:
@@ -8018,7 +8029,7 @@ class GatewayRunner:
         # Switch the session store entry to the new session
         new_entry = self.session_store.switch_session(session_key, new_session_id)
         if not new_entry:
-            return "Branch created but failed to switch to it."
+            return "Branch created but failed to switch to it.\n分支已创建，但切换到新分支失败。"
         self._clear_session_boundary_security_state(session_key)
 
         # Evict any cached agent for this session
@@ -8028,9 +8039,11 @@ class GatewayRunner:
         return (
             f"⑂ Branched to **{branch_title}**"
             f" ({msg_count} message{'s' if msg_count != 1 else ''} copied)\n"
-            f"Original: `{parent_session_id}`\n"
-            f"Branch: `{new_session_id}`\n"
-            f"Use `/resume` to switch back to the original."
+            f"已分叉到 **{branch_title}**（已复制 {msg_count} 条消息）\n"
+            f"Original: `{parent_session_id}`（原会话）\n"
+            f"Branch: `{new_session_id}`（新分支）\n"
+            f"Use `/resume` to switch back to the original.\n"
+            f"如需切回原会话，请使用 `/resume`。"
         )
 
     async def _handle_usage_command(self, event: MessageEvent) -> str:
@@ -8093,7 +8106,7 @@ class GatewayRunner:
             rl_state = agent.get_rate_limit_state()
             if rl_state and rl_state.has_data:
                 from agent.rate_limit_tracker import format_rate_limit_compact
-                lines.append(f"⏱️ **Rate Limits:** {format_rate_limit_compact(rl_state)}")
+                lines.append(f"⏱️ **Rate Limits:** {format_rate_limit_compact(rl_state)}（速率限制）")
                 lines.append("")
 
             # Session token usage — detailed breakdown matching CLI
@@ -8102,16 +8115,16 @@ class GatewayRunner:
             cache_read = getattr(agent, "session_cache_read_tokens", 0) or 0
             cache_write = getattr(agent, "session_cache_write_tokens", 0) or 0
 
-            lines.append("📊 **Session Token Usage**")
-            lines.append(f"Model: `{agent.model}`")
-            lines.append(f"Input tokens: {input_tokens:,}")
+            lines.append("📊 **Session Token Usage**（会话 Token 用量）")
+            lines.append(f"Model: `{agent.model}`（模型）")
+            lines.append(f"Input tokens: {input_tokens:,}（输入 token）")
             if cache_read:
-                lines.append(f"Cache read tokens: {cache_read:,}")
+                lines.append(f"Cache read tokens: {cache_read:,}（缓存读取 token）")
             if cache_write:
-                lines.append(f"Cache write tokens: {cache_write:,}")
-            lines.append(f"Output tokens: {output_tokens:,}")
-            lines.append(f"Total: {agent.session_total_tokens:,}")
-            lines.append(f"API calls: {agent.session_api_calls}")
+                lines.append(f"Cache write tokens: {cache_write:,}（缓存写入 token）")
+            lines.append(f"Output tokens: {output_tokens:,}（输出 token）")
+            lines.append(f"Total: {agent.session_total_tokens:,}（总计）")
+            lines.append(f"API calls: {agent.session_api_calls}（API 调用）")
 
             # Cost estimation
             try:
@@ -8129,9 +8142,9 @@ class GatewayRunner:
                 )
                 if cost_result.amount_usd is not None:
                     prefix = "~" if cost_result.status == "estimated" else ""
-                    lines.append(f"Cost: {prefix}${float(cost_result.amount_usd):.4f}")
+                    lines.append(f"Cost: {prefix}${float(cost_result.amount_usd):.4f}（费用）")
                 elif cost_result.status == "included":
-                    lines.append("Cost: included")
+                    lines.append("Cost: included（费用已包含）")
             except Exception:
                 pass
 
@@ -8139,9 +8152,9 @@ class GatewayRunner:
             ctx = agent.context_compressor
             if ctx.last_prompt_tokens:
                 pct = min(100, ctx.last_prompt_tokens / ctx.context_length * 100) if ctx.context_length else 0
-                lines.append(f"Context: {ctx.last_prompt_tokens:,} / {ctx.context_length:,} ({pct:.0f}%)")
+                lines.append(f"Context: {ctx.last_prompt_tokens:,} / {ctx.context_length:,} ({pct:.0f}%)（上下文）")
             if ctx.compression_count:
-                lines.append(f"Compressions: {ctx.compression_count}")
+                lines.append(f"Compressions: {ctx.compression_count}（压缩次数）")
 
             if account_lines:
                 lines.append("")
@@ -8157,10 +8170,11 @@ class GatewayRunner:
             msgs = [m for m in history if m.get("role") in ("user", "assistant") and m.get("content")]
             approx = estimate_messages_tokens_rough(msgs)
             lines = [
-                "📊 **Session Info**",
-                f"Messages: {len(msgs)}",
-                f"Estimated context: ~{approx:,} tokens",
-                "_(Detailed usage available after the first agent response)_",
+                "📊 **Session Info**（会话信息）",
+                f"Messages: {len(msgs)}（消息数）",
+                f"Estimated context: ~{approx:,} tokens（预估上下文）",
+                "_(Detailed usage available after the first agent response)_\n"
+                "_(首次代理回复后会显示更详细的用量)_",
             ]
             if account_lines:
                 lines.append("")
@@ -8168,7 +8182,7 @@ class GatewayRunner:
             return "\n".join(lines)
         if account_lines:
             return "\n".join(account_lines)
-        return "No usage data available for this session."
+        return "No usage data available for this session.\n当前会话还没有可用的用量数据。"
 
     async def _handle_insights_command(self, event: MessageEvent) -> str:
         """Handle /insights command -- show usage insights and analytics."""
@@ -8189,7 +8203,7 @@ class GatewayRunner:
                     try:
                         days = int(parts[i + 1])
                     except ValueError:
-                        return f"Invalid --days value: {parts[i + 1]}"
+                        return f"Invalid --days value: {parts[i + 1]}\n无效的 --days 值：{parts[i + 1]}"
                     i += 2
                 elif parts[i] == "--source" and i + 1 < len(parts):
                     source = parts[i + 1]
@@ -8217,7 +8231,7 @@ class GatewayRunner:
             return await loop.run_in_executor(None, _run_insights)
         except Exception as e:
             logger.error("Insights command error: %s", e, exc_info=True)
-            return f"Error generating insights: {e}"
+            return f"Error generating insights: {e}\n生成洞察报告失败：{e}"
 
     async def _handle_reload_mcp_command(self, event: MessageEvent) -> Optional[str]:
         """Handle /reload-mcp — reconnect MCP servers and rebuild the cached agent.
@@ -8255,7 +8269,7 @@ class GatewayRunner:
         # chosen outcome.
         async def _on_confirm(choice: str) -> Optional[str]:
             if choice == "cancel":
-                return "🟡 /reload-mcp cancelled. MCP tools unchanged."
+                return "🟡 /reload-mcp cancelled. MCP tools unchanged.\n已取消 /reload-mcp，MCP 工具未改变。"
             if choice == "always":
                 # Persist the opt-out and run the reload.
                 try:
@@ -8273,21 +8287,26 @@ class GatewayRunner:
                 return (
                     f"{result}\n\n"
                     "ℹ️ Future `/reload-mcp` calls will run without confirmation. "
-                    "Re-enable via `approvals.mcp_reload_confirm: true` in config.yaml."
+                    "Re-enable via `approvals.mcp_reload_confirm: true` in config.yaml.\n"
+                    "后续 `/reload-mcp` 将不再确认；如需恢复确认，请在 config.yaml 中设置 "
+                    "`approvals.mcp_reload_confirm: true`。"
                 )
             return result
 
         prompt_message = (
-            "⚠️ **Confirm /reload-mcp**\n\n"
+            "⚠️ **Confirm /reload-mcp**（确认重新加载 MCP）\n\n"
             "Reloading MCP servers rebuilds the tool set for this session "
             "and **invalidates the provider prompt cache** — the next "
             "message will re-send full input tokens.  On long-context or "
-            "high-reasoning models this can be expensive.\n\n"
+            "high-reasoning models this can be expensive.\n"
+            "重新加载 MCP 会重建本会话工具集，并使供应商 prompt 缓存失效；"
+            "下一条消息会重新发送完整输入 token，长上下文或高推理模型成本可能更高。\n\n"
             "Choose:\n"
-            "• **Approve Once** — reload now\n"
-            "• **Always Approve** — reload now and silence this prompt permanently\n"
-            "• **Cancel** — leave MCP tools unchanged\n\n"
-            "_Text fallback: reply `/approve`, `/always`, or `/cancel`._"
+            "• **Approve Once** — reload now（仅本次批准，立即重新加载）\n"
+            "• **Always Approve** — reload now and silence this prompt permanently（始终批准，并永久关闭此确认）\n"
+            "• **Cancel** — leave MCP tools unchanged（取消，保持 MCP 工具不变）\n\n"
+            "_Text fallback: reply `/approve`, `/always`, or `/cancel`._\n"
+            "_文本 fallback：回复 `/approve`、`/always` 或 `/cancel`。_"
         )
         return await self._request_slash_confirm(
             event=event,
@@ -8327,17 +8346,20 @@ class GatewayRunner:
             removed = old_servers - connected_servers
             reconnected = connected_servers & old_servers
 
-            lines = ["🔄 **MCP Servers Reloaded**\n"]
+            lines = ["🔄 **MCP Servers Reloaded**（MCP 服务器已重新加载）\n"]
             if reconnected:
-                lines.append(f"♻️ Reconnected: {', '.join(sorted(reconnected))}")
+                lines.append(f"♻️ Reconnected: {', '.join(sorted(reconnected))}（已重新连接）")
             if added:
-                lines.append(f"➕ Added: {', '.join(sorted(added))}")
+                lines.append(f"➕ Added: {', '.join(sorted(added))}（已添加）")
             if removed:
-                lines.append(f"➖ Removed: {', '.join(sorted(removed))}")
+                lines.append(f"➖ Removed: {', '.join(sorted(removed))}（已移除）")
             if not connected_servers:
-                lines.append("No MCP servers connected.")
+                lines.append("No MCP servers connected.\n当前没有已连接的 MCP 服务器。")
             else:
-                lines.append(f"\n🔧 {len(new_tools)} tool(s) available from {len(connected_servers)} server(s)")
+                lines.append(
+                    f"\n🔧 {len(new_tools)} tool(s) available from {len(connected_servers)} server(s)"
+                    f"（来自 {len(connected_servers)} 个服务器的 {len(new_tools)} 个可用工具）"
+                )
 
             # Inject a message at the END of the session history so the
             # model knows tools changed on its next turn.  Appended after
@@ -8367,7 +8389,7 @@ class GatewayRunner:
 
         except Exception as e:
             logger.warning("MCP reload failed: %s", e)
-            return f"❌ MCP reload failed: {e}"
+            return f"❌ MCP reload failed: {e}\nMCP 重新加载失败：{e}"
 
     async def _handle_reload_skills_command(self, event: MessageEvent) -> str:
         """Handle /reload-skills — rescan skills dir, queue a note for next turn.
@@ -8393,10 +8415,10 @@ class GatewayRunner:
             removed = result.get("removed", [])  # [{"name", "description"}, ...]
             total = result.get("total", 0)
 
-            lines = ["🔄 **Skills Reloaded**\n"]
+            lines = ["🔄 **Skills Reloaded**（技能已重新加载）\n"]
             if not added and not removed:
-                lines.append("No new skills detected.")
-                lines.append(f"\n📚 {total} skill(s) available")
+                lines.append("No new skills detected.\n未检测到新技能。")
+                lines.append(f"\n📚 {total} skill(s) available（{total} 个可用技能）")
                 return "\n".join(lines)
 
             def _fmt_line(item: dict) -> str:
@@ -8405,14 +8427,14 @@ class GatewayRunner:
                 return f"    - {nm}: {desc}" if desc else f"    - {nm}"
 
             if added:
-                lines.append("➕ **Added Skills:**")
+                lines.append("➕ **Added Skills:**（新增技能）")
                 for item in added:
                     lines.append(_fmt_line(item))
             if removed:
-                lines.append("➖ **Removed Skills:**")
+                lines.append("➖ **Removed Skills:**（移除技能）")
                 for item in removed:
                     lines.append(_fmt_line(item))
-            lines.append(f"\n📚 {total} skill(s) available")
+            lines.append(f"\n📚 {total} skill(s) available（{total} 个可用技能）")
 
             # Queue the one-shot note for the next user turn in this session.
             # Format matches how the system prompt renders pre-existing
@@ -8443,7 +8465,7 @@ class GatewayRunner:
 
         except Exception as e:
             logger.warning("Skills reload failed: %s", e)
-            return f"❌ Skills reload failed: {e}"
+            return f"❌ Skills reload failed: {e}\n技能重新加载失败：{e}"
 
     # ------------------------------------------------------------------
     # Slash-command confirmation primitive (generic)
@@ -8635,8 +8657,11 @@ class GatewayRunner:
                 )
             if session_key in self._pending_approvals:
                 self._pending_approvals.pop(session_key)
-                return "⚠️ Approval expired (agent is no longer waiting). Ask the agent to try again."
-            return "No pending command to approve."
+                return (
+                    "⚠️ Approval expired (agent is no longer waiting). Ask the agent to try again.\n"
+                    "审批已过期，Agent 当前不再等待该命令；请让 Agent 重新尝试。"
+                )
+            return "No pending command to approve.\n当前没有待批准命令。"
 
         # Parse args: support "all", "all session", "all always", "session", "always"
         args = event.get_command_args().strip().lower().split()
@@ -8646,16 +8671,19 @@ class GatewayRunner:
         if any(a in ("always", "permanent", "permanently") for a in remaining):
             choice = "always"
             scope_msg = " (pattern approved permanently)"
+            scope_msg_zh = "（该命令模式已永久批准）"
         elif any(a in ("session", "ses") for a in remaining):
             choice = "session"
             scope_msg = " (pattern approved for this session)"
+            scope_msg_zh = "（该命令模式已在本会话批准）"
         else:
             choice = "once"
             scope_msg = ""
+            scope_msg_zh = ""
 
         count = resolve_gateway_approval(session_key, choice, resolve_all=resolve_all)
         if not count:
-            return "No pending command to approve."
+            return "No pending command to approve.\n当前没有待批准命令。"
 
         # Resume typing indicator — agent is about to continue processing.
         _adapter = self.adapters.get(source.platform)
@@ -8663,8 +8691,12 @@ class GatewayRunner:
             _adapter.resume_typing_for_chat(source.chat_id)
 
         count_msg = f" ({count} commands)" if count > 1 else ""
+        count_msg_zh = f"（{count} 条命令）" if count > 1 else ""
         logger.info("User approved %d dangerous command(s) via /approve%s", count, scope_msg)
-        return f"✅ Command{'s' if count > 1 else ''} approved{scope_msg}{count_msg}. The agent is resuming..."
+        return (
+            f"✅ Command{'s' if count > 1 else ''} approved{scope_msg}{count_msg}. The agent is resuming...\n"
+            f"已批准命令{scope_msg_zh}{count_msg_zh}，Agent 正在继续运行。"
+        )
 
     async def _handle_deny_command(self, event: MessageEvent) -> str:
         """Handle /deny command — reject pending dangerous command(s).
@@ -8690,15 +8722,15 @@ class GatewayRunner:
                 return "❌ 已拒绝继续运行。Agent 会基于当前进度做总结。"
             if session_key in self._pending_approvals:
                 self._pending_approvals.pop(session_key)
-                return "❌ Command denied (approval was stale)."
-            return "No pending command to deny."
+                return "❌ Command denied (approval was stale).\n已拒绝命令（审批已过期）。"
+            return "No pending command to deny.\n当前没有待拒绝命令。"
 
         args = event.get_command_args().strip().lower()
         resolve_all = "all" in args
 
         count = resolve_gateway_approval(session_key, "deny", resolve_all=resolve_all)
         if not count:
-            return "No pending command to deny."
+            return "No pending command to deny.\n当前没有待拒绝命令。"
 
         # Resume typing indicator — agent continues (with BLOCKED result).
         _adapter = self.adapters.get(source.platform)
@@ -8706,8 +8738,9 @@ class GatewayRunner:
             _adapter.resume_typing_for_chat(source.chat_id)
 
         count_msg = f" ({count} commands)" if count > 1 else ""
+        count_msg_zh = f"（{count} 条命令）" if count > 1 else ""
         logger.info("User denied %d dangerous command(s) via /deny", count)
-        return f"❌ Command{'s' if count > 1 else ''} denied{count_msg}."
+        return f"❌ Command{'s' if count > 1 else ''} denied{count_msg}.\n已拒绝命令{count_msg_zh}。"
 
     # Platforms where /update is allowed.  ACP, API server, and webhooks are
     # programmatic interfaces that should not trigger system updates.
@@ -9277,9 +9310,9 @@ class GatewayRunner:
         from agent.memory_manager import sanitize_context
 
         analysis_prompt = (
-            "Describe everything visible in this image in thorough detail. "
-            "Include any text, code, data, objects, people, layout, colors, "
-            "and any other notable visual information."
+            "请用中文详细描述这张图片中可见的一切。"
+            "包括文字、代码、数据、物体、人物、布局、颜色以及其他重要视觉信息。"
+            "如果图片里的文字是英文，可以保留英文原文；不要输出日语、德语或其他语言。"
         )
 
         enriched_parts = []
@@ -9295,22 +9328,19 @@ class GatewayRunner:
                     description = result.get("analysis", "")
                     description = sanitize_context(description)
                     enriched_parts.append(
-                        f"[The user sent an image~ Here's what I can see:\n{description}]\n"
-                        f"[If you need a closer look, use vision_analyze with "
-                        f"image_url: {path} ~]"
+                        f"[用户发来一张图片。图片内容如下：\n{description}]\n"
+                        f"[如果需要更仔细查看，请使用 vision_analyze，image_url: {path}]"
                     )
                 else:
                     enriched_parts.append(
-                        "[The user sent an image but I couldn't quite see it "
-                        "this time (>_<) You can try looking at it yourself "
-                        f"with vision_analyze using image_url: {path}]"
+                        "[用户发来一张图片，但自动分析失败。"
+                        f"你可以尝试使用 vision_analyze 查看，image_url: {path}]"
                     )
             except Exception as e:
                 logger.error("Vision auto-analysis error: %s", e)
                 enriched_parts.append(
-                    f"[The user sent an image but something went wrong when I "
-                    f"tried to look at it~ You can try examining it yourself "
-                    f"with vision_analyze using image_url: {path}]"
+                    f"[用户发来一张图片，但分析失败（{e}）。"
+                    f"你可以尝试使用 vision_analyze 查看，image_url: {path}]"
                 )
 
         # Combine: vision descriptions first, then the user's original text
@@ -9318,7 +9348,10 @@ class GatewayRunner:
             prefix = "\n\n".join(enriched_parts)
             if user_text:
                 return f"{prefix}\n\n{user_text}"
-            return prefix
+            return (
+                f"{prefix}\n\n"
+                "[用户没有为图片附加文字。请先简短回复：收到图片，你要怎么处理呢？]"
+            )
         return user_text
 
     async def _enrich_message_with_transcription(
@@ -9338,11 +9371,12 @@ class GatewayRunner:
             The enriched message string with transcriptions prepended.
         """
         if not getattr(self.config, "stt_enabled", True):
-            disabled_note = "[The user sent voice message(s), but transcription is disabled in config."
+            disabled_note = "[The user sent voice message(s), but transcription is disabled in config. 用户发送了语音消息，但配置中已关闭转写。"
             if self._has_setup_skill():
                 disabled_note += (
                     " You have a skill called hermes-agent-setup that can help "
-                    "users configure Hermes features including voice, tools, and more."
+                    "users configure Hermes features including voice, tools, and more. "
+                    "你可以提示用户使用 hermes-agent-setup 配置语音、工具等功能。"
                 )
             disabled_note += "]"
             if user_text:
@@ -9359,8 +9393,7 @@ class GatewayRunner:
                 if result["success"]:
                     transcript = result["transcript"]
                     enriched_parts.append(
-                        f'[The user sent a voice message~ '
-                        f'Here\'s what they said: "{transcript}"]'
+                        f'[The user sent a voice message. 用户发送了一条语音消息，转写内容如下："{transcript}"]'
                     )
                 else:
                     error = result.get("error", "unknown error")
@@ -9372,26 +9405,28 @@ class GatewayRunner:
                             "[The user sent a voice message but I can't listen "
                             "to it right now — no STT provider is configured. "
                             "A direct message has already been sent to the user "
-                            "with setup instructions."
+                            "with setup instructions. 用户发送了语音消息，但当前没有配置 STT provider，"
+                            "系统已向用户发送设置说明。"
                         )
                         if self._has_setup_skill():
                             _no_stt_note += (
                                 " You have a skill called hermes-agent-setup "
                                 "that can help users configure Hermes features "
-                                "including voice, tools, and more."
+                                "including voice, tools, and more. "
+                                "你可以提示用户使用 hermes-agent-setup 完成语音配置。"
                             )
                         _no_stt_note += "]"
                         enriched_parts.append(_no_stt_note)
                     else:
                         enriched_parts.append(
                             "[The user sent a voice message but I had trouble "
-                            f"transcribing it~ ({error})]"
+                            f"transcribing it. 用户发送了语音消息，但转写失败（{error}）。]"
                         )
             except Exception as e:
                 logger.error("Transcription error: %s", e)
                 enriched_parts.append(
                     "[The user sent a voice message but something went wrong "
-                    "when I tried to listen to it~ Let them know!]"
+                    "when I tried to listen to it. 用户发送了语音消息，但监听/转写时出错；请告知用户。]"
                 )
 
         if enriched_parts:
@@ -10464,27 +10499,18 @@ class GatewayRunner:
         user_config = _load_gateway_config()
         platform_key = _platform_config_key(source.platform)
         agent_config = user_config.get("agent", {}) if isinstance(user_config.get("agent"), dict) else {}
-        try:
-            max_iterations = int(
-                os.getenv(
-                    "HERMES_MAX_ITERATIONS",
-                    str(agent_config.get("max_turns", 60)),
-                )
-            )
-        except (TypeError, ValueError):
-            max_iterations = 60
-        try:
-            max_iterations_with_approval = int(
-                agent_config.get("max_turns_with_approval", max_iterations)
-            )
-        except (TypeError, ValueError):
-            max_iterations_with_approval = max_iterations
-        max_iterations_with_approval = max(max_iterations, max_iterations_with_approval)
-        try:
-            iteration_extension_step = int(agent_config.get("max_turns_approval_step", 30))
-        except (TypeError, ValueError):
-            iteration_extension_step = 30
-        iteration_extension_step = max(0, iteration_extension_step)
+        _turn_limits = resolve_agent_turn_limits(
+            agent_config,
+            env_max_turns=os.getenv(
+                "HERMES_MAX_ITERATIONS",
+                str(agent_config.get("max_turns", 60)),
+            ),
+            root_max_turns=user_config.get("max_turns"),
+        )
+        max_iterations = _turn_limits["max_turns"]
+        max_iterations_with_approval = _turn_limits["max_turns_with_approval"]
+        iteration_extension_step = _turn_limits["max_turns_approval_step"]
+        continuation_policy = _turn_limits["continuation_policy"]
 
         from hermes_cli.tools_config import _get_platform_tools
         enabled_toolsets = sorted(_get_platform_tools(user_config, platform_key))
@@ -11187,6 +11213,7 @@ class GatewayRunner:
                     verbose_logging=False,
                     enabled_toolsets=turn_toolsets,
                     task_mode=turn_route.get("task_mode"),
+                    continuation_policy=continuation_policy,
                     ephemeral_system_prompt=combined_ephemeral or None,
                     prefill_messages=self._prefill_messages or None,
                     reasoning_config=reasoning_config,
@@ -11234,6 +11261,7 @@ class GatewayRunner:
             agent._base_max_iterations = max_iterations
             agent._base_max_iterations_with_approval = max_iterations_with_approval
             agent._base_iteration_extension_step = iteration_extension_step
+            agent._continuation_policy = continuation_policy
             agent.continuation_callback = _continuation_callback_sync
 
             _bg_review_release = threading.Event()

@@ -16,6 +16,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any, Dict, Iterable, List, Optional
 
 import yaml
@@ -100,6 +101,15 @@ def _normalize_list(values: Optional[Iterable[str]]) -> List[str]:
     return result
 
 
+def _infer_watch_parent(candidate: str) -> str:
+    """Preserve slash style when inferring watch roots from captured globs."""
+    if "/" in candidate and "\\" not in candidate:
+        parent = str(PurePosixPath(candidate).parent)
+    else:
+        parent = str(Path(candidate).parent)
+    return "" if parent == "." else parent
+
+
 def _session_messages(session_id: str) -> List[Dict[str, Any]]:
     from hermes_state import SessionDB
 
@@ -157,7 +167,7 @@ def _infer_inputs_outputs(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
             if any(ch in candidate for ch in _GLOB_CHARS):
                 if candidate not in globs:
                     globs.append(candidate)
-                parent = str(Path(candidate).parent)
+                parent = _infer_watch_parent(candidate)
                 if parent not in (".", "") and watch_path is None:
                     watch_path = parent
                 pattern = Path(candidate).name
@@ -279,7 +289,7 @@ def _execute_with_agent(prompt: str, workflow: Dict[str, Any], session_source: s
     from run_agent import AIAgent
     from hermes_state import SessionDB
     from dotenv import load_dotenv
-    from hermes_cli.config import load_config
+    from hermes_cli.config import load_config, resolve_agent_turn_limits
     from hermes_constants import apply_ipv4_preference, parse_reasoning_effort
     from hermes_cli.runtime_provider import resolve_runtime_provider, format_runtime_provider_error
     from agent.smart_model_routing import resolve_turn_route, resolve_turn_toolsets
@@ -297,6 +307,12 @@ def _execute_with_agent(prompt: str, workflow: Dict[str, Any], session_source: s
     reasoning_config = parse_reasoning_effort(effort)
     pr = cfg.get("provider_routing", {})
     smart_routing = cfg.get("smart_model_routing", {}) or {}
+    agent_cfg = cfg.get("agent", {}) if isinstance(cfg.get("agent"), dict) else {}
+    turn_limits = resolve_agent_turn_limits(
+        agent_cfg,
+        env_max_turns=os.getenv("HERMES_MAX_ITERATIONS"),
+        root_max_turns=cfg.get("max_turns"),
+    )
 
     runtime_kwargs = {"requested": "cliproxyapi"}
     if workflow.get("base_url"):
@@ -338,7 +354,7 @@ def _execute_with_agent(prompt: str, workflow: Dict[str, Any], session_source: s
             api_mode=route["runtime"].get("api_mode"),
             acp_command=route["runtime"].get("command"),
             acp_args=route["runtime"].get("args"),
-            max_iterations=cfg.get("agent", {}).get("max_turns") or cfg.get("max_turns") or 60,
+            max_iterations=turn_limits["max_turns"],
             reasoning_config=reasoning_config,
             fallback_model=cfg.get("fallback_providers") or cfg.get("fallback_model") or None,
             providers_allowed=pr.get("only"),
@@ -347,6 +363,7 @@ def _execute_with_agent(prompt: str, workflow: Dict[str, Any], session_source: s
             provider_sort=pr.get("sort"),
             enabled_toolsets=route_toolsets,
             task_mode=route.get("task_mode"),
+            continuation_policy=turn_limits["continuation_policy"],
             disabled_toolsets=["clarify"] if route_toolsets != [] else None,
             quiet_mode=True,
             skip_context_files=True,

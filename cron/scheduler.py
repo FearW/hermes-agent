@@ -35,7 +35,7 @@ from typing import List, Optional
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from hermes_constants import get_hermes_home
-from hermes_cli.config import load_config
+from hermes_cli.config import load_config, resolve_agent_turn_limits
 from hermes_time import now as _hermes_now
 
 logger = logging.getLogger(__name__)
@@ -120,6 +120,37 @@ _hermes_home = get_hermes_home()
 # File-based lock prevents concurrent ticks from gateway + daemon + systemd timer
 _LOCK_DIR = _hermes_home / "cron"
 _LOCK_FILE = _LOCK_DIR / ".tick.lock"
+
+
+def _load_cron_runtime_config() -> dict:
+    """Load cron runtime config from the active Hermes home path.
+
+    ``cron.scheduler`` historically read ``_hermes_home / config.yaml``
+    directly. Preserve that behavior so tests and isolated cron runtimes that
+    patch ``_hermes_home`` continue to resolve the same file, while still
+    normalizing through ``load_config`` when ``HERMES_HOME`` already matches.
+    """
+    import yaml
+
+    config_path = _hermes_home / "config.yaml"
+    if config_path.exists():
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                yaml.safe_load(f)
+        except Exception as exc:
+            raise RuntimeError(f"failed to load config.yaml: {exc}") from exc
+
+    prior_home = os.environ.get("HERMES_HOME")
+    resolved_home = str(_hermes_home)
+    try:
+        if prior_home != resolved_home:
+            os.environ["HERMES_HOME"] = resolved_home
+        return load_config() or {}
+    finally:
+        if prior_home is None:
+            os.environ.pop("HERMES_HOME", None)
+        else:
+            os.environ["HERMES_HOME"] = prior_home
 
 
 def _resolve_origin(job: dict) -> Optional[dict]:
@@ -359,6 +390,7 @@ def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Option
             f"(job_id: {job_id})\n"
             f"-------------\n\n"
             f"{content}\n\n"
+            "The agent cannot see this message. "
             f"To stop or manage this job, send me a new message (e.g. \"stop reminder {task_name}\")."
         )
     else:
@@ -849,6 +881,7 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
     )
     for _var_name in _cron_delivery_vars:
         _VAR_MAP[_var_name].set("")
+        os.environ.pop(_var_name, None)
 
     # Per-job working directory.  When set (and validated at create/update
     # time), we point TERMINAL_CWD at it so:
@@ -892,23 +925,26 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
                 if delivery_target.get("thread_id") is None
                 else str(delivery_target["thread_id"])
             )
+            os.environ["HERMES_CRON_AUTO_DELIVER_PLATFORM"] = delivery_target["platform"]
+            os.environ["HERMES_CRON_AUTO_DELIVER_CHAT_ID"] = str(delivery_target["chat_id"])
+            if delivery_target.get("thread_id") is None:
+                os.environ.pop("HERMES_CRON_AUTO_DELIVER_THREAD_ID", None)
+            else:
+                os.environ["HERMES_CRON_AUTO_DELIVER_THREAD_ID"] = str(delivery_target["thread_id"])
 
         model = job.get("model") or os.getenv("HERMES_MODEL") or ""
 
-        # Load config.yaml for model, reasoning, prefill, toolsets, provider routing
+        # Load config fresh every run so model/provider/toolset changes apply
+        # without restarting the scheduler.
         _cfg = {}
         try:
-            import yaml
-            _cfg_path = str(_hermes_home / "config.yaml")
-            if os.path.exists(_cfg_path):
-                with open(_cfg_path) as _f:
-                    _cfg = yaml.safe_load(_f) or {}
-                _model_cfg = _cfg.get("model", {})
-                if not job.get("model"):
-                    if isinstance(_model_cfg, str):
-                        model = _model_cfg
-                    elif isinstance(_model_cfg, dict):
-                        model = _model_cfg.get("default", model)
+            _cfg = _load_cron_runtime_config()
+            _model_cfg = _cfg.get("model", {})
+            if not job.get("model"):
+                if isinstance(_model_cfg, str):
+                    model = _model_cfg
+                elif isinstance(_model_cfg, dict):
+                    model = _model_cfg.get("default", model)
         except Exception as e:
             logger.warning("Job '%s': failed to load config.yaml, using defaults: %s", job_id, e)
 
@@ -943,8 +979,13 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
                     logger.warning("Job '%s': failed to parse prefill messages file '%s': %s", job_id, pfpath, e)
                     prefill_messages = None
 
-        # Max iterations
-        max_iterations = _cfg.get("agent", {}).get("max_turns") or _cfg.get("max_turns") or 90
+        agent_cfg = _cfg.get("agent", {}) if isinstance(_cfg.get("agent"), dict) else {}
+        turn_limits = resolve_agent_turn_limits(
+            agent_cfg,
+            env_max_turns=os.getenv("HERMES_MAX_ITERATIONS"),
+            root_max_turns=_cfg.get("max_turns"),
+        )
+        max_iterations = turn_limits["max_turns"]
 
         # Provider routing
         pr = _cfg.get("provider_routing", {})
@@ -1023,6 +1064,7 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
             providers_order=pr.get("order"),
             provider_sort=pr.get("sort"),
             enabled_toolsets=_resolve_cron_enabled_toolsets(job, _cfg),
+            continuation_policy=turn_limits["continuation_policy"],
             disabled_toolsets=["cronjob", "messaging", "clarify"],
             quiet_mode=True,
             # Cron jobs should always inherit the user's SOUL.md identity from
@@ -1192,6 +1234,7 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
         clear_session_vars(_ctx_tokens)
         for _var_name in _cron_delivery_vars:
             _VAR_MAP[_var_name].set("")
+            os.environ.pop(_var_name, None)
         if _session_db:
             try:
                 _session_db.end_session(_cron_session_id, "cron_complete")

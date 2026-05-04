@@ -80,6 +80,7 @@ from agent.usage_pricing import (
 # top — it transitively pulls the OpenAI SDK chain (~230 ms cold) and is only
 # needed when the user runs `/limits`. Lazy-imported inside the handler below.
 from hermes_cli.banner import _format_context_length, format_banner_version_label
+from hermes_cli.config import resolve_agent_turn_limits
 
 _COMMAND_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 
@@ -251,6 +252,7 @@ def _parse_service_tier_config(raw: str) -> str | None:
         return "priority"
     logger.warning("Unknown service_tier '%s', ignoring", raw)
     return None
+
 
 def load_cli_config() -> Dict[str, Any]:
     """
@@ -1272,8 +1274,10 @@ def _termux_example_image_path(filename: str = "cat.png") -> str:
     ]
     for root in candidates:
         if os.path.isdir(root):
+            if root.startswith(("/", "~")):
+                return f"{root.rstrip('/')}/Pictures/{filename}"
             return os.path.join(root, "Pictures", filename)
-    return os.path.join("~/storage/shared", "Pictures", filename)
+    return f"~/storage/shared/Pictures/{filename}"
 
 
 def _split_path_input(raw: str) -> tuple[str, str]:
@@ -1346,7 +1350,15 @@ def _resolve_attachment_path(raw_path: str) -> Path | None:
                     expanded = f"//{parsed.netloc}{expanded}"
         except Exception:
             expanded = token
-    expanded = os.path.expandvars(os.path.expanduser(expanded))
+    expanded = os.path.expandvars(expanded)
+    if expanded == "~" or expanded.startswith(("~/", "~\\")):
+        home_override = os.getenv("HOME")
+        if home_override:
+            expanded = home_override.rstrip("\\/") + expanded[1:]
+        else:
+            expanded = os.path.expanduser(expanded)
+    else:
+        expanded = os.path.expanduser(expanded)
     if os.name != "nt":
         normalized = expanded.replace("\\", "/")
         if len(normalized) >= 3 and normalized[1] == ":" and normalized[2] == "/" and normalized[0].isalpha():
@@ -1574,7 +1586,7 @@ def _collect_query_images(query: str | None, image_arg: str | None = None) -> tu
         dropped = _detect_file_drop(message)
         if dropped and dropped.get("is_image"):
             images.append(dropped["path"])
-            message = dropped["remainder"] or f"[User attached image: {dropped['path'].name}]"
+            message = dropped["remainder"] or f"[用户附加了一张图片：{dropped['path'].name}]"
 
     if image_arg:
         explicit_path = _resolve_attachment_path(image_arg)
@@ -1991,32 +2003,17 @@ class HermesCLI:
             self.api_key = api_key or os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
         else:
             self.api_key = api_key or os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
-        # Max turns priority: CLI arg > config file > env var > default
-        if max_turns is not None:  # CLI arg was explicitly set
-            self.max_turns = max_turns
-        elif CLI_CONFIG["agent"].get("max_turns"):
-            self.max_turns = CLI_CONFIG["agent"]["max_turns"]
-        elif CLI_CONFIG.get("max_turns"):  # Backwards compat: root-level max_turns
-            self.max_turns = CLI_CONFIG["max_turns"]
-        elif os.getenv("HERMES_MAX_ITERATIONS"):
-            self.max_turns = int(os.getenv("HERMES_MAX_ITERATIONS"))
-        else:
-            self.max_turns = 60
         _agent_cfg = CLI_CONFIG.get("agent", {})
-        try:
-            self.max_turns_with_approval = int(
-                _agent_cfg.get("max_turns_with_approval", self.max_turns)
-            )
-        except (TypeError, ValueError):
-            self.max_turns_with_approval = self.max_turns
-        self.max_turns_with_approval = max(self.max_turns, self.max_turns_with_approval)
-        try:
-            self.max_turns_approval_step = int(
-                _agent_cfg.get("max_turns_approval_step", 30)
-            )
-        except (TypeError, ValueError):
-            self.max_turns_approval_step = 30
-        self.max_turns_approval_step = max(0, self.max_turns_approval_step)
+        _turn_limits = resolve_agent_turn_limits(
+            _agent_cfg,
+            env_max_turns=os.getenv("HERMES_MAX_ITERATIONS"),
+            explicit_max_turns=max_turns,
+            root_max_turns=CLI_CONFIG.get("max_turns"),
+        )
+        self.max_turns = _turn_limits["max_turns"]
+        self.max_turns_with_approval = _turn_limits["max_turns_with_approval"]
+        self.max_turns_approval_step = _turn_limits["max_turns_approval_step"]
+        self.continuation_policy = _turn_limits["continuation_policy"]
         
         # Parse and validate toolsets
         self.enabled_toolsets = toolsets
@@ -3495,6 +3492,7 @@ class HermesCLI:
                 clarify_callback=self._clarify_callback,
                 continuation_callback=self._continuation_callback,
                 task_mode=(route_signature_override[-1] if route_signature_override else None),
+                continuation_policy=self.continuation_policy,
                 reasoning_callback=self._current_reasoning_callback(),
 
                 fallback_model=self._fallback_model,
@@ -4200,7 +4198,7 @@ class HermesCLI:
             _cprint(f"  {_DIM}(>_<) 未找到文件：{path_token}{_RST}")
             return
         if image_path.suffix.lower() not in _IMAGE_EXTENSIONS:
-            _cprint(f"  {_DIM}(._.) 不支持的图片文件：{image_path.name}{_RST}")
+            _cprint(f"  {_DIM}(._.) Not a supported image file: {image_path.name}（不支持的图片文件）{_RST}")
             return
 
         self._attached_images.append(image_path)
@@ -4250,28 +4248,28 @@ class HermesCLI:
                         f"[\u5982\u679c\u9700\u8981\u66f4\u4ed4\u7ec6\u67e5\u770b\uff0c\u8bf7\u4f7f\u7528 vision_analyze\uff0cimage_url: {img_path}]"
                     )
                     if announce:
-                        _cprint(f"  {_DIM}✓ image analyzed{_RST}")
+                        _cprint(f"  {_DIM}✓ 图片已分析{_RST}")
                 else:
                     enriched_parts.append(
                         f"[\u7528\u6237\u9644\u52a0\u4e86\u4e00\u5f20\u56fe\u7247\uff0c\u4f46\u81ea\u52a8\u5206\u6790\u5931\u8d25\u3002"
                         f"\u4f60\u53ef\u4ee5\u5c1d\u8bd5\u4f7f\u7528 vision_analyze \u67e5\u770b\uff0cimage_url: {img_path}]"
                     )
                     if announce:
-                        _cprint(f"  {_DIM}⚠ vision analysis failed — path included for retry{_RST}")
+                        _cprint(f"  {_DIM}⚠ 图片分析失败，已保留路径以便重试{_RST}")
             except Exception as e:
                 enriched_parts.append(
                     f"[\u7528\u6237\u9644\u52a0\u4e86\u4e00\u5f20\u56fe\u7247\uff0c\u4f46\u5206\u6790\u5931\u8d25\uff08{e}\uff09\u3002"
                     f"\u4f60\u53ef\u4ee5\u5c1d\u8bd5\u4f7f\u7528 vision_analyze \u67e5\u770b\uff0cimage_url: {img_path}]"
                 )
                 if announce:
-                    _cprint(f"  {_DIM}⚠ vision analysis error — path included for retry{_RST}")
+                    _cprint(f"  {_DIM}⚠ 图片分析出错，已保留路径以便重试{_RST}")
 
         # Combine: vision descriptions first, then the user's original text
         user_text = text if isinstance(text, str) and text else ""
         if enriched_parts:
             prefix = "\n\n".join(enriched_parts)
             return f"{prefix}\n\n{user_text}" if user_text else prefix
-        return user_text or "What do you see in this image?"
+        return user_text or "收到图片，你要怎么处理呢？"
 
     def _show_tool_availability_warnings(self):
         """Show warnings about disabled tools due to missing API keys."""
@@ -4285,13 +4283,13 @@ class HermesCLI:
             
             if api_key_missing:
                 self._console_print()
-                self._console_print("[yellow]⚠️  Some tools disabled (missing API keys):[/]")
+                self._console_print("[yellow]⚠️  Some tools disabled (missing API keys)（部分工具因缺少 API key 已禁用）：[/]")
                 for item in api_key_missing:
                     tools_str = ", ".join(item["tools"][:2])  # Show first 2 tools
                     if len(item["tools"]) > 2:
                         tools_str += f", +{len(item['tools'])-2} more"
                     self._console_print(f"   [dim]• {item['name']}[/] [dim italic]({', '.join(item['missing_vars'])})[/]")
-                self._console_print("[dim]   Run 'hermes setup' to configure[/]")
+                self._console_print("[dim]   Run 'hermes setup' to configure（运行 hermes setup 进行配置）[/]")
         except Exception:
             pass  # Don't crash on import errors
     
@@ -4372,19 +4370,19 @@ class HermesCLI:
         is_running = bool(getattr(self, "_agent_running", False))
 
         lines = [
-            "Hermes CLI Status",
+            "Hermes CLI Status（CLI 状态）",
             "",
-            f"Session ID: {self.session_id}",
-            f"Path: {display_hermes_home()}",
+            f"Session ID: {self.session_id}（会话 ID）",
+            f"Path: {display_hermes_home()}（Hermes 主目录）",
         ]
         if title:
-            lines.append(f"Title: {title}")
+            lines.append(f"Title: {title}（标题）")
         lines.extend([
-            f"Model: {model} ({provider})",
-            f"Created: {created_at.strftime('%Y-%m-%d %H:%M')}",
-            f"Last Activity: {updated_at.strftime('%Y-%m-%d %H:%M')}",
-            f"Tokens: {total_tokens:,}",
-            f"Agent Running: {'Yes' if is_running else 'No'}",
+            f"Model: {model} ({provider})（模型）",
+            f"Created: {created_at.strftime('%Y-%m-%d %H:%M')}（创建时间）",
+            f"Last Activity: {updated_at.strftime('%Y-%m-%d %H:%M')}（最近活动）",
+            f"Tokens: {total_tokens:,}（Token）",
+            f"Agent Running: {'Yes' if is_running else 'No'}（Agent 运行中：{'是' if is_running else '否'}）",
         ])
         self._console_print("\n".join(lines), highlight=False, markup=False)
     
@@ -6150,14 +6148,14 @@ class HermesCLI:
                             _cprint(f"  {e}")
                             new_title = None
                         if not new_title:
-                            _cprint("  Title is empty after cleanup. Please use printable characters.")
+                            _cprint("  Title is empty after cleanup. Please use printable characters.（清理后标题为空，请使用可见字符。）")
                         elif self._session_db.get_session(self.session_id):
                             # Session exists in DB — set title directly
                             try:
                                 if self._session_db.set_session_title(self.session_id, new_title):
-                                    _cprint(f"  Session title set: {new_title}")
+                                    _cprint(f"  Session title set: {new_title}（会话标题已设置）")
                                 else:
-                                    _cprint("  Session not found in database.")
+                                    _cprint("  Session not found in database.（数据库中找不到该会话。）")
                             except ValueError as e:
                                 _cprint(f"  {e}")
                         else:
@@ -6165,27 +6163,27 @@ class HermesCLI:
                             # Check uniqueness proactively with the sanitized title
                             existing = self._session_db.get_session_by_title(new_title)
                             if existing:
-                                _cprint(f"  Title '{new_title}' is already in use by session {existing['id']}")
+                                _cprint(f"  Title '{new_title}' is already in use by session {existing['id']}（该标题已被使用）")
                             else:
                                 self._pending_title = new_title
-                                _cprint(f"  Session title queued: {new_title} (will be saved on first message)")
+                                _cprint(f"  Session title queued: {new_title} (will be saved on first message)（标题已暂存，将在第一条消息后保存）")
                     else:
-                        _cprint("  Session database not available.")
+                        _cprint("  Session database not available.（会话数据库不可用。）")
                 else:
                     _cprint("  用法：/title <your session title>")
             else:
                 # Show current title and session ID if no argument given
                 if self._session_db:
-                    _cprint(f"  Session ID: {self.session_id}")
+                    _cprint(f"  Session ID: {self.session_id}（会话 ID）")
                     session = self._session_db.get_session(self.session_id)
                     if session and session.get("title"):
-                        _cprint(f"  Title: {session['title']}")
+                        _cprint(f"  Title: {session['title']}（标题）")
                     elif self._pending_title:
-                        _cprint(f"  Title (pending): {self._pending_title}")
+                        _cprint(f"  Title (pending): {self._pending_title}（待保存标题）")
                     else:
                         _cprint("  当前未设置标题。用法：/title <your session title>")
                 else:
-                    _cprint("  Session database not available.")
+                    _cprint("  Session database not available.（会话数据库不可用。）")
         elif canonical == "new":
             self.new_session()
         elif canonical == "resume":
@@ -6223,7 +6221,7 @@ class HermesCLI:
         elif canonical == "statusbar":
             self._status_bar_visible = not self._status_bar_visible
             state = "visible" if self._status_bar_visible else "hidden"
-            self._console_print(f"  Status bar {state}")
+            self._console_print(f"  Status bar {state}（状态栏已{'显示' if self._status_bar_visible else '隐藏'}）")
         elif canonical == "verbose":
             self._toggle_verbose()
         elif canonical == "footer":
@@ -6251,7 +6249,7 @@ class HermesCLI:
         elif canonical == "reload":
             from hermes_cli.config import reload_env
             count = reload_env()
-            print(f"  Reloaded .env ({count} var(s) updated)")
+            print(f"  Reloaded .env ({count} var(s) updated)（已重新加载 .env，更新 {count} 个变量）")
         elif canonical == "reload-mcp":
             # Interactive reload: confirm first (unless the user has opted out).
             # The auto-reload path (file watcher) calls _reload_mcp directly
@@ -6303,9 +6301,9 @@ class HermesCLI:
             else:
                 self._pending_input.put(payload)
                 if self._agent_running:
-                    _cprint(f"  Queued for the next turn: {payload[:80]}{'...' if len(payload) > 80 else ''}")
+                    _cprint(f"  Queued for the next turn: {payload[:80]}{'...' if len(payload) > 80 else ''}（已排队到下一轮）")
                 else:
-                    _cprint(f"  Queued: {payload[:80]}{'...' if len(payload) > 80 else ''}")
+                    _cprint(f"  Queued: {payload[:80]}{'...' if len(payload) > 80 else ''}（已排队）")
         elif canonical == "steer":
             # Inject a message after the next tool call without interrupting.
             # If the agent is actively running, push the text into the agent's
@@ -6508,6 +6506,7 @@ class HermesCLI:
                     session_db=self._session_db,
                     continuation_callback=self._continuation_callback,
                     task_mode=turn_route.get("task_mode"),
+                    continuation_policy=self.continuation_policy,
                     reasoning_config=self.reasoning_config,
                     service_tier=self.service_tier,
                     request_overrides=turn_route.get("request_overrides"),
@@ -6888,8 +6887,8 @@ class HermesCLI:
         if arg in ("status", "?"):
             state = "ON" if current else "OFF"
             _cprint(
-                f"  {_Colors.BOLD}Runtime footer:{_Colors.RESET} {state}\n"
-                f"  Fields: {', '.join(fields)}"
+                f"  {_Colors.BOLD}Runtime footer:{_Colors.RESET} {state}（运行时页脚）\n"
+                f"  Fields: {', '.join(fields)}（字段）"
             )
             return
 
@@ -6908,9 +6907,9 @@ class HermesCLI:
                 f"{_Colors.GREEN}ON{_Colors.RESET}" if new_state
                 else f"{_Colors.DIM}OFF{_Colors.RESET}"
             )
-            _cprint(f"  Runtime footer: {state}")
+            _cprint(f"  Runtime footer: {state}（运行时页脚）")
         else:
-            _cprint("  Failed to save runtime_footer setting to config.yaml")
+            _cprint("  Failed to save runtime_footer setting to config.yaml（保存运行时页脚配置失败）")
 
     def _toggle_verbose(self):
         """Cycle tool progress mode: off → new → all → verbose → off."""
@@ -6933,10 +6932,10 @@ class HermesCLI:
         # into garbled sequences like '?[33mTool progress: NEW?[0m' (#2262).
         from hermes_cli.colors import Colors as _Colors
         labels = {
-            "off": f"{_Colors.DIM}Tool progress: OFF{_Colors.RESET} — silent mode, just the final response.",
-            "new": f"{_Colors.YELLOW}Tool progress: NEW{_Colors.RESET} — show each new tool (skip repeats).",
-            "all": f"{_Colors.GREEN}Tool progress: ALL{_Colors.RESET} — show every tool call.",
-            "verbose": f"{_Colors.BOLD}{_Colors.GREEN}Tool progress: VERBOSE{_Colors.RESET} — full args, results, think blocks, and debug logs.",
+            "off": f"{_Colors.DIM}Tool progress: OFF{_Colors.RESET} — silent mode, just the final response.（静默模式，只显示最终回复。）",
+            "new": f"{_Colors.YELLOW}Tool progress: NEW{_Colors.RESET} — show each new tool (skip repeats).（仅显示新工具，跳过重复调用。）",
+            "all": f"{_Colors.GREEN}Tool progress: ALL{_Colors.RESET} — show every tool call.（显示每次工具调用。）",
+            "verbose": f"{_Colors.BOLD}{_Colors.GREEN}Tool progress: VERBOSE{_Colors.RESET} — full args, results, think blocks, and debug logs.（显示完整参数、结果、思考块和调试日志。）",
         }
         _cprint(labels.get(self.tool_progress_mode, ""))
 
@@ -6950,13 +6949,13 @@ class HermesCLI:
             os.environ.pop("HERMES_YOLO_MODE", None)
             _cprint(
                 f"  ⚠ YOLO mode {_Colors.BOLD}{_Colors.RED}OFF{_Colors.RESET}"
-                " — dangerous commands will require approval."
+                " — dangerous commands will require approval.（危险命令将重新需要审批。）"
             )
         else:
             os.environ["HERMES_YOLO_MODE"] = "1"
             _cprint(
                 f"  ⚡ YOLO mode {_Colors.BOLD}{_Colors.GREEN}ON{_Colors.RESET}"
-                " — all commands auto-approved. Use with caution."
+                " — all commands auto-approved. Use with caution.（所有命令将自动批准，请谨慎使用。）"
             )
 
     def _handle_reasoning_command(self, cmd: str):
@@ -6980,8 +6979,8 @@ class HermesCLI:
             else:
                 level = rc.get("effort", "medium")
             display_state = "on ✓" if self.show_reasoning else "off"
-            _cprint(f"  {_ACCENT}Reasoning effort:  {level}{_RST}")
-            _cprint(f"  {_ACCENT}Reasoning display: {display_state}{_RST}")
+            _cprint(f"  {_ACCENT}Reasoning effort:  {level}{_RST}（推理强度）")
+            _cprint(f"  {_ACCENT}Reasoning display: {display_state}{_RST}（推理显示）")
             _cprint(f"  {_DIM}用法：/reasoning <none|minimal|low|medium|high|xhigh|show|hide>{_RST}")
             return
 
@@ -6993,32 +6992,32 @@ class HermesCLI:
             if self.agent:
                 self.agent.reasoning_callback = self._current_reasoning_callback()
             save_config_value("display.show_reasoning", True)
-            _cprint(f"  {_ACCENT}✓ Reasoning display: ON (saved){_RST}")
-            _cprint(f"  {_DIM}  Model thinking will be shown during and after each response.{_RST}")
+            _cprint(f"  {_ACCENT}✓ Reasoning display: ON (saved){_RST}（已开启并保存）")
+            _cprint(f"  {_DIM}  Model thinking will be shown during and after each response.（每次回复期间和之后会显示模型思考。）{_RST}")
             return
         if arg in ("hide", "off"):
             self.show_reasoning = False
             if self.agent:
                 self.agent.reasoning_callback = self._current_reasoning_callback()
             save_config_value("display.show_reasoning", False)
-            _cprint(f"  {_ACCENT}✓ Reasoning display: OFF (saved){_RST}")
+            _cprint(f"  {_ACCENT}✓ Reasoning display: OFF (saved){_RST}（已关闭并保存）")
             return
 
         # Effort level change
         parsed = _parse_reasoning_config(arg)
         if parsed is None:
-            _cprint(f"  {_DIM}(._.) Unknown argument: {arg}{_RST}")
-            _cprint(f"  {_DIM}Valid levels: none, minimal, low, medium, high, xhigh{_RST}")
-            _cprint(f"  {_DIM}Display:      show, hide{_RST}")
+            _cprint(f"  {_DIM}(._.) Unknown argument: {arg}（未知参数）{_RST}")
+            _cprint(f"  {_DIM}Valid levels: none, minimal, low, medium, high, xhigh（有效强度）{_RST}")
+            _cprint(f"  {_DIM}Display:      show, hide（显示开关）{_RST}")
             return
 
         self.reasoning_config = parsed
         self.agent = None  # Force agent re-init with new reasoning config
 
         if save_config_value("agent.reasoning_effort", arg):
-            _cprint(f"  {_ACCENT}✓ Reasoning effort set to '{arg}' (saved to config){_RST}")
+            _cprint(f"  {_ACCENT}✓ Reasoning effort set to '{arg}' (saved to config){_RST}（推理强度已保存）")
         else:
-            _cprint(f"  {_ACCENT}✓ Reasoning effort set to '{arg}' (config save failed; in-memory only){_RST}")
+            _cprint(f"  {_ACCENT}✓ Reasoning effort set to '{arg}' (config save failed; in-memory only){_RST}（推理强度仅当前内存生效）")
 
     def _handle_busy_command(self, cmd: str):
         """Handle /busy — control what Enter does while Hermes is working.
@@ -7032,40 +7031,40 @@ class HermesCLI:
         """
         parts = cmd.strip().split(maxsplit=1)
         if len(parts) < 2 or parts[1].strip().lower() == "status":
-            _cprint(f"  {_ACCENT}Busy input mode: {self.busy_input_mode}{_RST}")
+            _cprint(f"  {_ACCENT}Busy input mode: {self.busy_input_mode}{_RST}（忙碌输入模式）")
             if self.busy_input_mode == "queue":
-                _behavior = "queues for next turn"
+                _behavior = "queues for next turn（排队到下一轮）"
             elif self.busy_input_mode == "steer":
-                _behavior = "steers into current run (after next tool call)"
+                _behavior = "steers into current run (after next tool call)（在下一次工具调用后注入当前运行）"
             else:
-                _behavior = "interrupts current run"
+                _behavior = "interrupts current run（中断当前运行）"
             _cprint(f"  {_DIM}Enter while busy: {_behavior}{_RST}")
             _cprint(f"  {_DIM}用法：/busy [queue|steer|interrupt|status]{_RST}")
             return
 
         arg = parts[1].strip().lower()
         if arg not in {"queue", "interrupt", "steer"}:
-            _cprint(f"  {_DIM}(._.) Unknown argument: {arg}{_RST}")
+            _cprint(f"  {_DIM}(._.) Unknown argument: {arg}（未知参数）{_RST}")
             _cprint(f"  {_DIM}用法：/busy [queue|steer|interrupt|status]{_RST}")
             return
 
         self.busy_input_mode = arg
         if save_config_value("display.busy_input_mode", arg):
             if arg == "queue":
-                behavior = "Enter will queue follow-up input while Hermes is busy."
+                behavior = "Enter will queue follow-up input while Hermes is busy.（Hermes 忙碌时，Enter 会把后续输入排队。）"
             elif arg == "steer":
-                behavior = "Enter will steer your message into the current run (after the next tool call)."
+                behavior = "Enter will steer your message into the current run (after the next tool call).（Enter 会在下一次工具调用后把消息注入当前运行。）"
             else:
-                behavior = "Enter will interrupt the current run while Hermes is busy."
-            _cprint(f"  {_ACCENT}✓ Busy input mode set to '{arg}' (saved to config){_RST}")
+                behavior = "Enter will interrupt the current run while Hermes is busy.（Hermes 忙碌时，Enter 会中断当前运行。）"
+            _cprint(f"  {_ACCENT}✓ Busy input mode set to '{arg}' (saved to config){_RST}（忙碌输入模式已保存）")
             _cprint(f"  {_DIM}{behavior}{_RST}")
         else:
-            _cprint(f"  {_ACCENT}✓ Busy input mode set to '{arg}' (session only){_RST}")
+            _cprint(f"  {_ACCENT}✓ Busy input mode set to '{arg}' (session only){_RST}（仅当前会话生效）")
 
     def _handle_fast_command(self, cmd: str):
         """Handle /fast — toggle fast mode (OpenAI Priority Processing / Anthropic Fast Mode)."""
         if not self._fast_command_available():
-            _cprint("  (._.) /fast is only available for models that support fast mode (OpenAI Priority Processing or Anthropic Fast Mode).")
+            _cprint("  (._.) /fast is only available for models that support fast mode (OpenAI Priority Processing or Anthropic Fast Mode).（/fast 仅支持具备快速模式的模型。）")
             return
 
         # Determine the branding for the current model
@@ -7080,7 +7079,7 @@ class HermesCLI:
         parts = cmd.strip().split(maxsplit=1)
         if len(parts) < 2 or parts[1].strip().lower() == "status":
             status = "fast" if self.service_tier == "priority" else "normal"
-            _cprint(f"  {_ACCENT}{feature_name}: {status}{_RST}")
+            _cprint(f"  {_ACCENT}{feature_name}: {status}{_RST}（快速模式状态）")
             _cprint(f"  {_DIM}用法：/fast [normal|fast|status]{_RST}")
             return
 
@@ -7095,15 +7094,15 @@ class HermesCLI:
             saved_value = "normal"
             label = "NORMAL"
         else:
-            _cprint(f"  {_DIM}(._.) Unknown argument: {arg}{_RST}")
+            _cprint(f"  {_DIM}(._.) Unknown argument: {arg}（未知参数）{_RST}")
             _cprint(f"  {_DIM}用法：/fast [normal|fast|status]{_RST}")
             return
 
         self.agent = None  # Force agent re-init with new service-tier config
         if save_config_value("agent.service_tier", saved_value):
-            _cprint(f"  {_ACCENT}✓ {feature_name} set to {label} (saved to config){_RST}")
+            _cprint(f"  {_ACCENT}✓ {feature_name} set to {label} (saved to config){_RST}（已保存到配置）")
         else:
-            _cprint(f"  {_ACCENT}✓ {feature_name} set to {label} (session only){_RST}")
+            _cprint(f"  {_ACCENT}✓ {feature_name} set to {label} (session only){_RST}（仅当前会话生效）")
 
     def _on_reasoning(self, reasoning_text: str):
         """Callback for intermediate reasoning display during tool-call loops."""
@@ -7251,33 +7250,33 @@ class HermesCLI:
         )
         elapsed = format_duration_compact((datetime.now() - self.session_start).total_seconds())
 
-        print("  📊 会话 Token 用量")
+        print("  📊 Session Token Usage（会话 Token 用量）")
         print(f"  {'─' * 40}")
-        print(f"  模型：                     {agent.model}")
-        print(f"  输入 tokens：              {input_tokens:>10,}")
-        print(f"  缓存读取 tokens：          {cache_read_tokens:>10,}")
-        print(f"  缓存写入 tokens：          {cache_write_tokens:>10,}")
-        print(f"  输出 tokens：              {output_tokens:>10,}")
+        print(f"  Model:                    {agent.model}（模型）")
+        print(f"  Input tokens:             {input_tokens:>10,}（输入）")
+        print(f"  Cache read tokens:        {cache_read_tokens:>10,}（缓存读取）")
+        print(f"  Cache write tokens:       {cache_write_tokens:>10,}（缓存写入）")
+        print(f"  Output tokens:            {output_tokens:>10,}（输出）")
         print(f"  Prompt tokens（总计）：     {prompt:>10,}")
-        print(f"  Completion tokens：        {completion:>10,}")
-        print(f"  总 tokens：                {total:>10,}")
-        print(f"  API 调用次数：             {calls:>10,}")
-        print(f"  会话时长：                 {elapsed:>10}")
-        print(f"  费用状态：                {cost_result.status:>10}")
-        print(f"  费用来源：                {cost_result.source:>10}")
+        print(f"  Completion tokens:        {completion:>10,}（完成）")
+        print(f"  Total tokens:             {total:>10,}（总计）")
+        print(f"  API calls:                {calls:>10,}（API 调用）")
+        print(f"  Session duration:         {elapsed:>10}（会话时长）")
+        print(f"  Cost status:              {cost_result.status:>10}（费用状态）")
+        print(f"  Cost source:              {cost_result.source:>10}（费用来源）")
         if cost_result.amount_usd is not None:
             prefix = "~" if cost_result.status == "estimated" else ""
-            print(f"  总费用：                  {prefix}${float(cost_result.amount_usd):>10.4f}")
+            print(f"  Total cost:               {prefix}${float(cost_result.amount_usd):>10.4f}（总费用）")
         elif cost_result.status == "included":
-            print(f"  总费用：                  {'included':>10}")
+            print(f"  Total cost:               {'included':>10}（总费用）")
         else:
-            print(f"  总费用：                  {'n/a':>10}")
+            print(f"  Total cost:               {'n/a':>10}（总费用）")
         print(f"  {'─' * 40}")
-        print(f"  当前上下文：      {last_prompt:,} / {ctx_len:,} ({pct:.0f}%)")
-        print(f"  消息数：          {msg_count}")
-        print(f"  压缩次数：        {compressions}")
+        print(f"  Context:          {last_prompt:,} / {ctx_len:,} ({pct:.0f}%)（当前上下文）")
+        print(f"  Messages:         {msg_count}（消息数）")
+        print(f"  Compressions:     {compressions}（压缩次数）")
         if cost_result.status == "unknown":
-            print(f"  备注：            {agent.model} 的定价信息未知")
+            print(f"  Note:             Pricing unknown for {agent.model}（定价信息未知）")
 
         # Account limits -- fetched off-thread with a hard timeout so slow
         # provider APIs don't hang the prompt.
@@ -8699,13 +8698,13 @@ class HermesCLI:
                     )
                     if _skipped:
                         _cprint(
-                            f"  {_DIM}⚠ skipped {len(_skipped)} unreadable image path(s){_RST}"
+                            f"  {_DIM}⚠ 已跳过 {len(_skipped)} 个无法读取的图片路径{_RST}"
                         )
                     if any(p.get("type") == "image_url" for p in _parts):
                         _img_names = ", ".join(Path(p).name for p in _img_str_paths)
                         _cprint(
-                            f"  {_DIM}📎 attaching {len(images)} image(s) natively "
-                            f"(model supports vision): {_img_names}{_RST}"
+                            f"  {_DIM}📎 正在原生附加 {len(images)} 张图片"
+                            f"（当前模型支持视觉）：{_img_names}{_RST}"
                         )
                         message = _parts
                     else:
@@ -11090,8 +11089,8 @@ class HermesCLI:
                         _remainder = _file_drop["remainder"]
                         if _file_drop["is_image"]:
                             submit_images.append(_drop_path)
-                            user_input = _remainder or f"[User attached image: {_drop_path.name}]"
-                            _cprint(f"  📎 Auto-attached image: {_drop_path.name}")
+                            user_input = _remainder or f"[用户附加了一张图片：{_drop_path.name}]"
+                            _cprint(f"  📎 已自动附加图片：{_drop_path.name}")
                         else:
                             _cprint(f"  📄 Detected file: {_drop_path.name}")
                             user_input = (
@@ -11119,7 +11118,7 @@ class HermesCLI:
                     # Show image attachment count
                     if submit_images:
                         n = len(submit_images)
-                        _cprint(f"  {_DIM}📎 {n} image{'s' if n > 1 else ''} attached{_RST}")
+                        _cprint(f"  {_DIM}📎 已附加 {n} 张图片{_RST}")
 
                     # Regular chat - run agent
                     self._agent_running = True
@@ -11606,7 +11605,7 @@ def main(
             sys.exit(1)
         else:
             cli.show_banner()
-            _query_label = query or ("[image attached]" if single_query_images else "")
+            _query_label = query or ("[已附加图片]" if single_query_images else "")
             if _query_label:
                 cli.console.print(f"[bold blue]Query:[/] {_query_label}")
             cli.chat(query, images=single_query_images or None)

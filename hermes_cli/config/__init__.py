@@ -589,6 +589,10 @@ DEFAULT_CONFIG = {
         "tool_progress_command": False,  # Enable /verbose command in messaging gateway
         "tool_progress_overrides": {},  # DEPRECATED — use display.platforms instead
         "tool_preview_length": 0,  # Max chars for tool call previews (0 = no limit, show full paths/commands)
+        "user_message_preview": {
+            "first_lines": 2,
+            "last_lines": 2,
+        },
         "platforms": {},  # Per-platform display overrides: {"telegram": {"tool_progress": "all"}, "slack": {"tool_progress": "off"}}
     },
     # Privacy settings
@@ -722,6 +726,7 @@ DEFAULT_CONFIG = {
         "allowed_channels": "",  # If set, bot ONLY responds in these channel IDs (whitelist)
         "auto_thread": True,  # Auto-create threads on @mention in channels (like Slack)
         "reactions": True,  # Add 👀/✅/❌ reactions to messages during processing
+        "channel_prompts": {},
     },
     # WhatsApp platform settings (gateway mode)
     "whatsapp": {
@@ -2943,6 +2948,79 @@ def cfg_get(cfg: Optional[Dict[str, Any]], *keys: str, default: Any = None) -> A
     return node
 
 
+def normalize_continuation_policy(policy: Any) -> Dict[str, Any]:
+    """Normalize ``agent.continuation_policy`` into a stable dict."""
+    raw = policy if isinstance(policy, dict) else {}
+    auto_modes = raw.get("auto_task_modes")
+    if not isinstance(auto_modes, (list, tuple, set)):
+        auto_modes = ["heavy"]
+    auto_modes = [str(mode).strip().lower() for mode in auto_modes if str(mode).strip()]
+    if not auto_modes:
+        auto_modes = ["heavy"]
+    return {
+        "enabled": bool(raw.get("enabled", True)),
+        "auto_task_modes": auto_modes,
+        "legacy_toolset_fallback": bool(raw.get("legacy_toolset_fallback", True)),
+        "manual_fallback": bool(raw.get("manual_fallback", False)),
+        "require_tool_activity": bool(raw.get("require_tool_activity", False)),
+    }
+
+
+def resolve_agent_turn_limits(
+    agent_cfg: Optional[Dict[str, Any]],
+    *,
+    env_max_turns: Optional[str] = None,
+    explicit_max_turns: Optional[int] = None,
+    root_max_turns: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Resolve agent turn-budget settings with shared defaults and coercion."""
+    cfg = agent_cfg if isinstance(agent_cfg, dict) else {}
+
+    if explicit_max_turns is not None:
+        max_turns = explicit_max_turns
+    elif cfg.get("max_turns") is not None:
+        try:
+            max_turns = int(cfg.get("max_turns"))
+        except (TypeError, ValueError):
+            max_turns = int(DEFAULT_CONFIG["agent"]["max_turns"])
+    elif root_max_turns is not None:
+        try:
+            max_turns = int(root_max_turns)
+        except (TypeError, ValueError):
+            max_turns = int(DEFAULT_CONFIG["agent"]["max_turns"])
+    elif env_max_turns:
+        try:
+            max_turns = int(env_max_turns)
+        except (TypeError, ValueError):
+            max_turns = int(DEFAULT_CONFIG["agent"]["max_turns"])
+    else:
+        max_turns = int(DEFAULT_CONFIG["agent"]["max_turns"])
+
+    try:
+        max_turns_with_approval = int(
+            cfg.get(
+                "max_turns_with_approval",
+                DEFAULT_CONFIG["agent"]["max_turns_with_approval"],
+            )
+        )
+    except (TypeError, ValueError):
+        max_turns_with_approval = int(DEFAULT_CONFIG["agent"]["max_turns_with_approval"])
+    max_turns_with_approval = max(max_turns, max_turns_with_approval)
+
+    try:
+        approval_step = int(cfg.get("max_turns_approval_step", DEFAULT_CONFIG["agent"]["max_turns_approval_step"]))
+    except (TypeError, ValueError):
+        approval_step = int(DEFAULT_CONFIG["agent"]["max_turns_approval_step"])
+    approval_step = max(0, approval_step)
+
+    return {
+        "max_turns": max_turns,
+        "max_turns_with_approval": max_turns_with_approval,
+        "max_turns_approval_step": approval_step,
+        "continuation_policy": normalize_continuation_policy(cfg.get("continuation_policy")),
+    }
+
+
 def _normalize_custom_provider_entry(
     entry: Any,
     provider_key: Optional[str] = None,
@@ -2951,14 +3029,24 @@ def _normalize_custom_provider_entry(
     if not isinstance(entry, dict):
         return None
     name = str(entry.get("name") or provider_key or "").strip()
-    base_url = str(entry.get("base_url") or entry.get("url") or "").strip()
+    base_url = str(entry.get("base_url") or entry.get("url") or entry.get("api") or "").strip()
     if not name or not base_url:
         return None
-    normalized = dict(entry)
-    normalized["name"] = name
-    normalized["base_url"] = base_url
+    normalized: Dict[str, Any] = {
+        "name": name,
+        "base_url": base_url,
+    }
     if provider_key:
-        normalized.setdefault("provider_key", provider_key)
+        normalized["provider_key"] = provider_key
+    api_key = str(entry.get("api_key") or "").strip()
+    if api_key:
+        normalized["api_key"] = api_key
+    api_mode = str(entry.get("api_mode") or entry.get("transport") or "").strip()
+    if api_mode:
+        normalized["api_mode"] = api_mode
+    model = str(entry.get("model") or entry.get("default_model") or "").strip()
+    if model:
+        normalized["model"] = model
     return normalized
 
 

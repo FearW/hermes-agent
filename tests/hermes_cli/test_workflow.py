@@ -1,4 +1,5 @@
 import argparse
+from unittest.mock import MagicMock, patch
 
 from hermes_cli import workflow as wf
 
@@ -93,3 +94,58 @@ def test_build_workflow_parser_registers_command():
     args = parser.parse_args(["workflow", "list"])
     assert args.command == "workflow"
     assert args.workflow_action == "list"
+
+
+def test_execute_with_agent_uses_shared_turn_limit_resolution(tmp_path, monkeypatch):
+    home = _patch_home(tmp_path, monkeypatch)
+    workflow = {
+        "name": "budget-workflow",
+        "prompt_template": "Summarize",
+        "inputs": {"paths": [], "globs": []},
+        "outputs": {"format": "markdown", "write_to": None},
+        "skills": [],
+    }
+    fake_db = MagicMock()
+
+    with patch("hermes_cli.config.load_config", return_value={"max_turns": 77, "agent": {}, "model": "test/model"}), \
+         patch("dotenv.load_dotenv"), \
+         patch("hermes_cli.workflow.apply_ipv4_preference", create=True), \
+         patch("hermes_cli.workflow.parse_reasoning_effort", return_value={}, create=True), \
+         patch("cron.scheduler._build_job_prompt", return_value="effective prompt"), \
+         patch("hermes_state.SessionDB", return_value=fake_db), \
+         patch(
+             "hermes_cli.runtime_provider.resolve_runtime_provider",
+             return_value={
+                 "api_key": "test-key",
+                 "base_url": "https://example.invalid/v1",
+                 "provider": "openrouter",
+                 "api_mode": "chat_completions",
+             },
+         ), \
+         patch(
+             "agent.smart_model_routing.resolve_turn_route",
+             return_value={
+                 "model": "test/model",
+                 "runtime": {
+                     "api_key": "test-key",
+                     "base_url": "https://example.invalid/v1",
+                     "provider": "openrouter",
+                     "api_mode": "chat_completions",
+                     "command": None,
+                     "args": [],
+                 },
+                 "task_mode": "heavy",
+             },
+         ), \
+         patch("agent.smart_model_routing.resolve_turn_toolsets", return_value=["all"]), \
+         patch("run_agent.AIAgent") as mock_agent_cls:
+        mock_agent = MagicMock()
+        mock_agent.run_conversation.return_value = {"final_response": "ok"}
+        mock_agent_cls.return_value = mock_agent
+
+        result = wf._execute_with_agent("prompt", workflow, "workflow_complete")
+
+    assert result["result"]["final_response"] == "ok"
+    kwargs = mock_agent_cls.call_args.kwargs
+    assert kwargs["max_iterations"] == 77
+    assert kwargs["continuation_policy"]["auto_task_modes"] == ["heavy"]

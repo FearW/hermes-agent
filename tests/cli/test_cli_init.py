@@ -23,6 +23,13 @@ def _make_cli(env_overrides=None, config_overrides=None, **kwargs):
             "max_turns": 60,
             "max_turns_with_approval": 150,
             "max_turns_approval_step": 30,
+            "continuation_policy": {
+                "enabled": True,
+                "auto_task_modes": ["heavy"],
+                "legacy_toolset_fallback": True,
+                "manual_fallback": False,
+                "require_tool_activity": False,
+            },
         },
         "terminal": {"env_type": "local"},
     }
@@ -95,6 +102,8 @@ class TestMaxTurnsResolution:
         cli = _make_cli()
         assert cli.max_turns_with_approval == 150
         assert cli.max_turns_approval_step == 30
+        assert cli.continuation_policy["enabled"] is True
+        assert cli.continuation_policy["auto_task_modes"] == ["heavy"]
 
 
 class TestVerboseAndToolProgress:

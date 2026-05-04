@@ -954,6 +954,7 @@ class AIAgent:
         tool_gen_callback: callable = None,
         status_callback: callable = None,
         task_mode: str = None,
+        continuation_policy: Dict[str, Any] = None,
         max_tokens: int = None,
         reasoning_config: Dict[str, Any] = None,
         service_tier: str = None,
@@ -1011,6 +1012,7 @@ class AIAgent:
             continuation_callback (callable): Callback function(payload) -> bool/str used when the
                 agent reaches the current iteration cap and wants approval to continue.
             task_mode (str): Routed task mode for the current turn (``light`` / ``heavy`` / ``inherit``).
+            continuation_policy (Dict[str, Any]): Normalized continuation strategy injected by the caller.
             max_tokens (int): Maximum tokens for model responses (optional, uses model default if not set)
             reasoning_config (Dict): OpenRouter reasoning configuration override (e.g. {"effort": "none"} to disable thinking).
                 If None, defaults to {"enabled": True, "effort": "medium"} for OpenRouter. Set to disable/customize reasoning.
@@ -1048,9 +1050,7 @@ class AIAgent:
         self._base_max_iterations = self.max_iterations
         self._base_max_iterations_with_approval = self.max_iterations_with_approval
         self._base_iteration_extension_step = self.iteration_extension_step
-        self._continuation_policy = _normalize_continuation_policy(
-            cfg_get(load_config(), "agent", "continuation_policy", default=None)
-        )
+        self._continuation_policy = _normalize_continuation_policy(continuation_policy)
         # Shared iteration budget — parent creates, children inherit.
         # Consumed by every LLM turn across parent + all subagents.
         self.iteration_budget = iteration_budget or IterationBudget(max_iterations)
@@ -8595,7 +8595,7 @@ class AIAgent:
             # (gateway, batch, quiet) still get reasoning.
             # Any reasoning that wasn't shown during streaming is caught by the
             # CLI post-response display fallback (cli.py _reasoning_shown_this_turn).
-            if not self.stream_delta_callback and not self._stream_callback:
+            if not getattr(self, "stream_delta_callback", None) and not getattr(self, "_stream_callback", None):
                 try:
                     self.reasoning_callback(reasoning_text)
                 except Exception:
