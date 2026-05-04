@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from utils import is_truthy_value
 
@@ -66,6 +66,14 @@ _COMPLEX_TASK_KEYWORDS = {
     "落地", "自动", "外部程序", "15分钟", "超时", "回滚",
 }
 
+_GENERAL_HINT_TOKENS = {"总结", "翻译", "解释", "方案", "建议", "整理"}
+_COMPLEX_HINT_TOKENS = {
+    "代码", "修复", "重构", "排查", "报错", "异常", "实现", "部署", "上线",
+    "工具", "终端", "脚本", "备份", "恢复", "复盘", "优化", "可行性分析",
+    "落地", "自动", "外部程序", "15分钟", "超时", "回滚",
+}
+_DEFAULT_ROUTE_MODES = {"simple": "light", "general": "light", "complex": "heavy"}
+
 
 def _coerce_bool(value: Any, default: bool = False) -> bool:
     return is_truthy_value(value, default=default)
@@ -76,6 +84,46 @@ def _coerce_int(value: Any, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _coerce_str_list(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    if isinstance(value, (list, tuple, set)):
+        out: List[str] = []
+        for item in value:
+            if item is None:
+                continue
+            text = str(item).strip()
+            if text:
+                out.append(text)
+        return out
+    return []
+
+
+def _merged_keyword_set(base: set[str], extra_value: Any) -> set[str]:
+    extras = {item.lower() for item in _coerce_str_list(extra_value)}
+    return set(base) | extras
+
+
+def _contains_any(text: str, tokens: Any) -> bool:
+    return any(token and token in text for token in _coerce_str_list(tokens))
+
+
+def _resolve_route_modes(routing_config: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    cfg = routing_config or {}
+    configured = cfg.get("route_modes")
+    if not isinstance(configured, dict):
+        return dict(_DEFAULT_ROUTE_MODES)
+
+    resolved = dict(_DEFAULT_ROUTE_MODES)
+    for key in ("simple", "general", "complex"):
+        value = str(configured.get(key) or "").strip().lower()
+        if value in {"light", "heavy", "inherit"}:
+            resolved[key] = value
+    return resolved
 
 
 def _primary_route(primary: Dict[str, Any]) -> Dict[str, Any]:
@@ -113,34 +161,57 @@ def _classify_turn_complexity(
 
     max_chars = _coerce_int(cfg.get("max_simple_chars"), 160)
     max_words = _coerce_int(cfg.get("max_simple_words"), 28)
+    max_lines = _coerce_int(cfg.get("max_simple_lines"), 2)
+    min_complex_chars = _coerce_int(cfg.get("min_complex_chars"), max(max_chars * 2, 320))
+    min_complex_words = _coerce_int(cfg.get("min_complex_words"), max(max_words * 2, 60))
+    min_complex_lines = _coerce_int(cfg.get("min_complex_lines"), 6)
+    min_complex_sentences = _coerce_int(cfg.get("min_complex_sentences"), 4)
+    min_complex_chars_with_many_sentences = _coerce_int(
+        cfg.get("min_complex_chars_with_many_sentences"),
+        180,
+    )
     lowered = text.lower()
     words = {token.strip(".,:;!?()[]{}\"'`") for token in lowered.split()}
+    general_keywords = _merged_keyword_set(_GENERAL_KEYWORDS, cfg.get("general_keywords"))
+    complex_keywords = _merged_keyword_set(_COMPLEX_TASK_KEYWORDS, cfg.get("complex_keywords"))
 
     line_count = text.count("\n") + 1
     char_count = len(text)
     word_count = len([w for w in lowered.split() if w.strip()])
     has_code_block = "```" in text or "`" in text
     has_url = bool(_URL_RE.search(text))
-    has_general_keywords = bool(words & _GENERAL_KEYWORDS) or any(
-        token in text for token in ["总结", "翻译", "解释", "方案", "建议", "整理"]
+    has_general_keywords = bool(words & general_keywords) or _contains_any(
+        text,
+        list(_GENERAL_HINT_TOKENS) + _coerce_str_list(cfg.get("force_general_contains")),
     )
-    has_complex_keywords = bool(words & _COMPLEX_TASK_KEYWORDS) or any(
-        token in text for token in [
-            "代码", "修复", "重构", "排查", "报错", "异常", "实现", "部署", "上线",
-            "工具", "终端", "脚本", "备份", "恢复", "复盘", "优化", "可行性分析",
-            "落地", "自动", "外部程序", "15分钟", "超时", "回滚",
-        ]
+    has_complex_keywords = bool(words & complex_keywords) or _contains_any(
+        text,
+        list(_COMPLEX_HINT_TOKENS) + _coerce_str_list(cfg.get("force_heavy_contains")),
     )
     has_question_chain = text.count("?") >= 2 or text.count("？") >= 2
-    has_many_sentences = sum(text.count(mark) for mark in ".!?。！？") >= 4
+    has_many_sentences = sum(text.count(mark) for mark in ".!?。！？") >= min_complex_sentences
     has_path_like = "/" in text or "\\" in text
-    has_constraint_chain = any(token in text for token in ["并且", "如果", "若是", "要是", "然后", "成功了", "失败", "完成", "自动恢复", "不断", "每次"]) and char_count >= 120
-    has_timeout_or_recovery = any(token in text for token in ["15分钟", "超时", "恢复", "备份", "回滚", "拉起"])
+    has_constraint_chain = _contains_any(
+        text,
+        [
+            "并且", "如果", "若是", "要是", "然后", "成功了", "失败", "完成",
+            "自动恢复", "不断", "每次",
+        ] + _coerce_str_list(cfg.get("constraint_contains")),
+    ) and char_count >= _coerce_int(cfg.get("min_constraint_chars"), 120)
+    has_timeout_or_recovery = _contains_any(
+        text,
+        ["15分钟", "超时", "恢复", "备份", "回滚", "拉起"]
+        + _coerce_str_list(cfg.get("timeout_or_recovery_contains")),
+    )
+    if _contains_any(text, cfg.get("force_light_contains")):
+        return "simple"
+    if _contains_any(text, cfg.get("force_heavy_contains")):
+        return "complex"
 
     if (
         char_count <= max_chars
         and word_count <= max_words
-        and line_count <= 2
+        and line_count <= max_lines
         and not has_code_block
         and not has_url
         and not has_general_keywords
@@ -152,9 +223,9 @@ def _classify_turn_complexity(
         return "simple"
 
     if (
-        char_count >= max(max_chars * 2, 320)
-        or word_count >= max(max_words * 2, 60)
-        or line_count >= 6
+        char_count >= min_complex_chars
+        or word_count >= min_complex_words
+        or line_count >= min_complex_lines
         or has_code_block
         or has_url
         or has_complex_keywords
@@ -162,7 +233,7 @@ def _classify_turn_complexity(
         or has_path_like
         or has_constraint_chain
         or has_timeout_or_recovery
-        or (char_count >= 180 and has_many_sentences)
+        or (char_count >= min_complex_chars_with_many_sentences and has_many_sentences)
     ):
         return "complex"
 
@@ -248,6 +319,41 @@ def _build_signature(model: str, runtime: Dict[str, Any]) -> tuple:
         runtime.get("command"),
         tuple(runtime.get("args") or ()),
     )
+
+
+def _route_task_mode(
+    routing_config: Optional[Dict[str, Any]],
+    turn_complexity: Optional[str],
+) -> str:
+    """Return ``light`` / ``heavy`` / ``inherit`` for this turn.
+
+    Mode mapping is configurable via ``smart_model_routing.route_modes``.
+    """
+    cfg = routing_config or {}
+    if not _coerce_bool(cfg.get("enabled"), False):
+        return "inherit"
+    modes = _resolve_route_modes(cfg)
+    return modes.get(str(turn_complexity or "general").strip().lower(), "light")
+
+
+def resolve_turn_toolsets(
+    route: Optional[Dict[str, Any]],
+    default_toolsets: Optional[List[str]],
+) -> Optional[List[str]]:
+    """Resolve the effective toolset list for a routed turn.
+
+    ``light``  => no tools at all (basic Q&A only)
+    ``heavy``  => full tool + MCP + skills access
+    ``inherit`` => keep the caller's configured toolsets unchanged
+    """
+    mode = str((route or {}).get("task_mode") or "inherit").strip().lower()
+    if mode == "light":
+        return []
+    if mode == "heavy":
+        return ["all"]
+    if default_toolsets is None:
+        return None
+    return list(default_toolsets)
 
 
 def choose_cheap_model_route(
@@ -336,6 +442,11 @@ def resolve_turn_route(
     Returns a dict with model/runtime/signature/label fields.
     """
     cfg = routing_config or {}
+    turn_complexity = (
+        _classify_turn_complexity(user_message, cfg)
+        if _coerce_bool(cfg.get("enabled"), False)
+        else None
+    )
     strategy = str(cfg.get("strategy") or "cheap_model").strip().lower()
     if strategy == "executor":
         route = choose_executor_route(
@@ -355,42 +466,58 @@ def resolve_turn_route(
             )
             route.setdefault("routing_reason", route.get("turn_complexity") or "general")
             route.setdefault("turn_complexity", route.get("routing_reason") or "general")
-            return route
+            turn_complexity = route.get("turn_complexity") or turn_complexity
+            result = route
+        else:
+            result = _primary_route(primary)
     else:
         route = choose_cheap_model_route(user_message, cfg)
-    if not route:
-        return _primary_route(primary)
+        if not route:
+            result = _primary_route(primary)
+        else:
+            from hermes_cli.runtime_provider import resolve_runtime_provider
 
-    from hermes_cli.runtime_provider import resolve_runtime_provider
+            explicit_api_key = None
+            api_key_env = str(route.get("api_key_env") or "").strip()
+            if api_key_env:
+                explicit_api_key = os.getenv(api_key_env) or None
 
-    explicit_api_key = None
-    api_key_env = str(route.get("api_key_env") or "").strip()
-    if api_key_env:
-        explicit_api_key = os.getenv(api_key_env) or None
+            try:
+                runtime = resolve_runtime_provider(
+                    requested=route.get("provider"),
+                    explicit_api_key=explicit_api_key,
+                    explicit_base_url=route.get("base_url"),
+                )
+            except Exception:
+                result = _primary_route(primary)
+            else:
+                result = {
+                    "model": route.get("model"),
+                    "runtime": {
+                        "api_key": runtime.get("api_key"),
+                        "base_url": runtime.get("base_url"),
+                        "provider": runtime.get("provider"),
+                        "api_mode": runtime.get("api_mode"),
+                        "command": runtime.get("command"),
+                        "args": list(runtime.get("args") or []),
+                        "credential_pool": runtime.get("credential_pool"),
+                    },
+                    "label": f"smart route → {route.get('model')} ({runtime.get('provider')})",
+                    "signature": _build_signature(route.get("model"), runtime),
+                }
+                result["routing_reason"] = route.get("routing_reason")
+                result["turn_complexity"] = (
+                    turn_complexity
+                    or route.get("turn_complexity")
+                    or route.get("routing_reason")
+                )
+                turn_complexity = result.get("turn_complexity") or turn_complexity
 
-    try:
-        runtime = resolve_runtime_provider(
-            requested=route.get("provider"),
-            explicit_api_key=explicit_api_key,
-            explicit_base_url=route.get("base_url"),
-        )
-    except Exception:
-        return _primary_route(primary)
-
-    result = {
-        "model": route.get("model"),
-        "runtime": {
-            "api_key": runtime.get("api_key"),
-            "base_url": runtime.get("base_url"),
-            "provider": runtime.get("provider"),
-            "api_mode": runtime.get("api_mode"),
-            "command": runtime.get("command"),
-            "args": list(runtime.get("args") or []),
-            "credential_pool": runtime.get("credential_pool"),
-        },
-        "label": f"smart route → {route.get('model')} ({runtime.get('provider')})",
-        "signature": _build_signature(route.get("model"), runtime),
-    }
-    result["routing_reason"] = route.get("routing_reason")
-    result["turn_complexity"] = route.get("turn_complexity") or route.get("routing_reason")
+    if turn_complexity and not result.get("turn_complexity"):
+        result["turn_complexity"] = turn_complexity
+    task_mode = _route_task_mode(cfg, result.get("turn_complexity") or turn_complexity)
+    result["task_mode"] = task_mode
+    signature = tuple(result.get("signature") or _build_signature(result.get("model"), result.get("runtime") or {}))
+    if not signature or signature[-1] != task_mode:
+        result["signature"] = signature + (task_mode,)
     return result

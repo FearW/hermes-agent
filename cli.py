@@ -312,7 +312,9 @@ def load_cli_config() -> Dict[str, Any]:
             "threshold": 0.50,    # Compress at 50% of model's context limit
         },
         "agent": {
-            "max_turns": 90,  # Default max tool-calling iterations (shared with subagents)
+            "max_turns": 60,  # Default max tool-calling iterations before automatic continuation
+            "max_turns_with_approval": 150,  # Hard cap for automatic continuation on heavy turns
+            "max_turns_approval_step": 30,  # Iterations added per automatic continuation step
             "verbose": False,
             "system_prompt": "",
             "prefill_messages_file": "",
@@ -1869,7 +1871,7 @@ class HermesCLI:
             provider: Inference provider ("auto", "openrouter", "nous", "openai-codex", "zai", "kimi-coding", "minimax", "minimax-cn")
             api_key: API key (default: from environment)
             base_url: API base URL (default: OpenRouter)
-            max_turns: Maximum tool-calling iterations shared with subagents (default: 90)
+            max_turns: Maximum tool-calling iterations before asking to continue (default: 60)
             verbose: Enable verbose logging
             compact: Use compact display mode
             resume: Session ID to resume (restores conversation history from SQLite)
@@ -1999,7 +2001,22 @@ class HermesCLI:
         elif os.getenv("HERMES_MAX_ITERATIONS"):
             self.max_turns = int(os.getenv("HERMES_MAX_ITERATIONS"))
         else:
-            self.max_turns = 90
+            self.max_turns = 60
+        _agent_cfg = CLI_CONFIG.get("agent", {})
+        try:
+            self.max_turns_with_approval = int(
+                _agent_cfg.get("max_turns_with_approval", self.max_turns)
+            )
+        except (TypeError, ValueError):
+            self.max_turns_with_approval = self.max_turns
+        self.max_turns_with_approval = max(self.max_turns, self.max_turns_with_approval)
+        try:
+            self.max_turns_approval_step = int(
+                _agent_cfg.get("max_turns_approval_step", 30)
+            )
+        except (TypeError, ValueError):
+            self.max_turns_approval_step = 30
+        self.max_turns_approval_step = max(0, self.max_turns_approval_step)
         
         # Parse and validate toolsets
         self.enabled_toolsets = toolsets
@@ -3345,7 +3362,15 @@ class HermesCLI:
         route["request_overrides"] = overrides
         return route
 
-    def _init_agent(self, *, model_override: str = None, runtime_override: dict = None, request_overrides: dict | None = None) -> bool:
+    def _init_agent(
+        self,
+        *,
+        model_override: str = None,
+        runtime_override: dict = None,
+        request_overrides: dict | None = None,
+        enabled_toolsets_override=None,
+        route_signature_override=None,
+    ) -> bool:
         """
         Initialize the agent on first use.
         When resuming a session, restores conversation history from SQLite.
@@ -3433,6 +3458,11 @@ class HermesCLI:
                 "credential_pool": getattr(self, "_credential_pool", None),
             }
             effective_model = model_override or self.model
+            effective_toolsets = (
+                self.enabled_toolsets
+                if enabled_toolsets_override is None
+                else enabled_toolsets_override
+            )
             self.agent = AIAgent(
                 model=effective_model,
                 api_key=runtime.get("api_key"),
@@ -3443,7 +3473,9 @@ class HermesCLI:
                 acp_args=runtime.get("args"),
                 credential_pool=runtime.get("credential_pool"),
                 max_iterations=self.max_turns,
-                enabled_toolsets=self.enabled_toolsets,
+                max_iterations_with_approval=self.max_turns_with_approval,
+                iteration_extension_step=self.max_turns_approval_step,
+                enabled_toolsets=effective_toolsets,
                 verbose_logging=self.verbose,
                 quiet_mode=not self.verbose,
                 ephemeral_system_prompt=self.system_prompt if self.system_prompt else None,
@@ -3461,6 +3493,8 @@ class HermesCLI:
                 platform="cli",
                 session_db=self._session_db,
                 clarify_callback=self._clarify_callback,
+                continuation_callback=self._continuation_callback,
+                task_mode=(route_signature_override[-1] if route_signature_override else None),
                 reasoning_callback=self._current_reasoning_callback(),
 
                 fallback_model=self._fallback_model,
@@ -3482,7 +3516,7 @@ class HermesCLI:
             # Route agent status output through prompt_toolkit so ANSI escape
             # sequences aren't garbled by patch_stdout's StdoutProxy (#2262).
             self.agent._print_fn = _cprint
-            self._active_agent_route_signature = (
+            self._active_agent_route_signature = route_signature_override or (
                 effective_model,
                 runtime.get("provider"),
                 runtime.get("base_url"),
@@ -4614,6 +4648,8 @@ class HermesCLI:
         print()
         print("  -- 代理 --")
         print(f"  最大轮数：  {self.max_turns}")
+        print(f"  续批上限：  {self.max_turns_with_approval}")
+        print(f"  续批步长：  {self.max_turns_approval_step}")
         print(f"  工具集：    {', '.join(self.enabled_toolsets) if self.enabled_toolsets else 'all'}")
         print(f"  详细输出：  {self.verbose}")
         print()
@@ -6442,6 +6478,8 @@ class HermesCLI:
         _cprint("  You can continue chatting — results will appear when done.\n")
 
         turn_route = self._resolve_turn_agent_config(prompt)
+        from agent.smart_model_routing import resolve_turn_toolsets
+        turn_toolsets = resolve_turn_toolsets(turn_route, self.enabled_toolsets)
 
         def run_background():
             set_sudo_password_callback(self._sudo_password_callback)
@@ -6460,12 +6498,16 @@ class HermesCLI:
                     acp_command=turn_route["runtime"].get("command"),
                     acp_args=turn_route["runtime"].get("args"),
                     max_iterations=self.max_turns,
-                    enabled_toolsets=self.enabled_toolsets,
+                    max_iterations_with_approval=self.max_turns_with_approval,
+                    iteration_extension_step=self.max_turns_approval_step,
+                    enabled_toolsets=turn_toolsets,
                     quiet_mode=True,
                     verbose_logging=False,
                     session_id=task_id,
                     platform="cli",
                     session_db=self._session_db,
+                    continuation_callback=self._continuation_callback,
+                    task_mode=turn_route.get("task_mode"),
                     reasoning_config=self.reasoning_config,
                     service_tier=self.service_tier,
                     request_overrides=turn_route.get("request_overrides"),
@@ -8217,6 +8259,22 @@ class HermesCLI:
             "Use your best judgement to make the choice and proceed."
         )
 
+    def _continuation_callback(self, payload):
+        """Prompt the user when the agent wants more iteration budget."""
+        increment = int(payload.get("increment", 0) or 0)
+        next_limit = int(payload.get("next_limit", self.max_turns) or self.max_turns)
+        max_limit = int(payload.get("max_limit", next_limit) or next_limit)
+        question = (
+            f"已达到当前轮数上限 {payload.get('current_limit', self.max_turns)}。"
+            f"是否继续再运行 {increment} 轮？"
+            f" 续批后上限 {next_limit}，硬上限 {max_limit}。"
+        )
+        choice = self._clarify_callback(
+            question,
+            [f"Continue (+{increment})", "Stop and summarise"],
+        )
+        return str(choice or "").strip().lower().startswith("continue")
+
     def _sudo_password_callback(self) -> str:
         """
         Prompt for sudo password through the prompt_toolkit UI.
@@ -8591,6 +8649,8 @@ class HermesCLI:
             return None
 
         turn_route = self._resolve_turn_agent_config(message)
+        from agent.smart_model_routing import resolve_turn_toolsets
+        turn_toolsets = resolve_turn_toolsets(turn_route, self.enabled_toolsets)
         if turn_route["signature"] != self._active_agent_route_signature:
             self.agent = None
 
@@ -8601,6 +8661,8 @@ class HermesCLI:
             model_override=turn_route["model"],
             runtime_override=turn_route["runtime"],
             request_overrides=turn_route.get("request_overrides"),
+            enabled_toolsets_override=turn_toolsets,
+            route_signature_override=turn_route["signature"],
         ):
             return None
         
@@ -9085,8 +9147,8 @@ class HermesCLI:
             # Notify when iteration budget was hit
             if result and not result.get("completed") and not result.get("interrupted"):
                 _api_calls = result.get("api_calls", 0)
-                if _api_calls >= getattr(self.agent, "max_iterations", 90):
-                    _max_iter = getattr(self.agent, "max_iterations", 90)
+                if _api_calls >= getattr(self.agent, "max_iterations", 60):
+                    _max_iter = getattr(self.agent, "max_iterations", 60)
                     _cprint(
                         f"\n{_DIM}⚠ Iteration budget reached "
                         f"({_api_calls}/{_max_iter}) — "

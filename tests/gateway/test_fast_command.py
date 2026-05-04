@@ -176,3 +176,107 @@ async def test_run_agent_passes_priority_processing_to_gateway_agent(monkeypatch
     assert result["final_response"] == "ok"
     assert _CapturingAgent.last_init["service_tier"] == "priority"
     assert _CapturingAgent.last_init["request_overrides"] == {"service_tier": "priority"}
+
+
+@pytest.mark.asyncio
+async def test_run_agent_light_route_disables_all_tools(monkeypatch, tmp_path):
+    _install_fake_agent(monkeypatch)
+    runner = _make_runner()
+
+    (tmp_path / "config.yaml").write_text("", encoding="utf-8")
+    monkeypatch.setattr(gateway_run, "_hermes_home", tmp_path)
+    monkeypatch.setattr(gateway_run, "_env_path", tmp_path / ".env")
+    monkeypatch.setattr(gateway_run, "load_dotenv", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gateway_run, "_load_gateway_config", lambda: {})
+    monkeypatch.setattr(
+        gateway_run,
+        "_resolve_runtime_agent_kwargs",
+        lambda: {
+            "provider": "openrouter",
+            "api_mode": "chat_completions",
+            "base_url": "https://openrouter.ai/api/v1",
+            "api_key": "***",
+        },
+    )
+    runner._resolve_turn_agent_config = lambda *args, **kwargs: {
+        "model": "gpt-5.4-mini",
+        "runtime": {
+            "api_key": "***",
+            "base_url": "https://openrouter.ai/api/v1",
+            "provider": "openrouter",
+            "api_mode": "chat_completions",
+            "command": None,
+            "args": [],
+            "credential_pool": None,
+        },
+        "task_mode": "light",
+        "signature": ("gpt-5.4-mini", "openrouter", "https://openrouter.ai/api/v1", "chat_completions", None, (), "light"),
+    }
+
+    import hermes_cli.tools_config as tools_config
+    monkeypatch.setattr(tools_config, "_get_platform_tools", lambda user_config, platform_key: {"core", "web"})
+
+    _CapturingAgent.last_init = None
+    result = await runner._run_agent(
+        message="what time is it",
+        context_prompt="",
+        history=[],
+        source=_make_source(),
+        session_id="session-1",
+        session_key="agent:main:telegram:dm:12345",
+    )
+
+    assert result["final_response"] == "ok"
+    assert _CapturingAgent.last_init["enabled_toolsets"] == []
+
+
+@pytest.mark.asyncio
+async def test_run_agent_heavy_route_grants_all_tools(monkeypatch, tmp_path):
+    _install_fake_agent(monkeypatch)
+    runner = _make_runner()
+
+    (tmp_path / "config.yaml").write_text("", encoding="utf-8")
+    monkeypatch.setattr(gateway_run, "_hermes_home", tmp_path)
+    monkeypatch.setattr(gateway_run, "_env_path", tmp_path / ".env")
+    monkeypatch.setattr(gateway_run, "load_dotenv", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gateway_run, "_load_gateway_config", lambda: {})
+    monkeypatch.setattr(
+        gateway_run,
+        "_resolve_runtime_agent_kwargs",
+        lambda: {
+            "provider": "openrouter",
+            "api_mode": "chat_completions",
+            "base_url": "https://openrouter.ai/api/v1",
+            "api_key": "***",
+        },
+    )
+    runner._resolve_turn_agent_config = lambda *args, **kwargs: {
+        "model": "gpt-5.4",
+        "runtime": {
+            "api_key": "***",
+            "base_url": "https://openrouter.ai/api/v1",
+            "provider": "openrouter",
+            "api_mode": "chat_completions",
+            "command": None,
+            "args": [],
+            "credential_pool": None,
+        },
+        "task_mode": "heavy",
+        "signature": ("gpt-5.4", "openrouter", "https://openrouter.ai/api/v1", "chat_completions", None, (), "heavy"),
+    }
+
+    import hermes_cli.tools_config as tools_config
+    monkeypatch.setattr(tools_config, "_get_platform_tools", lambda user_config, platform_key: {"core"})
+
+    _CapturingAgent.last_init = None
+    result = await runner._run_agent(
+        message="implement a patch for this docker error",
+        context_prompt="",
+        history=[],
+        source=_make_source(),
+        session_id="session-1",
+        session_key="agent:main:telegram:dm:12345",
+    )
+
+    assert result["final_response"] == "ok"
+    assert _CapturingAgent.last_init["enabled_toolsets"] == ["all"]

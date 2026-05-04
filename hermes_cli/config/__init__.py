@@ -376,7 +376,23 @@ DEFAULT_CONFIG = {
         "tui": False,
     },
     "agent": {
-        "max_turns": 90,
+        "max_turns": 60,
+        # Automatic continuation hard cap for long-running heavy turns.
+        # Light/basic-Q&A turns stop at max_turns. Heavy turns can extend in
+        # fixed steps up to this ceiling.
+        "max_turns_with_approval": 150,
+        # Iterations granted per automatic continuation step.
+        "max_turns_approval_step": 30,
+        # Configurable continuation strategy. Defaults preserve the current
+        # heavy/light routing semantics, but allow stricter or looser policies
+        # without changing code.
+        "continuation_policy": {
+            "enabled": True,
+            "auto_task_modes": ["heavy"],
+            "legacy_toolset_fallback": True,
+            "manual_fallback": False,
+            "require_tool_activity": False,
+        },
         # Inactivity timeout for gateway agent execution (seconds).
         # The agent can run indefinitely as long as it's actively calling
         # tools or receiving API responses.  Only fires when the agent has
@@ -478,6 +494,23 @@ DEFAULT_CONFIG = {
         "enabled": False,
         "max_simple_chars": 160,
         "max_simple_words": 28,
+        "max_simple_lines": 2,
+        "min_complex_chars": 320,
+        "min_complex_words": 60,
+        "min_complex_lines": 6,
+        "min_complex_sentences": 4,
+        "min_complex_chars_with_many_sentences": 180,
+        "force_light_contains": [],
+        "force_heavy_contains": [],
+        "general_keywords": [],
+        "complex_keywords": [],
+        "constraint_contains": [],
+        "timeout_or_recovery_contains": [],
+        "route_modes": {
+            "simple": "light",
+            "general": "light",
+            "complex": "heavy",
+        },
         "cheap_model": {},
     },
     # Auxiliary model config. Main inference is CPA-only; aux tasks default to
@@ -762,7 +795,7 @@ DEFAULT_CONFIG = {
         "force_ipv4": False,
     },
     # Config schema version - bump this when adding new required fields
-    "_config_version": 18,
+    "_config_version": 20,
 }
 
 # =============================================================================
@@ -1478,7 +1511,7 @@ OPTIONAL_ENV_VARS = {
         "category": "setting",
     },
     "HERMES_MAX_ITERATIONS": {
-        "description": "Maximum tool-calling iterations per conversation (default: 90)",
+        "description": "Maximum tool-calling iterations before automatic continuation (default: 60)",
         "prompt": "Max iterations",
         "url": None,
         "password": False,

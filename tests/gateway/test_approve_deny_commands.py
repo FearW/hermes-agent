@@ -56,6 +56,8 @@ def _make_runner():
     runner._running_agents = {}
     runner._pending_messages = {}
     runner._pending_approvals = {}
+    runner._pending_continuations = {}
+    runner._pending_continuations_lock = threading.Lock()
     runner._background_tasks = set()
     runner._session_db = None
     runner._reasoning_config = None
@@ -172,6 +174,44 @@ class TestBlockingGatewayApproval:
         unregister_gateway_notify(session_key)
         assert e1.event.is_set()
         assert e2.event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_approve_resolves_pending_iteration_continuation():
+    runner = _make_runner()
+    session_key = build_session_key(_make_source())
+    event = threading.Event()
+    runner._pending_continuations[session_key] = [
+        {
+            "event": event,
+            "result": None,
+            "payload": {"increment": 30, "next_limit": 90},
+        }
+    ]
+
+    result = await runner._handle_approve_command(_make_event("/approve"))
+
+    assert event.is_set() is True
+    assert "追加 30 轮" in result
+
+
+@pytest.mark.asyncio
+async def test_deny_resolves_pending_iteration_continuation():
+    runner = _make_runner()
+    session_key = build_session_key(_make_source())
+    event = threading.Event()
+    runner._pending_continuations[session_key] = [
+        {
+            "event": event,
+            "result": None,
+            "payload": {"increment": 30, "next_limit": 90},
+        }
+    ]
+
+    result = await runner._handle_deny_command(_make_event("/deny"))
+
+    assert event.is_set() is True
+    assert "做总结" in result
 
 
 # ------------------------------------------------------------------

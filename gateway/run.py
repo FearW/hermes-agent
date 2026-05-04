@@ -515,6 +515,12 @@ def _build_media_placeholder(event) -> str:
     return "\n".join(parts)
 
 
+_IMAGE_ONLY_FOLLOW_UP_PROMPT = (
+    "The user sent an image without any accompanying text. "
+    "Ask what they'd like you to do with it."
+)
+
+
 def _dequeue_pending_event(adapter, session_key: str) -> MessageEvent | None:
     """Consume and return the full pending event for a session.
 
@@ -842,6 +848,10 @@ class GatewayRunner:
         # Track pending exec approvals per session
         # Key: session_key, Value: {"command": str, "pattern_key": str, ...}
         self._pending_approvals: Dict[str, Dict[str, Any]] = {}
+        # Track pending iteration-continuation approvals per session.
+        # Key: session_key, Value: [{"event": Event, "result": str|None, "payload": dict}, ...]
+        self._pending_continuations: Dict[str, List[Dict[str, Any]]] = {}
+        self._pending_continuations_lock = _threading.Lock()
 
         # Track platforms that failed to connect for background reconnection.
         # Key: Platform enum, Value: {"config": platform_config, "attempts": int, "next_retry": float}
@@ -4575,6 +4585,7 @@ class GatewayRunner:
         """
         history = history or []
         message_text = event.text or ""
+        has_user_supplied_text = bool(message_text.strip())
         # Reset per-call buffer; set only when native routing is chosen.
         self._pending_native_image_paths = []
 
@@ -4600,9 +4611,14 @@ class GatewayRunner:
                 # Decide routing: native (attach pixels) vs text (vision_analyze
                 # pre-run + prepend description).  See agent/image_routing.py.
                 _img_mode = self._decide_image_input_mode()
+                _image_only_prompt = _IMAGE_ONLY_FOLLOW_UP_PROMPT
+                if not has_user_supplied_text and _is_shared_multi_user and source.user_name:
+                    _image_only_prompt = f"[{source.user_name}] {_image_only_prompt}"
                 if _img_mode == "native":
                     # Defer attachment to the run_conversation call site.
                     self._pending_native_image_paths = list(image_paths)
+                    if not has_user_supplied_text:
+                        message_text = _image_only_prompt
                     logger.info(
                         "Image routing: native (model supports vision). %d image(s) will be attached inline.",
                         len(image_paths),
@@ -4613,7 +4629,7 @@ class GatewayRunner:
                         _img_mode, len(image_paths),
                     )
                     message_text = await self._enrich_message_with_vision(
-                        message_text,
+                        message_text if has_user_supplied_text else _image_only_prompt,
                         image_paths,
                     )
 
@@ -7164,20 +7180,98 @@ class GatewayRunner:
             enabled_toolsets = sorted(_get_platform_tools(user_config, platform_key))
 
             pr = self._provider_routing
-            max_iterations = int(os.getenv("HERMES_MAX_ITERATIONS", "90"))
+            agent_config = user_config.get("agent", {}) if isinstance(user_config.get("agent"), dict) else {}
+            try:
+                max_iterations = int(
+                    os.getenv(
+                        "HERMES_MAX_ITERATIONS",
+                        str(agent_config.get("max_turns", 60)),
+                    )
+                )
+            except (TypeError, ValueError):
+                max_iterations = 60
+            try:
+                max_iterations_with_approval = int(
+                    agent_config.get("max_turns_with_approval", max_iterations)
+                )
+            except (TypeError, ValueError):
+                max_iterations_with_approval = max_iterations
+            max_iterations_with_approval = max(max_iterations, max_iterations_with_approval)
+            try:
+                iteration_extension_step = int(agent_config.get("max_turns_approval_step", 30))
+            except (TypeError, ValueError):
+                iteration_extension_step = 30
+            iteration_extension_step = max(0, iteration_extension_step)
             reasoning_config = self._resolve_session_reasoning_config(source=source)
             self._reasoning_config = reasoning_config
             self._service_tier = self._load_service_tier()
             turn_route = self._resolve_turn_agent_config(prompt, model, runtime_kwargs)
+            from agent.smart_model_routing import resolve_turn_toolsets
+            turn_toolsets = resolve_turn_toolsets(turn_route, enabled_toolsets)
+            bg_session_key = self._session_key_for_source(source)
+
+            def _continuation_callback_sync(payload: dict) -> str:
+                entry = {
+                    "event": threading.Event(),
+                    "result": None,
+                    "payload": dict(payload or {}),
+                }
+                _cont_lock = getattr(self, "_pending_continuations_lock", None)
+                if _cont_lock is None:
+                    self._pending_continuations_lock = threading.Lock()
+                    _cont_lock = self._pending_continuations_lock
+                with _cont_lock:
+                    self._pending_continuations.setdefault(bg_session_key, []).append(entry)
+                prompt_text = (
+                    f"⏸️ 后台任务已达到 {payload.get('current_limit', max_iterations)} 轮。\n"
+                    f"回复 `/approve` 可继续 {payload.get('increment', 0)} 轮，"
+                    f"新上限 {payload.get('next_limit', max_iterations)}，"
+                    f"硬上限 {payload.get('max_limit', max_iterations_with_approval)}。\n"
+                    "回复 `/deny` 则停止并总结当前结果。"
+                )
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        adapter.send(
+                            source.chat_id,
+                            prompt_text,
+                            metadata=_thread_metadata,
+                        ),
+                        self.loop,
+                    ).result(timeout=15)
+                except Exception:
+                    with _cont_lock:
+                        queue = self._pending_continuations.get(bg_session_key, [])
+                        if entry in queue:
+                            queue.remove(entry)
+                        if not queue:
+                            self._pending_continuations.pop(bg_session_key, None)
+                    return "deny"
+                deadline = time.monotonic() + self._APPROVAL_TIMEOUT_SECONDS
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    if entry["event"].wait(timeout=min(1.0, remaining)):
+                        return entry.get("result") or "deny"
+                with _cont_lock:
+                    queue = self._pending_continuations.get(bg_session_key, [])
+                    if entry in queue:
+                        queue.remove(entry)
+                    if not queue:
+                        self._pending_continuations.pop(bg_session_key, None)
+                return "deny"
 
             def run_sync():
                 agent = AIAgent(
                     model=turn_route["model"],
                     **turn_route["runtime"],
                     max_iterations=max_iterations,
+                    max_iterations_with_approval=max_iterations_with_approval,
+                    iteration_extension_step=iteration_extension_step,
                     quiet_mode=True,
                     verbose_logging=False,
-                    enabled_toolsets=enabled_toolsets,
+                    enabled_toolsets=turn_toolsets,
+                    task_mode=turn_route.get("task_mode"),
                     reasoning_config=reasoning_config,
                     service_tier=self._service_tier,
                     request_overrides=turn_route.get("request_overrides"),
@@ -7197,6 +7291,7 @@ class GatewayRunner:
                     thread_id=source.thread_id,
                     session_db=self._session_db,
                     fallback_model=self._fallback_model,
+                    continuation_callback=_continuation_callback_sync,
                 )
                 try:
                     return agent.run_conversation(
@@ -8452,6 +8547,41 @@ class GatewayRunner:
 
     _APPROVAL_TIMEOUT_SECONDS = 300  # 5 minutes
 
+    def _resolve_pending_continuation(
+        self,
+        session_key: str,
+        choice: str,
+        *,
+        resolve_all: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Resolve one or more pending iteration-continuation prompts."""
+        if not session_key:
+            return []
+        lock = getattr(self, "_pending_continuations_lock", None)
+        if lock is None:
+            import threading as _threading
+            self._pending_continuations_lock = _threading.Lock()
+            lock = self._pending_continuations_lock
+        pending = getattr(self, "_pending_continuations", None)
+        if pending is None:
+            self._pending_continuations = {}
+            pending = self._pending_continuations
+        with lock:
+            queue = pending.get(session_key)
+            if not queue:
+                return []
+            if resolve_all:
+                targets = list(queue)
+                queue.clear()
+            else:
+                targets = [queue.pop(0)]
+            if not queue:
+                pending.pop(session_key, None)
+        for entry in targets:
+            entry["result"] = choice
+            entry["event"].set()
+        return [entry.get("payload") or {} for entry in targets]
+
     async def _handle_approve_command(self, event: MessageEvent) -> Optional[str]:
         """Handle /approve command — unblock waiting agent thread(s).
 
@@ -8480,6 +8610,29 @@ class GatewayRunner:
         )
 
         if not has_blocking_approval(session_key):
+            args = event.get_command_args().strip().lower().split()
+            resolve_all = "all" in args
+            continuation_payloads = self._resolve_pending_continuation(
+                session_key,
+                "approve",
+                resolve_all=resolve_all,
+            )
+            if continuation_payloads:
+                _adapter = self.adapters.get(source.platform)
+                if _adapter:
+                    _adapter.resume_typing_for_chat(source.chat_id)
+                first = continuation_payloads[0]
+                added = first.get("increment")
+                next_limit = first.get("next_limit")
+                count_msg = (
+                    f" ({len(continuation_payloads)} runs)"
+                    if len(continuation_payloads) > 1
+                    else ""
+                )
+                return (
+                    f"✅ 已批准继续运行{count_msg}。"
+                    f" 追加 {added} 轮，当前上限提升到 {next_limit}。"
+                )
             if session_key in self._pending_approvals:
                 self._pending_approvals.pop(session_key)
                 return "⚠️ Approval expired (agent is no longer waiting). Ask the agent to try again."
@@ -8529,6 +8682,12 @@ class GatewayRunner:
         )
 
         if not has_blocking_approval(session_key):
+            continuation_payloads = self._resolve_pending_continuation(session_key, "deny")
+            if continuation_payloads:
+                _adapter = self.adapters.get(source.platform)
+                if _adapter:
+                    _adapter.resume_typing_for_chat(source.chat_id)
+                return "❌ 已拒绝继续运行。Agent 会基于当前进度做总结。"
             if session_key in self._pending_approvals:
                 self._pending_approvals.pop(session_key)
                 return "❌ Command denied (approval was stale)."
@@ -9678,6 +9837,9 @@ class GatewayRunner:
         pending_approvals = getattr(self, "_pending_approvals", None)
         if isinstance(pending_approvals, dict):
             pending_approvals.pop(session_key, None)
+        pending_continuations = getattr(self, "_pending_continuations", None)
+        if isinstance(pending_continuations, dict):
+            pending_continuations.pop(session_key, None)
 
         update_prompt_pending = getattr(self, "_update_prompt_pending", None)
         if isinstance(update_prompt_pending, dict):
@@ -10301,6 +10463,28 @@ class GatewayRunner:
         
         user_config = _load_gateway_config()
         platform_key = _platform_config_key(source.platform)
+        agent_config = user_config.get("agent", {}) if isinstance(user_config.get("agent"), dict) else {}
+        try:
+            max_iterations = int(
+                os.getenv(
+                    "HERMES_MAX_ITERATIONS",
+                    str(agent_config.get("max_turns", 60)),
+                )
+            )
+        except (TypeError, ValueError):
+            max_iterations = 60
+        try:
+            max_iterations_with_approval = int(
+                agent_config.get("max_turns_with_approval", max_iterations)
+            )
+        except (TypeError, ValueError):
+            max_iterations_with_approval = max_iterations
+        max_iterations_with_approval = max(max_iterations, max_iterations_with_approval)
+        try:
+            iteration_extension_step = int(agent_config.get("max_turns_approval_step", 30))
+        except (TypeError, ValueError):
+            iteration_extension_step = 30
+        iteration_extension_step = max(0, iteration_extension_step)
 
         from hermes_cli.tools_config import _get_platform_tools
         enabled_toolsets = sorted(_get_platform_tools(user_config, platform_key))
@@ -10741,9 +10925,6 @@ class GatewayRunner:
             # (concurrency-safe). Keep os.environ as fallback for CLI/cron.
             os.environ["HERMES_SESSION_KEY"] = session_key or ""
 
-            # Read from env var or use default (same as CLI)
-            max_iterations = int(os.getenv("HERMES_MAX_ITERATIONS", "90"))
-            
             # Map platform enum to the platform hint key the agent understands.
             # Platform.LOCAL ("local") maps to "cli"; others pass through as-is.
             platform_key = "cli" if source.platform == Platform.LOCAL else source.platform.value
@@ -10893,7 +11074,78 @@ class GatewayRunner:
                 except Exception as _e:
                     logger.debug("interim_assistant_callback error: %s", _e)
 
+            def _continuation_callback_sync(payload: dict) -> str:
+                """Send a continuation approval prompt and block for the reply."""
+                _status_adapter.pause_typing_for_chat(_status_chat_id)
+                entry = {
+                    "event": threading.Event(),
+                    "result": None,
+                    "payload": dict(payload or {}),
+                }
+                _cont_lock = getattr(self, "_pending_continuations_lock", None)
+                if _cont_lock is None:
+                    self._pending_continuations_lock = threading.Lock()
+                    _cont_lock = self._pending_continuations_lock
+                with _cont_lock:
+                    self._pending_continuations.setdefault(_approval_session_key, []).append(entry)
+
+                prompt = (
+                    f"⏸️ 当前回合已达到 {payload.get('current_limit', max_iterations)} 轮。\n"
+                    f"如需继续，我可以再执行 {payload.get('increment', 0)} 轮，"
+                    f"新上限 {payload.get('next_limit', max_iterations)}，"
+                    f"硬上限 {payload.get('max_limit', max_iterations_with_approval)}。\n\n"
+                    "回复 `/approve` 继续，或 `/deny` 现在停止并总结。"
+                )
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        _status_adapter.send(
+                            _status_chat_id,
+                            prompt,
+                            metadata=_status_thread_metadata,
+                        ),
+                        _loop_for_step,
+                    ).result(timeout=15)
+                except Exception as _e:
+                    logger.error("Failed to send continuation request: %s", _e)
+                    with _cont_lock:
+                        queue = self._pending_continuations.get(_approval_session_key, [])
+                        if entry in queue:
+                            queue.remove(entry)
+                        if not queue:
+                            self._pending_continuations.pop(_approval_session_key, None)
+                    return "deny"
+
+                try:
+                    from tools.environments.base import touch_activity_if_due
+                except Exception:  # pragma: no cover
+                    touch_activity_if_due = None
+
+                now = time.monotonic()
+                deadline = now + self._APPROVAL_TIMEOUT_SECONDS
+                activity_state = {"last_touch": now, "start": now}
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    if entry["event"].wait(timeout=min(1.0, remaining)):
+                        return entry.get("result") or "deny"
+                    if touch_activity_if_due is not None:
+                        try:
+                            touch_activity_if_due(activity_state, every=10.0)
+                        except Exception:
+                            pass
+
+                with _cont_lock:
+                    queue = self._pending_continuations.get(_approval_session_key, [])
+                    if entry in queue:
+                        queue.remove(entry)
+                    if not queue:
+                        self._pending_continuations.pop(_approval_session_key, None)
+                return "deny"
+
             turn_route = self._resolve_turn_agent_config(message, model, runtime_kwargs)
+            from agent.smart_model_routing import resolve_turn_toolsets
+            turn_toolsets = resolve_turn_toolsets(turn_route, enabled_toolsets)
 
             # Check agent cache — reuse the AIAgent from the previous message
             # in this session to preserve the frozen system prompt and tool
@@ -10929,9 +11181,12 @@ class GatewayRunner:
                     model=turn_route["model"],
                     **turn_route["runtime"],
                     max_iterations=max_iterations,
+                    max_iterations_with_approval=max_iterations_with_approval,
+                    iteration_extension_step=iteration_extension_step,
                     quiet_mode=True,
                     verbose_logging=False,
-                    enabled_toolsets=enabled_toolsets,
+                    enabled_toolsets=turn_toolsets,
+                    task_mode=turn_route.get("task_mode"),
                     ephemeral_system_prompt=combined_ephemeral or None,
                     prefill_messages=self._prefill_messages or None,
                     reasoning_config=reasoning_config,
@@ -10954,6 +11209,7 @@ class GatewayRunner:
                     gateway_session_key=session_key,
                     session_db=self._session_db,
                     fallback_model=self._fallback_model,
+                    continuation_callback=_continuation_callback_sync,
                 )
                 if _cache_lock and _cache is not None:
                     with _cache_lock:
@@ -10971,6 +11227,14 @@ class GatewayRunner:
             agent.reasoning_config = reasoning_config
             agent.service_tier = self._service_tier
             agent.request_overrides = turn_route.get("request_overrides") or {}
+            agent.task_mode = str(turn_route.get("task_mode") or "").strip().lower()
+            agent.max_iterations = max_iterations
+            agent.max_iterations_with_approval = max_iterations_with_approval
+            agent.iteration_extension_step = iteration_extension_step
+            agent._base_max_iterations = max_iterations
+            agent._base_max_iterations_with_approval = max_iterations_with_approval
+            agent._base_iteration_extension_step = iteration_extension_step
+            agent.continuation_callback = _continuation_callback_sync
 
             _bg_review_release = threading.Event()
             _bg_review_pending: list[str] = []
@@ -11983,6 +12247,7 @@ class GatewayRunner:
                     event_message_id=next_message_id,
                     channel_prompt=next_channel_prompt,
                 )
+            return result
         finally:
             # Stop progress sender, interrupt monitor, and notification task
             if progress_task:

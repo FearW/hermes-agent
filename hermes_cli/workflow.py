@@ -282,7 +282,7 @@ def _execute_with_agent(prompt: str, workflow: Dict[str, Any], session_source: s
     from hermes_cli.config import load_config
     from hermes_constants import apply_ipv4_preference, parse_reasoning_effort
     from hermes_cli.runtime_provider import resolve_runtime_provider, format_runtime_provider_error
-    from agent.smart_model_routing import resolve_turn_route
+    from agent.smart_model_routing import resolve_turn_route, resolve_turn_toolsets
 
     cfg = load_config() or {}
     try:
@@ -322,6 +322,7 @@ def _execute_with_agent(prompt: str, workflow: Dict[str, Any], session_source: s
             "args": list(runtime.get("args") or []),
         },
     )
+    route_toolsets = resolve_turn_toolsets(route, ["all"])
 
     pre_job = {"prompt": prompt, "skills": workflow.get("skills") or [], "skill": (workflow.get("skills") or [None])[0], "script": workflow.get("script")}
     effective_prompt = _build_job_prompt(pre_job)
@@ -337,14 +338,16 @@ def _execute_with_agent(prompt: str, workflow: Dict[str, Any], session_source: s
             api_mode=route["runtime"].get("api_mode"),
             acp_command=route["runtime"].get("command"),
             acp_args=route["runtime"].get("args"),
-            max_iterations=cfg.get("agent", {}).get("max_turns") or cfg.get("max_turns") or 90,
+            max_iterations=cfg.get("agent", {}).get("max_turns") or cfg.get("max_turns") or 60,
             reasoning_config=reasoning_config,
             fallback_model=cfg.get("fallback_providers") or cfg.get("fallback_model") or None,
             providers_allowed=pr.get("only"),
             providers_ignored=pr.get("ignore"),
             providers_order=pr.get("order"),
             provider_sort=pr.get("sort"),
-            disabled_toolsets=["clarify"],
+            enabled_toolsets=route_toolsets,
+            task_mode=route.get("task_mode"),
+            disabled_toolsets=["clarify"] if route_toolsets != [] else None,
             quiet_mode=True,
             skip_context_files=True,
             skip_memory=True,

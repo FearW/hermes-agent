@@ -66,10 +66,20 @@ class TestLoadConfigDefaults:
             config = load_config()
             assert config["model"] == DEFAULT_CONFIG["model"]
             assert config["agent"]["max_turns"] == DEFAULT_CONFIG["agent"]["max_turns"]
+            assert (
+                config["agent"]["max_turns_with_approval"]
+                == DEFAULT_CONFIG["agent"]["max_turns_with_approval"]
+            )
+            assert (
+                config["agent"]["max_turns_approval_step"]
+                == DEFAULT_CONFIG["agent"]["max_turns_approval_step"]
+            )
             assert "max_turns" not in config
             assert "terminal" in config
             assert config["terminal"]["backend"] == "local"
             assert config["display"]["interim_assistant_messages"] is True
+            assert config["agent"]["continuation_policy"]["enabled"] is True
+            assert config["agent"]["continuation_policy"]["auto_task_modes"] == ["heavy"]
 
     def test_legacy_root_level_max_turns_migrates_to_agent_config(self, tmp_path):
         with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):

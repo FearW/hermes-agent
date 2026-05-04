@@ -8,9 +8,10 @@ multiple times, and without an explicit pointer the agent has to guess
 which prior message the user is referencing.
 """
 import pytest
+from unittest.mock import AsyncMock
 
 from gateway.config import GatewayConfig, Platform, PlatformConfig
-from gateway.platforms.base import MessageEvent
+from gateway.platforms.base import MessageEvent, MessageType
 from gateway.run import GatewayRunner
 from gateway.session import SessionSource
 
@@ -157,3 +158,56 @@ async def test_reply_snippet_truncated_to_500_chars():
     assert result is not None
     assert result.startswith('[Replying to: "' + "x" * 500 + '"]')
     assert "x" * 501 not in result
+
+
+@pytest.mark.asyncio
+async def test_image_only_message_gets_default_follow_up_prompt_for_text_routing():
+    runner = _make_runner()
+    source = _source()
+    runner._decide_image_input_mode = lambda: "text"
+    runner._enrich_message_with_vision = AsyncMock(return_value="ENRICHED")
+    event = MessageEvent(
+        text="",
+        source=source,
+        message_type=MessageType.PHOTO,
+        media_urls=["/tmp/cat.jpg"],
+        media_types=["image/jpeg"],
+    )
+
+    result = await runner._prepare_inbound_message_text(
+        event=event,
+        source=source,
+        history=[],
+    )
+
+    runner._enrich_message_with_vision.assert_awaited_once_with(
+        "The user sent an image without any accompanying text. Ask what they'd like you to do with it.",
+        ["/tmp/cat.jpg"],
+    )
+    assert result == "ENRICHED"
+
+
+@pytest.mark.asyncio
+async def test_image_only_message_gets_default_follow_up_prompt_for_native_routing():
+    runner = _make_runner()
+    source = _source()
+    runner._decide_image_input_mode = lambda: "native"
+    event = MessageEvent(
+        text="",
+        source=source,
+        message_type=MessageType.PHOTO,
+        media_urls=["/tmp/cat.jpg"],
+        media_types=["image/jpeg"],
+    )
+
+    result = await runner._prepare_inbound_message_text(
+        event=event,
+        source=source,
+        history=[],
+    )
+
+    assert runner._pending_native_image_paths == ["/tmp/cat.jpg"]
+    assert (
+        result
+        == "The user sent an image without any accompanying text. Ask what they'd like you to do with it."
+    )

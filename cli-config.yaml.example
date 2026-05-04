@@ -72,6 +72,15 @@ dashboard:
 #   enabled: true
 #   max_simple_chars: 160
 #   max_simple_words: 28
+#   max_simple_lines: 2
+#   min_complex_chars: 320
+#   min_complex_words: 60
+#   force_light_contains: ["现在几点", "今天天气"]
+#   force_heavy_contains: ["debug", "patch", "terminal", "MCP"]
+#   route_modes:
+#     simple: light
+#     general: light
+#     complex: heavy
 #   cheap_model:
 #     provider: openrouter
 #     model: google/gemini-2.5-flash
@@ -439,6 +448,22 @@ agent:
   # Higher = more room for complex tasks, but costs more tokens
   # Recommended: 20-30 for focused tasks, 50-100 for open exploration
   max_turns: 60
+
+  # If the agent hits max_turns mid-task, it can ask to continue in steps
+  # until reaching this hard cap.
+  max_turns_with_approval: 150
+
+  # Iterations added each time you approve continuation.
+  max_turns_approval_step: 30
+
+  # Continuation policy controls whether Hermes auto-extends a turn when the
+  # current iteration budget is exhausted.
+  continuation_policy:
+    enabled: true
+    auto_task_modes: ["heavy"]
+    legacy_toolset_fallback: true
+    manual_fallback: false
+    require_tool_activity: false
 
   # Inactivity timeout for gateway agent runs (seconds, 0 = unlimited).
   # The agent can run indefinitely when actively calling tools or receiving

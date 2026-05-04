@@ -166,7 +166,7 @@ from agent.trajectory import (
     save_trajectory as _save_trajectory_to_file,
 )
 from utils import atomic_json_write, base_url_host_matches, base_url_hostname, env_var_enabled, normalize_proxy_url
-from hermes_cli.config import cfg_get
+from hermes_cli.config import cfg_get, load_config
 
 
 
@@ -264,7 +264,7 @@ class IterationBudget:
     """Thread-safe iteration counter for an agent.
 
     Each agent (parent or subagent) gets its own ``IterationBudget``.
-    The parent's budget is capped at ``max_iterations`` (default 90).
+    The parent's budget is capped at ``max_iterations`` (default 60).
     Each subagent gets an independent budget capped at
     ``delegation.max_iterations`` (default 50) — this means total
     iterations across parent + subagents can exceed the parent's cap.
@@ -294,6 +294,13 @@ class IterationBudget:
             if self._used > 0:
                 self._used -= 1
 
+    def extend(self, new_max_total: int) -> int:
+        """Raise the budget cap if the requested total is higher."""
+        with self._lock:
+            if new_max_total > self.max_total:
+                self.max_total = new_max_total
+            return self.max_total
+
     @property
     def used(self) -> int:
         return self._used
@@ -302,6 +309,24 @@ class IterationBudget:
     def remaining(self) -> int:
         with self._lock:
             return max(0, self.max_total - self._used)
+
+
+def _normalize_continuation_policy(raw: Any) -> Dict[str, Any]:
+    """Return a validated continuation-policy dict with safe defaults."""
+    policy = raw if isinstance(raw, dict) else {}
+    auto_modes = policy.get("auto_task_modes")
+    if not isinstance(auto_modes, (list, tuple, set)):
+        auto_modes = ["heavy"]
+    auto_modes = [str(mode).strip().lower() for mode in auto_modes if str(mode).strip()]
+    if not auto_modes:
+        auto_modes = ["heavy"]
+    return {
+        "enabled": bool(policy.get("enabled", True)),
+        "auto_task_modes": auto_modes,
+        "legacy_toolset_fallback": bool(policy.get("legacy_toolset_fallback", True)),
+        "manual_fallback": bool(policy.get("manual_fallback", False)),
+        "require_tool_activity": bool(policy.get("require_tool_activity", False)),
+    }
 
 
 # Tools that must never run concurrently (interactive / user-facing).
@@ -897,7 +922,9 @@ class AIAgent:
         command: str = None,
         args: list[str] | None = None,
         model: str = "",
-        max_iterations: int = 90,  # Default tool-calling iterations (shared with subagents)
+        max_iterations: int = 60,  # Default tool-calling iterations (shared with subagents)
+        max_iterations_with_approval: int = None,
+        iteration_extension_step: int = None,
         tool_delay: float = 1.0,
         enabled_toolsets: List[str] = None,
         disabled_toolsets: List[str] = None,
@@ -920,11 +947,13 @@ class AIAgent:
         thinking_callback: callable = None,
         reasoning_callback: callable = None,
         clarify_callback: callable = None,
+        continuation_callback: callable = None,
         step_callback: callable = None,
         stream_delta_callback: callable = None,
         interim_assistant_callback: callable = None,
         tool_gen_callback: callable = None,
         status_callback: callable = None,
+        task_mode: str = None,
         max_tokens: int = None,
         reasoning_config: Dict[str, Any] = None,
         service_tier: str = None,
@@ -959,7 +988,9 @@ class AIAgent:
             provider (str): Provider identifier (optional; used for telemetry/routing hints)
             api_mode (str): API mode override: "chat_completions" or "codex_responses"
             model (str): Model name to use (default: "anthropic/claude-opus-4.6")
-            max_iterations (int): Maximum number of tool calling iterations (default: 90)
+            max_iterations (int): Maximum number of tool calling iterations before asking to continue (default: 60)
+            max_iterations_with_approval (int): Hard cap after approved continuations (default: max_iterations)
+            iteration_extension_step (int): How many iterations each approval adds (default: disabled)
             tool_delay (float): Delay between tool calls in seconds (default: 1.0)
             enabled_toolsets (List[str]): Only enable tools from these toolsets (optional)
             disabled_toolsets (List[str]): Disable tools from these toolsets (optional)
@@ -977,6 +1008,9 @@ class AIAgent:
             tool_progress_callback (callable): Callback function(tool_name, args_preview) for progress notifications
             clarify_callback (callable): Callback function(question, choices) -> str for interactive user questions.
                 Provided by the platform layer (CLI or gateway). If None, the clarify tool returns an error.
+            continuation_callback (callable): Callback function(payload) -> bool/str used when the
+                agent reaches the current iteration cap and wants approval to continue.
+            task_mode (str): Routed task mode for the current turn (``light`` / ``heavy`` / ``inherit``).
             max_tokens (int): Maximum tokens for model responses (optional, uses model default if not set)
             reasoning_config (Dict): OpenRouter reasoning configuration override (e.g. {"effort": "none"} to disable thinking).
                 If None, defaults to {"enabled": True, "effort": "medium"} for OpenRouter. Set to disable/customize reasoning.
@@ -999,6 +1033,24 @@ class AIAgent:
 
         self.model = model
         self.max_iterations = max_iterations
+        self.max_iterations_with_approval = max(
+            self.max_iterations,
+            int(max_iterations_with_approval or max_iterations),
+        )
+        _extension_step = iteration_extension_step
+        if _extension_step is None and self.max_iterations_with_approval > self.max_iterations:
+            _extension_step = self.max_iterations_with_approval - self.max_iterations
+        try:
+            _extension_step = int(_extension_step or 0)
+        except (TypeError, ValueError):
+            _extension_step = 0
+        self.iteration_extension_step = max(0, _extension_step)
+        self._base_max_iterations = self.max_iterations
+        self._base_max_iterations_with_approval = self.max_iterations_with_approval
+        self._base_iteration_extension_step = self.iteration_extension_step
+        self._continuation_policy = _normalize_continuation_policy(
+            cfg_get(load_config(), "agent", "continuation_policy", default=None)
+        )
         # Shared iteration budget — parent creates, children inherit.
         # Consumed by every LLM turn across parent + all subagents.
         self.iteration_budget = iteration_budget or IterationBudget(max_iterations)
@@ -1140,11 +1192,13 @@ class AIAgent:
         self.thinking_callback = thinking_callback
         self.reasoning_callback = reasoning_callback
         self.clarify_callback = clarify_callback
+        self.continuation_callback = continuation_callback
         self.step_callback = step_callback
         self.stream_delta_callback = stream_delta_callback
         self.interim_assistant_callback = interim_assistant_callback
         self.status_callback = status_callback
         self.tool_gen_callback = tool_gen_callback
+        self.task_mode = str(task_mode or "").strip().lower()
 
         
         # Tool execution state — allows _vprint during tool execution
@@ -1235,6 +1289,7 @@ class AIAgent:
         # models to "give up" prematurely on complex tasks (#7915).
         self._budget_exhausted_injected = False
         self._budget_grace_call = False
+        self._turn_used_tools = False
 
         # Activity tracking — updated on each API call, tool execution, and
         # stream chunk.  Used by the gateway timeout handler to report what the
@@ -10157,6 +10212,128 @@ class AIAgent:
 
         return final_response
 
+    def _coerce_continuation_decision(self, decision: Any) -> bool:
+        """Interpret a continuation callback result as approve/deny."""
+        if isinstance(decision, bool):
+            return decision
+        text = str(decision or "").strip().lower()
+        if not text:
+            return False
+        approved_values = {
+            "y",
+            "yes",
+            "true",
+            "continue",
+            "approve",
+            "approved",
+            "once",
+            "session",
+            "always",
+        }
+        return text in approved_values or text.startswith("continue")
+
+    def _should_auto_extend_iteration_budget(self, api_call_count: int) -> bool:
+        """Return True when continuation should be extended automatically.
+
+        The default policy auto-extends heavy routed turns only. The config
+        block can widen or narrow the auto-extend set without changing code.
+        """
+        policy = getattr(self, "_continuation_policy", None) or {}
+        if not bool(policy.get("enabled", True)):
+            return False
+        if self.iteration_extension_step <= 0:
+            return False
+        if self.max_iterations >= self.max_iterations_with_approval:
+            return False
+        if api_call_count < self.max_iterations:
+            return False
+
+        task_mode = str(getattr(self, "task_mode", "") or "").strip().lower()
+        if task_mode == "light":
+            return False
+        auto_modes = {
+            str(mode).strip().lower()
+            for mode in (policy.get("auto_task_modes") or ["heavy"])
+            if str(mode).strip()
+        }
+        if task_mode in auto_modes:
+            if policy.get("require_tool_activity", False) and not getattr(self, "_turn_used_tools", False):
+                return False
+            return True
+        if policy.get("legacy_toolset_fallback", True) and self.enabled_toolsets not in (None, []):
+            if policy.get("require_tool_activity", False) and not getattr(self, "_turn_used_tools", False):
+                return False
+            return True
+        return False
+
+    def _maybe_extend_iteration_budget(self, api_call_count: int) -> bool:
+        """Request approval to continue past the current iteration cap."""
+        policy = getattr(self, "_continuation_policy", None) or {}
+        if self.iteration_extension_step <= 0:
+            return False
+        if self.max_iterations >= self.max_iterations_with_approval:
+            return False
+        next_limit = min(
+            self.max_iterations + self.iteration_extension_step,
+            self.max_iterations_with_approval,
+        )
+        increment = max(0, next_limit - self.max_iterations)
+        if increment <= 0:
+            return False
+
+        if self._should_auto_extend_iteration_budget(api_call_count):
+            self.max_iterations = next_limit
+            if self.iteration_budget is not None:
+                self.iteration_budget.extend(next_limit)
+            self._emit_status(
+                f"> Iteration budget extended automatically to {self.max_iterations}/{self.max_iterations_with_approval}"
+            )
+            if not self.quiet_mode:
+                self._safe_print(
+                    f"\n> Iteration budget extended automatically to {self.max_iterations} "
+                    f"(hard cap {self.max_iterations_with_approval})"
+                )
+            return True
+
+        if not policy.get("manual_fallback", False) or self.continuation_callback is None:
+            return False
+
+        payload = {
+            "question": (
+                "The task is still in progress and has reached the current tool-call budget. "
+                f"Continue for {increment} more iterations "
+                f"({api_call_count}/{self.max_iterations} used, hard cap {self.max_iterations_with_approval})?"
+            ),
+            "current_limit": self.max_iterations,
+            "next_limit": next_limit,
+            "max_limit": self.max_iterations_with_approval,
+            "increment": increment,
+            "api_call_count": api_call_count,
+            "budget_used": self.iteration_budget.used if self.iteration_budget else api_call_count,
+            "budget_max": self.iteration_budget.max_total if self.iteration_budget else self.max_iterations,
+        }
+        try:
+            decision = self.continuation_callback(payload)
+        except Exception as exc:
+            logger.warning("Continuation approval callback failed: %s", exc)
+            return False
+
+        if not self._coerce_continuation_decision(decision):
+            return False
+
+        self.max_iterations = next_limit
+        if self.iteration_budget is not None:
+            self.iteration_budget.extend(next_limit)
+        self._emit_status(
+            f"▶ Iteration budget extended to {self.max_iterations}/{self.max_iterations_with_approval}"
+        )
+        if not self.quiet_mode:
+            self._safe_print(
+                f"\n▶ Iteration budget extended to {self.max_iterations} "
+                f"(hard cap {self.max_iterations_with_approval})"
+            )
+        return True
+
     def run_conversation(
         self,
         user_message: str,
@@ -10259,7 +10436,29 @@ class AIAgent:
         # NOTE: _turns_since_memory and _iters_since_skill are NOT reset here.
         # They are initialized in __init__ and must persist across run_conversation
         # calls so that nudge logic accumulates correctly in CLI mode.
+        self.max_iterations = int(getattr(self, "_base_max_iterations", self.max_iterations))
+        self.max_iterations_with_approval = max(
+            self.max_iterations,
+            int(
+                getattr(
+                    self,
+                    "_base_max_iterations_with_approval",
+                    self.max_iterations_with_approval,
+                )
+            ),
+        )
+        self.iteration_extension_step = max(
+            0,
+            int(
+                getattr(
+                    self,
+                    "_base_iteration_extension_step",
+                    self.iteration_extension_step,
+                )
+            ),
+        )
         self.iteration_budget = IterationBudget(self.max_iterations)
+        self._turn_used_tools = False
 
         # Log conversation turn start for debugging/observability
         _preview_text = _summarize_user_message_for_log(user_message)
@@ -12820,6 +13019,7 @@ class AIAgent:
                 
                 # Check for tool calls
                 if assistant_message.tool_calls:
+                    self._turn_used_tools = True
                     if not self.quiet_mode:
                         self._vprint(f"{self.log_prefix}🔧 Processing {len(assistant_message.tool_calls)} tool call(s)...")
                     
@@ -13420,6 +13620,17 @@ class AIAgent:
                     if not self.quiet_mode:
                         self._safe_print(f"🎉 Conversation completed after {api_call_count} OpenAI-compatible API call(s)")
                     break
+
+                if (
+                    final_response is None
+                    and not interrupted
+                    and (
+                        api_call_count >= self.max_iterations
+                        or self.iteration_budget.remaining <= 0
+                    )
+                    and self._maybe_extend_iteration_budget(api_call_count)
+                ):
+                    continue
                 
             except Exception as e:
                 error_msg = f"Error during OpenAI-compatible API call #{api_call_count}: {str(e)}"
@@ -13584,6 +13795,8 @@ class AIAgent:
             "interrupted": interrupted,
             "response_previewed": getattr(self, "_response_was_previewed", False),
             "model": self.model,
+            "max_iterations": self.max_iterations,
+            "max_iterations_with_approval": self.max_iterations_with_approval,
             "provider": self.provider,
             "base_url": self.base_url,
             "input_tokens": self.session_input_tokens,

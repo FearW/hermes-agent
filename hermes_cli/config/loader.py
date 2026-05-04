@@ -204,6 +204,15 @@ _FALLBACK_COMMENT = """
 #   enabled: true
 #   max_simple_chars: 160
 #   max_simple_words: 28
+#   max_simple_lines: 2
+#   min_complex_chars: 320
+#   min_complex_words: 60
+#   force_light_contains: ["现在几点", "今天天气"]
+#   force_heavy_contains: ["debug", "patch", "terminal", "MCP"]
+#   route_modes:
+#     simple: light
+#     general: light
+#     complex: heavy
 #   cheap_model:
 #     provider: openrouter
 #     model: google/gemini-2.5-flash
@@ -247,6 +256,15 @@ _COMMENTED_SECTIONS = """
 #   enabled: true
 #   max_simple_chars: 160
 #   max_simple_words: 28
+#   max_simple_lines: 2
+#   min_complex_chars: 320
+#   min_complex_words: 60
+#   force_light_contains: ["现在几点", "今天天气"]
+#   force_heavy_contains: ["debug", "patch", "terminal", "MCP"]
+#   route_modes:
+#     simple: light
+#     general: light
+#     complex: heavy
 #   cheap_model:
 #     provider: openrouter
 #     model: google/gemini-2.5-flash
