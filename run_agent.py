@@ -374,8 +374,37 @@ _DESTRUCTIVE_PATTERNS = re.compile(
     )""",
     re.VERBOSE,
 )
-# Output redirects that overwrite files (> but not >>)
-_REDIRECT_OVERWRITE = re.compile(r'[^>]>[^>]|^>[^>]')
+def _has_unquoted_overwrite_redirect(cmd: str) -> bool:
+    """Return True when cmd contains unquoted overwrite redirect (> but not >>)."""
+    in_single = False
+    in_double = False
+    escaped = False
+
+    for i, ch in enumerate(cmd):
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\":
+            escaped = True
+            continue
+        if ch == "'" and not in_double:
+            in_single = not in_single
+            continue
+        if ch == '"' and not in_single:
+            in_double = not in_double
+            continue
+        if in_single or in_double:
+            continue
+        if ch != ">":
+            continue
+
+        prev_ch = cmd[i - 1] if i > 0 else ""
+        next_ch = cmd[i + 1] if i + 1 < len(cmd) else ""
+        if prev_ch == ">" or next_ch == ">":
+            continue
+        return True
+
+    return False
 
 
 def _is_destructive_command(cmd: str) -> bool:
@@ -384,7 +413,7 @@ def _is_destructive_command(cmd: str) -> bool:
         return False
     if _DESTRUCTIVE_PATTERNS.search(cmd):
         return True
-    if _REDIRECT_OVERWRITE.search(cmd):
+    if _has_unquoted_overwrite_redirect(cmd):
         return True
     return False
 
@@ -9454,35 +9483,65 @@ class AIAgent:
                     _set_sudo_password_callback(_parent_sudo_cb)
                 except Exception:
                     pass
-            start = time.time()
             try:
-                result = self._invoke_tool(function_name, function_args, effective_task_id, tool_call.id, messages=messages)
-            except Exception as tool_error:
-                result = f"Error executing tool '{function_name}': {tool_error}"
-                logger.error("_invoke_tool raised for %s: %s", function_name, tool_error, exc_info=True)
-            duration = time.time() - start
-            is_error, _ = _detect_tool_failure(function_name, result)
-            if is_error:
-                logger.info("tool %s failed (%.2fs): %s", function_name, duration, result[:200])
-            else:
-                logger.info("tool %s completed (%.2fs, %d chars)", function_name, duration, len(result))
-            results[index] = (function_name, function_args, result, duration, is_error)
-            # Tear down worker-tid tracking.  Clear any interrupt bit we may
-            # have set so the next task scheduled onto this recycled tid
-            # starts with a clean slate.
-            with self._tool_worker_threads_lock:
-                self._tool_worker_threads.discard(_worker_tid)
-            try:
-                _set_interrupt(False, _worker_tid)
-            except Exception:
-                pass
-            # Clear thread-local callbacks so a recycled worker thread
-            # doesn't hold stale references to a disposed CLI instance.
-            try:
-                _set_approval_callback(None)
-                _set_sudo_password_callback(None)
-            except Exception:
-                pass
+                start = time.time()
+                try:
+                    result = self._invoke_tool(
+                        function_name,
+                        function_args,
+                        effective_task_id,
+                        tool_call.id,
+                        messages=messages,
+                    )
+                except Exception as tool_error:
+                    result = f"Error executing tool '{function_name}': {tool_error}"
+                    logger.error(
+                        "_invoke_tool raised for %s: %s",
+                        function_name,
+                        tool_error,
+                        exc_info=True,
+                    )
+                duration = time.time() - start
+                result_text = result if isinstance(result, str) else str(result)
+                is_error, _ = _detect_tool_failure(function_name, result_text)
+                if is_error:
+                    logger.info(
+                        "tool %s failed (%.2fs): %s",
+                        function_name,
+                        duration,
+                        result_text[:200],
+                    )
+                else:
+                    logger.info(
+                        "tool %s completed (%.2fs, %d chars)",
+                        function_name,
+                        duration,
+                        len(result_text),
+                    )
+                results[index] = (
+                    function_name,
+                    function_args,
+                    result_text,
+                    duration,
+                    is_error,
+                )
+            finally:
+                # Tear down worker-tid tracking.  Clear any interrupt bit we may
+                # have set so the next task scheduled onto this recycled tid
+                # starts with a clean slate.
+                with self._tool_worker_threads_lock:
+                    self._tool_worker_threads.discard(_worker_tid)
+                try:
+                    _set_interrupt(False, _worker_tid)
+                except Exception:
+                    pass
+                # Clear thread-local callbacks so a recycled worker thread
+                # doesn't hold stale references to a disposed CLI instance.
+                try:
+                    _set_approval_callback(None)
+                    _set_sudo_password_callback(None)
+                except Exception:
+                    pass
 
         # Start spinner for CLI mode (skip when TUI handles tool progress)
         spinner = None
@@ -9495,9 +9554,11 @@ class AIAgent:
             max_workers = min(num_tools, _MAX_TOOL_WORKERS)
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = []
+                future_to_name = {}
                 for i, (tc, name, args) in enumerate(parsed_calls):
                     f = executor.submit(_run_tool, i, tc, name, args)
                     futures.append(f)
+                    future_to_name[f] = name
 
                 # Wait for all to complete with periodic heartbeats so the
                 # gateway's inactivity monitor doesn't kill us during long
@@ -9536,11 +9597,7 @@ class AIAgent:
                     _conc_elapsed = int(time.time() - _conc_start)
                     # Heartbeat every ~30s (6 × 5s poll intervals)
                     if _conc_elapsed > 0 and _conc_elapsed % 30 < 6:
-                        _still_running = [
-                            parsed_calls[futures.index(f)][1]
-                            for f in not_done
-                            if f in futures
-                        ]
+                        _still_running = [future_to_name.get(f, "tool") for f in not_done]
                         self._touch_activity(
                             f"concurrent tools running ({_conc_elapsed}s, "
                             f"{len(not_done)} remaining: {', '.join(_still_running[:3])})"
@@ -10685,6 +10742,8 @@ class AIAgent:
             logger.warning("pre_llm_call hook failed: %s", exc)
 
         # Main conversation loop
+        _run_started_at = time.time()
+        _run_id = f"{int(_run_started_at * 1000)}_{uuid.uuid4().hex[:8]}"
         api_call_count = 0
         final_response = None
         interrupted = False
@@ -13882,6 +13941,38 @@ class AIAgent:
             )
         except Exception as exc:
             logger.warning("on_session_end hook failed: %s", exc)
+
+        # Evolution loop v1: emit a compact structured outcome record.
+        try:
+            from agent.evolution_loop import record_run_outcome
+
+            _strategy_version = os.getenv("HERMES_STRATEGY_VERSION", "default")
+            _experiment_bucket = os.getenv("HERMES_EXPERIMENT_BUCKET", "control")
+            _retry_count = int(locals().get("retry_count", 0) or 0)
+            _latency_seconds = max(0.0, time.time() - _run_started_at)
+            _final_len = len(final_response) if isinstance(final_response, str) else 0
+            record_run_outcome(
+                session_id=self.session_id or "",
+                run_id=_run_id,
+                model=self.model or "",
+                strategy_version=_strategy_version,
+                experiment_bucket=_experiment_bucket,
+                completed=bool(completed),
+                interrupted=bool(interrupted),
+                api_calls=int(api_call_count or 0),
+                retry_count=_retry_count,
+                tool_turns=int(_turn_tool_count or 0),
+                fallback_active=bool(getattr(self, "_fallback_active", False)),
+                latency_seconds=_latency_seconds,
+                estimated_cost_usd=float(self.session_estimated_cost_usd or 0.0),
+                final_response_len=_final_len,
+                turn_exit_reason=str(_turn_exit_reason or "unknown"),
+            )
+            result["run_id"] = _run_id
+            result["strategy_version"] = _strategy_version
+            result["experiment_bucket"] = _experiment_bucket
+        except Exception as _evo_err:
+            logger.debug("Evolution outcome recording skipped: %s", _evo_err)
 
         return result
 

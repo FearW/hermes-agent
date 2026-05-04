@@ -1881,7 +1881,13 @@ def _run_on_mcp_loop(coro, timeout: float = 30):
         if deadline is not None:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                return future.result(timeout=0)
+                future.cancel()
+                # Drain cancellation so the coroutine sees CancelledError on the loop.
+                try:
+                    future.result(timeout=0)
+                except concurrent.futures.CancelledError:
+                    pass
+                raise concurrent.futures.TimeoutError()
             wait_timeout = min(wait_timeout, remaining)
 
         try:

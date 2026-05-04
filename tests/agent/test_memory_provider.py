@@ -76,6 +76,17 @@ class FakeMemoryProvider(MemoryProvider):
     def on_memory_write(self, action, target, content):
         self.memory_writes.append((action, target, content))
 
+    def on_session_switch(self, new_session_id: str, *, parent_session_id: str = "", reset: bool = False, **kwargs):
+        self.session_switches = getattr(self, "session_switches", [])
+        self.session_switches.append(
+            {
+                "new_session_id": new_session_id,
+                "parent_session_id": parent_session_id,
+                "reset": reset,
+                "kwargs": dict(kwargs),
+            }
+        )
+
 
 # ---------------------------------------------------------------------------
 # MemoryProvider ABC tests
@@ -311,6 +322,41 @@ class TestMemoryManager:
         mgr.add_provider(p)
         mgr.on_session_end([{"role": "user", "content": "hi"}])
         assert p.session_end_called
+
+    def test_on_session_switch_forwards_to_all_providers(self):
+        mgr = MemoryManager()
+        p1 = FakeMemoryProvider("builtin")
+        p2 = FakeMemoryProvider("external")
+        mgr.add_provider(p1)
+        mgr.add_provider(p2)
+
+        mgr.on_session_switch(
+            "new-1",
+            parent_session_id="old-1",
+            reset=True,
+            reason="new_session",
+        )
+
+        assert p1.session_switches[0]["new_session_id"] == "new-1"
+        assert p1.session_switches[0]["parent_session_id"] == "old-1"
+        assert p1.session_switches[0]["reset"] is True
+        assert p1.session_switches[0]["kwargs"]["reason"] == "new_session"
+
+        assert p2.session_switches[0]["new_session_id"] == "new-1"
+        assert p2.session_switches[0]["parent_session_id"] == "old-1"
+        assert p2.session_switches[0]["reset"] is True
+        assert p2.session_switches[0]["kwargs"]["reason"] == "new_session"
+
+    def test_on_session_switch_failure_doesnt_block_others(self):
+        mgr = MemoryManager()
+        p1 = FakeMemoryProvider("builtin")
+        p1.on_session_switch = MagicMock(side_effect=RuntimeError("boom"))
+        p2 = FakeMemoryProvider("external")
+        mgr.add_provider(p1)
+        mgr.add_provider(p2)
+
+        mgr.on_session_switch("new", parent_session_id="old", reset=False)
+        assert p2.session_switches[0]["new_session_id"] == "new"
 
     def test_on_pre_compress(self):
         mgr = MemoryManager()

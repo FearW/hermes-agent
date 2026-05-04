@@ -524,21 +524,59 @@ class TestRunOnMCPLoopInterrupts:
 
         waiter_tid = threading.current_thread().ident
 
+        ready_to_interrupt = threading.Event()
+
         def _interrupt_soon():
-            time.sleep(0.2)
+            ready_to_interrupt.wait(timeout=1)
             set_interrupt(True, waiter_tid)
 
         interrupter = threading.Thread(target=_interrupt_soon, daemon=True)
         interrupter.start()
 
         try:
+            ready_to_interrupt.set()
             with pytest.raises(InterruptedError, match="User sent a new message"):
                 mcp_mod._run_on_mcp_loop(_slow_call(), timeout=2)
 
-            deadline = time.time() + 2
-            while time.time() < deadline and not cancelled.is_set():
-                time.sleep(0.05)
-            assert cancelled.is_set()
+            assert cancelled.wait(timeout=2)
+        finally:
+            set_interrupt(False, waiter_tid)
+            loop.call_soon_threadsafe(loop.stop)
+            thread.join(timeout=2)
+            loop.close()
+            mcp_mod._mcp_loop = old_loop
+            mcp_mod._mcp_thread = old_thread
+
+    def test_timeout_cancels_waiting_mcp_call(self):
+        import tools.mcp_tool as mcp_mod
+        from tools.interrupt import set_interrupt
+        import concurrent.futures
+
+        loop = asyncio.new_event_loop()
+        thread = threading.Thread(target=loop.run_forever, daemon=True)
+        thread.start()
+
+        cancelled = threading.Event()
+
+        async def _never_finishes():
+            try:
+                await asyncio.sleep(9999)
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+        old_loop = mcp_mod._mcp_loop
+        old_thread = mcp_mod._mcp_thread
+        mcp_mod._mcp_loop = loop
+        mcp_mod._mcp_thread = thread
+
+        waiter_tid = threading.current_thread().ident
+        set_interrupt(False, waiter_tid)
+
+        try:
+            with pytest.raises(concurrent.futures.TimeoutError):
+                mcp_mod._run_on_mcp_loop(_never_finishes(), timeout=0.01)
+            assert cancelled.wait(timeout=2)
         finally:
             set_interrupt(False, waiter_tid)
             loop.call_soon_threadsafe(loop.stop)

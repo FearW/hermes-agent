@@ -752,6 +752,15 @@ class SessionStore:
         self._loaded = False
         self._lock = threading.Lock()
         self._has_active_processes_fn = has_active_processes_fn
+        # Session index write throttling: update_session() is called very
+        # frequently, so we coalesce writes to reduce fsync pressure.
+        self._index_save_min_interval_secs = 1.0
+        self._index_last_saved_monotonic = 0.0
+        self._index_save_pending = False
+        # Cache model signature keyed by config.yaml mtime_ns to avoid parsing
+        # YAML on every get_or_create_session() call.
+        self._model_signature_cache: Optional[str] = None
+        self._model_signature_mtime_ns: Optional[int] = None
         
         # Initialize SQLite session database
         self._db = None
@@ -811,6 +820,38 @@ class SessionStore:
             except OSError as e:
                 logger.debug("Could not remove temp file %s: %s", tmp_path, e)
             raise
+        self._index_last_saved_monotonic = time.monotonic()
+        self._index_save_pending = False
+
+    def _save_if_due_locked(self, *, force: bool = False) -> None:
+        """Flush sessions index if throttle window elapsed.
+
+        Must be called with self._lock held.
+        """
+        now_mono = time.monotonic()
+        due = (
+            force
+            or self._index_last_saved_monotonic == 0.0
+            or (now_mono - self._index_last_saved_monotonic) >= self._index_save_min_interval_secs
+        )
+        if due:
+            self._save()
+        else:
+            self._index_save_pending = True
+
+    def _flush_pending_save_if_due_locked(self) -> None:
+        """Flush a delayed index write once the throttle window has elapsed.
+
+        Must be called with self._lock held.
+        """
+        if not self._index_save_pending:
+            return
+        now_mono = time.monotonic()
+        if (
+            self._index_last_saved_monotonic == 0.0
+            or (now_mono - self._index_last_saved_monotonic) >= self._index_save_min_interval_secs
+        ):
+            self._save()
     
     def _generate_session_key(self, source: SessionSource) -> str:
         """Generate a session key from a source."""
@@ -823,12 +864,22 @@ class SessionStore:
     def _build_model_signature(self) -> str:
         """Return a stable hash of model/routing config that affects sessions."""
         payload = {}
+        config_mtime_ns: Optional[int] = None
         try:
             import yaml as _yaml
             from hermes_constants import get_hermes_home
 
             config_path = get_hermes_home() / "config.yaml"
             if config_path.exists():
+                try:
+                    config_mtime_ns = int(config_path.stat().st_mtime_ns)
+                except Exception:
+                    config_mtime_ns = None
+                if (
+                    self._model_signature_cache is not None
+                    and self._model_signature_mtime_ns == config_mtime_ns
+                ):
+                    return self._model_signature_cache
                 with open(config_path, encoding="utf-8") as file:
                     config = _yaml.safe_load(file) or {}
                 payload = {
@@ -839,10 +890,16 @@ class SessionStore:
                     "context": config.get("context"),
                     "compression": config.get("compression"),
                 }
+            elif self._model_signature_cache is not None and self._model_signature_mtime_ns is None:
+                return self._model_signature_cache
         except Exception:
             payload = {}
+            config_mtime_ns = None
         raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
-        return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+        signature = hashlib.sha1(raw.encode("utf-8")).hexdigest()
+        self._model_signature_cache = signature
+        self._model_signature_mtime_ns = config_mtime_ns
+        return signature
     
     def _is_session_expired(self, entry: SessionEntry) -> bool:
         """Check if a session has expired based on its reset policy.
@@ -970,6 +1027,7 @@ class SessionStore:
 
         with self._lock:
             self._ensure_loaded_locked()
+            self._flush_pending_save_if_due_locked()
 
             if session_key in self._entries and not force_new:
                 entry = self._entries[session_key]
@@ -990,7 +1048,7 @@ class SessionStore:
                     # means a re-interrupted retry keeps trying — the
                     # stuck-loop counter handles terminal escalation.
                     entry.updated_at = now
-                    self._save()
+                    self._save_if_due_locked(force=True)
                     return entry
                 elif entry.model_signature and entry.model_signature != current_model_signature:
                     reset_reason = "model_config_changed"
@@ -998,7 +1056,7 @@ class SessionStore:
                     reset_reason = self._should_reset(entry, source)
                 if not reset_reason:
                     entry.updated_at = now
-                    self._save()
+                    self._save_if_due_locked(force=True)
                     return entry
                 else:
                     # Session is being auto-reset.
@@ -1031,7 +1089,7 @@ class SessionStore:
             )
 
             self._entries[session_key] = entry
-            self._save()
+            self._save_if_due_locked(force=True)
             db_create_kwargs = {
                 "session_id": session_id,
                 "source": source.platform.value,
@@ -1067,7 +1125,7 @@ class SessionStore:
                 entry.updated_at = _now()
                 if last_prompt_tokens is not None:
                     entry.last_prompt_tokens = last_prompt_tokens
-                self._save()
+                self._save_if_due_locked(force=False)
 
     def suspend_session(self, session_key: str) -> bool:
         """Mark a session as suspended so it auto-resets on next access.
@@ -1331,6 +1389,7 @@ class SessionStore:
         """List all sessions, optionally filtered by activity."""
         with self._lock:
             self._ensure_loaded_locked()
+            self._flush_pending_save_if_due_locked()
             entries = list(self._entries.values())
 
         if active_minutes is not None:

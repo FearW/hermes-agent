@@ -6197,11 +6197,37 @@ class HermesCLI:
             # Use original case (handler lowercases the personality name itself)
             self._handle_personality_command(cmd_original)
         elif canonical == "retry":
+            try:
+                from agent.evolution_loop import record_user_feedback
+                record_user_feedback(
+                    session_id=self.session_id or "",
+                    run_id=getattr(self, "_last_agent_run_id", ""),
+                    score=2,
+                    tags=["implicit", "retry"],
+                    note="User triggered /retry",
+                    strategy_version=os.getenv("HERMES_STRATEGY_VERSION", "default"),
+                    experiment_bucket=os.getenv("HERMES_EXPERIMENT_BUCKET", "control"),
+                )
+            except Exception:
+                pass
             retry_msg = self.retry_last()
             if retry_msg and hasattr(self, '_pending_input'):
                 # Re-queue the message so process_loop sends it to the agent
                 self._pending_input.put(retry_msg)
         elif canonical == "undo":
+            try:
+                from agent.evolution_loop import record_user_feedback
+                record_user_feedback(
+                    session_id=self.session_id or "",
+                    run_id=getattr(self, "_last_agent_run_id", ""),
+                    score=1,
+                    tags=["implicit", "undo"],
+                    note="User triggered /undo",
+                    strategy_version=os.getenv("HERMES_STRATEGY_VERSION", "default"),
+                    experiment_bucket=os.getenv("HERMES_EXPERIMENT_BUCKET", "control"),
+                )
+            except Exception:
+                pass
             self.undo_last()
         elif canonical == "branch":
             self._handle_branch_command(cmd_original)

@@ -157,6 +157,86 @@ class ProcessRegistry:
         # Track sessions whose completion was already consumed by the agent
         # via wait/poll/log.  Drain loops skip notifications for these.
         self._completion_consumed: set = set()
+        # Track sessions whose completion notification was already enqueued.
+        self._completion_enqueued: set = set()
+
+    def configure_notifications(
+        self,
+        session_id: str,
+        *,
+        notify_on_complete: bool = False,
+        watch_patterns: Optional[List[str]] = None,
+        watcher_metadata: Optional[Dict[str, Any]] = None,
+        watcher_interval: int = 0,
+    ) -> None:
+        """Atomically configure background notification metadata.
+
+        This avoids races where a short-lived process exits (and is moved to
+        finished) before terminal_tool attaches notify_on_complete/watch_patterns.
+        If the process already exited and notify_on_complete=True, this method
+        will enqueue a completion notification exactly once.
+        """
+        enqueue_payload = None
+        need_checkpoint = False
+
+        with self._lock:
+            session = self._running.get(session_id) or self._finished.get(session_id)
+            if session is None:
+                return
+
+            # Apply watcher routing metadata first.
+            if watcher_metadata:
+                session.watcher_platform = str(watcher_metadata.get("platform") or "")
+                session.watcher_chat_id = str(watcher_metadata.get("chat_id") or "")
+                session.watcher_user_id = str(watcher_metadata.get("user_id") or "")
+                session.watcher_user_name = str(watcher_metadata.get("user_name") or "")
+                session.watcher_thread_id = str(watcher_metadata.get("thread_id") or "")
+                session.watcher_interval = int(watcher_interval or 0)
+
+                if session.watcher_platform and session.watcher_interval:
+                    watcher_entry = {
+                        "session_id": session.id,
+                        "check_interval": session.watcher_interval,
+                        "session_key": session.session_key,
+                        "platform": session.watcher_platform,
+                        "chat_id": session.watcher_chat_id,
+                        "user_id": session.watcher_user_id,
+                        "user_name": session.watcher_user_name,
+                        "thread_id": session.watcher_thread_id,
+                        "notify_on_complete": bool(notify_on_complete),
+                    }
+                    self.pending_watchers = [
+                        w for w in self.pending_watchers if w.get("session_id") != session.id
+                    ]
+                    self.pending_watchers.append(watcher_entry)
+
+            session.notify_on_complete = bool(notify_on_complete)
+            if watch_patterns is not None:
+                session.watch_patterns = list(watch_patterns)
+            need_checkpoint = True
+
+            # If the process already exited, ensure we don't miss the completion event.
+            if (
+                session.exited
+                and session.notify_on_complete
+                and session.id not in self._completion_consumed
+                and session.id not in self._completion_enqueued
+            ):
+                from tools.ansi_strip import strip_ansi
+                output_tail = strip_ansi(session.output_buffer[-2000:]) if session.output_buffer else ""
+                self._completion_enqueued.add(session.id)
+                enqueue_payload = {
+                    "type": "completion",
+                    "session_id": session.id,
+                    "command": session.command,
+                    "exit_code": session.exit_code,
+                    "output": output_tail,
+                }
+
+        if need_checkpoint:
+            self._write_checkpoint()
+        if enqueue_payload is not None:
+            self.completion_queue.put(enqueue_payload)
 
     @staticmethod
     def _clean_shell_noise(text: str) -> str:
@@ -252,7 +332,7 @@ class ProcessRegistry:
         try:
             os.kill(pid, 0)
             return True
-        except (ProcessLookupError, PermissionError):
+        except (OSError, ProcessLookupError, PermissionError):
             return False
 
     def _refresh_detached_session(self, session: Optional[ProcessSession]) -> Optional[ProcessSession]:
@@ -625,6 +705,7 @@ class ProcessRegistry:
         if was_running and session.notify_on_complete:
             from tools.ansi_strip import strip_ansi
             output_tail = strip_ansi(session.output_buffer[-2000:]) if session.output_buffer else ""
+            self._completion_enqueued.add(session.id)
             self.completion_queue.put({
                 "type": "completion",
                 "session_id": session.id,
@@ -638,6 +719,13 @@ class ProcessRegistry:
     def is_completion_consumed(self, session_id: str) -> bool:
         """Check if a completion notification was already consumed via wait/poll/log."""
         return session_id in self._completion_consumed
+
+    def _mark_completion_consumed(self, session_id: str) -> None:
+        """Mark completion as consumed and clear enqueue bookkeeping."""
+        if not session_id:
+            return
+        self._completion_consumed.add(session_id)
+        self._completion_enqueued.discard(session_id)
 
     def get(self, session_id: str) -> Optional[ProcessSession]:
         """Get a session by ID (running or finished)."""
@@ -666,7 +754,7 @@ class ProcessRegistry:
         }
         if session.exited:
             result["exit_code"] = session.exit_code
-            self._completion_consumed.add(session_id)
+            self._mark_completion_consumed(session_id)
         if session.detached:
             result["detached"] = True
             result["note"] = "Process recovered after restart -- output history unavailable"
@@ -700,7 +788,7 @@ class ProcessRegistry:
             "showing": f"{len(selected)} lines",
         }
         if session.exited:
-            self._completion_consumed.add(session_id)
+            self._mark_completion_consumed(session_id)
         return result
 
     def wait(self, session_id: str, timeout: int = None) -> dict:
@@ -744,7 +832,7 @@ class ProcessRegistry:
         while time.monotonic() < deadline:
             session = self._refresh_detached_session(session)
             if session.exited:
-                self._completion_consumed.add(session_id)
+                self._mark_completion_consumed(session_id)
                 result = {
                     "status": "exited",
                     "exit_code": session.exit_code,

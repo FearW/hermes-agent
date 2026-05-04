@@ -66,6 +66,69 @@ def test_dynamic_tool_discovery_updates_existing_mapping_references(monkeypatch)
         module.TOOLSET_REQUIREMENTS.update(registry.get_toolset_requirements())
 
 
+@pytest.mark.parametrize(
+    ("failing_target", "expected_fragment"),
+    [
+        ("tools.mcp_tool.discover_mcp_tools", "MCP tool discovery failed"),
+        ("hermes_cli.plugins.discover_plugins", "Plugin discovery failed"),
+        ("tools.plan_mode.apply_classification", "Plan-mode classification failed"),
+    ],
+)
+def test_dynamic_tool_discovery_logs_and_keeps_maps_consistent_on_partial_failures(
+    monkeypatch, failing_target, expected_fragment
+):
+    import model_tools as module
+    original_done = module._dynamic_discovery_done
+
+    mcp_called = 0
+    plugins_called = 0
+    classify_called = 0
+
+    def _ok_mcp():
+        nonlocal mcp_called
+        mcp_called += 1
+
+    def _ok_plugins():
+        nonlocal plugins_called
+        plugins_called += 1
+
+    def _ok_classify():
+        nonlocal classify_called
+        classify_called += 1
+
+    monkeypatch.setattr("tools.mcp_tool.discover_mcp_tools", _ok_mcp)
+    monkeypatch.setattr("hermes_cli.plugins.discover_plugins", _ok_plugins)
+    monkeypatch.setattr("tools.plan_mode.apply_classification", _ok_classify)
+    monkeypatch.setattr(module, "_dynamic_discovery_done", False)
+
+    if failing_target == "tools.mcp_tool.discover_mcp_tools":
+        monkeypatch.setattr(
+            failing_target, lambda: (_ for _ in ()).throw(RuntimeError("boom-mcp"))
+        )
+    elif failing_target == "hermes_cli.plugins.discover_plugins":
+        monkeypatch.setattr(
+            failing_target,
+            lambda: (_ for _ in ()).throw(RuntimeError("boom-plugins")),
+        )
+    else:
+        monkeypatch.setattr(
+            failing_target,
+            lambda: (_ for _ in ()).throw(RuntimeError("boom-classification")),
+        )
+
+    try:
+        with patch.object(module.logger, "debug") as debug_log:
+            module._ensure_dynamic_tool_discovery()
+
+        assert module._dynamic_discovery_done is True
+        assert module.TOOL_TO_TOOLSET_MAP == registry.get_tool_to_toolset_map()
+        assert module.TOOLSET_REQUIREMENTS == registry.get_toolset_requirements()
+        assert any(expected_fragment in str(args[0]) for args, _ in debug_log.call_args_list)
+        assert mcp_called + plugins_called + classify_called == 2
+    finally:
+        monkeypatch.setattr(module, "_dynamic_discovery_done", original_done)
+
+
 def test_quiet_toolset_resolution_is_cached(monkeypatch):
     import model_tools as module
 
@@ -79,6 +142,7 @@ def test_quiet_toolset_resolution_is_cached(monkeypatch):
     monkeypatch.setattr(module, "validate_toolset", lambda name: True)
     monkeypatch.setattr(module, "resolve_toolset", fake_resolve_toolset)
     monkeypatch.setattr(module.registry, "get_definitions", lambda names, quiet=False: [])
+
     module._toolset_resolution_cache.clear()
 
     try:
@@ -88,6 +152,12 @@ def test_quiet_toolset_resolution_is_cached(monkeypatch):
         assert calls == ["filesystem"]
     finally:
         module._toolset_resolution_cache.clear()
+
+
+@pytest.mark.parametrize("raw", ["nan", "NaN", "inf", "INF", "-inf", "+inf"])
+def test_coerce_number_does_not_convert_nonfinite_values(raw):
+    import model_tools as module
+    assert module._coerce_number(raw) == raw
 
 
 # =========================================================================

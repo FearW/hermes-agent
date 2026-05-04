@@ -1663,6 +1663,27 @@ def _resolve_notification_flag_conflict(
     return watch_patterns, ""
 
 
+def _build_gateway_watcher_metadata(notify_on_complete: bool, watch_patterns) -> tuple[dict | None, int]:
+    """Return gateway watcher metadata + interval for background notifications."""
+    if not (notify_on_complete or watch_patterns):
+        return None, 0
+    from gateway.session_context import get_session_env as _gse
+    platform = _gse("HERMES_SESSION_PLATFORM", "")
+    if not platform:
+        return None, 0
+    metadata = {
+        "platform": platform,
+        "chat_id": _gse("HERMES_SESSION_CHAT_ID", ""),
+        "thread_id": _gse("HERMES_SESSION_THREAD_ID", ""),
+        "user_id": _gse("HERMES_SESSION_USER_ID", ""),
+        "user_name": _gse("HERMES_SESSION_USER_NAME", ""),
+    }
+    # Gateway mode: auto-register a fast watcher so completion can trigger
+    # an immediate follow-up agent turn.
+    interval = 5 if notify_on_complete else 0
+    return metadata, interval
+
+
 def terminal_tool(
     command: str,
     background: bool = False,
@@ -1967,20 +1988,6 @@ def terminal_tool(
                 # Populate routing metadata on the session so that
                 # watch-pattern and completion notifications can be
                 # routed back to the correct chat/thread.
-                if background and (notify_on_complete or watch_patterns):
-                    from gateway.session_context import get_session_env as _gse
-                    _gw_platform = _gse("HERMES_SESSION_PLATFORM", "")
-                    if _gw_platform:
-                        _gw_chat_id = _gse("HERMES_SESSION_CHAT_ID", "")
-                        _gw_thread_id = _gse("HERMES_SESSION_THREAD_ID", "")
-                        _gw_user_id = _gse("HERMES_SESSION_USER_ID", "")
-                        _gw_user_name = _gse("HERMES_SESSION_USER_NAME", "")
-                        proc_session.watcher_platform = _gw_platform
-                        proc_session.watcher_chat_id = _gw_chat_id
-                        proc_session.watcher_user_id = _gw_user_id
-                        proc_session.watcher_user_name = _gw_user_name
-                        proc_session.watcher_thread_id = _gw_thread_id
-
                 # Mutual exclusion: if both notify_on_complete and watch_patterns
                 # are set, drop watch_patterns. The combination produces duplicate
                 # notifications (one per match + one on exit) that deliver
@@ -1997,32 +2004,29 @@ def terminal_tool(
                     logger.warning("background proc %s: %s", proc_session.id, conflict_note)
                     result_data["watch_patterns_ignored"] = conflict_note
 
-                # Mark for agent notification on completion
+                # Atomically configure notification metadata to avoid races with
+                # short-lived background processes that may exit before these
+                # flags are attached.
+                watcher_metadata = None
+                watcher_interval = 0
+                if background and (notify_on_complete or watch_patterns):
+                    watcher_metadata, watcher_interval = _build_gateway_watcher_metadata(
+                        bool(notify_on_complete),
+                        watch_patterns,
+                    )
+
+                process_registry.configure_notifications(
+                    proc_session.id,
+                    notify_on_complete=bool(notify_on_complete and background),
+                    watch_patterns=watch_patterns if (watch_patterns and background) else [],
+                    watcher_metadata=watcher_metadata,
+                    watcher_interval=watcher_interval,
+                )
+
                 if notify_on_complete and background:
-                    proc_session.notify_on_complete = True
                     result_data["notify_on_complete"] = True
-
-                    # In gateway mode, auto-register a fast watcher so the
-                    # gateway can detect completion and trigger a new agent
-                    # turn.  CLI mode uses the completion_queue directly.
-                    if proc_session.watcher_platform:
-                        proc_session.watcher_interval = 5
-                        process_registry.pending_watchers.append({
-                            "session_id": proc_session.id,
-                            "check_interval": 5,
-                            "session_key": session_key,
-                            "platform": proc_session.watcher_platform,
-                            "chat_id": proc_session.watcher_chat_id,
-                            "user_id": proc_session.watcher_user_id,
-                            "user_name": proc_session.watcher_user_name,
-                            "thread_id": proc_session.watcher_thread_id,
-                            "notify_on_complete": True,
-                        })
-
-                # Set watch patterns for output monitoring
                 if watch_patterns and background:
-                    proc_session.watch_patterns = list(watch_patterns)
-                    result_data["watch_patterns"] = proc_session.watch_patterns
+                    result_data["watch_patterns"] = list(watch_patterns)
 
                 return json.dumps(result_data, ensure_ascii=False)
             except Exception as e:

@@ -9,6 +9,7 @@ import time
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+import queue
 
 from tools.environments.local import _HERMES_PROVIDER_ENV_FORCE_PREFIX
 from tools.process_registry import (
@@ -103,6 +104,63 @@ class TestGetAndPoll:
         assert result["exit_code"] == 0
 
 
+class TestNotificationConfiguration:
+    def test_configure_notifications_enqueues_completion_for_finished_process(self, registry):
+        s = _make_session(exited=True, exit_code=0, output="all done")
+        registry._finished[s.id] = s
+
+        registry.configure_notifications(s.id, notify_on_complete=True)
+
+        item = registry.completion_queue.get(timeout=1)
+        assert item["type"] == "completion"
+        assert item["session_id"] == s.id
+        assert item["exit_code"] == 0
+        assert "all done" in item["output"]
+
+        # Exactly once
+        with pytest.raises(queue.Empty):
+            registry.completion_queue.get_nowait()
+
+    def test_poll_marks_completion_consumed_and_clears_enqueued(self, registry):
+        s = _make_session(exited=True, exit_code=0, output="ok")
+        registry._finished[s.id] = s
+        registry._completion_enqueued.add(s.id)
+
+        result = registry.poll(s.id)
+
+        assert result["status"] == "exited"
+        assert s.id in registry._completion_consumed
+        assert s.id not in registry._completion_enqueued
+
+    def test_configure_notifications_deduplicates_pending_watcher(self, registry):
+        s = _make_session(task_id="task-1")
+        s.session_key = "session-key-1"
+        registry._running[s.id] = s
+
+        metadata = {
+            "platform": "telegram",
+            "chat_id": "chat-1",
+            "thread_id": "",
+            "user_id": "user-1",
+            "user_name": "alice",
+        }
+        registry.configure_notifications(
+            s.id,
+            notify_on_complete=True,
+            watcher_metadata=metadata,
+            watcher_interval=5,
+        )
+        registry.configure_notifications(
+            s.id,
+            notify_on_complete=True,
+            watcher_metadata=metadata,
+            watcher_interval=5,
+        )
+
+        watchers = [w for w in registry.pending_watchers if w.get("session_id") == s.id]
+        assert len(watchers) == 1
+
+
 # =========================================================================
 # Read log
 # =========================================================================
@@ -168,8 +226,9 @@ class TestStdinHelpers:
         assert result["status"] == "ok"
 
     def test_close_stdin_allows_eof_driven_process_to_finish(self, registry, tmp_path):
+        exe = sys.executable
         session = registry.spawn_local(
-            'python3 -c "import sys; print(sys.stdin.read().strip())"',
+            f"\"{exe}\" -c 'import sys; print(sys.stdin.read().strip())'",
             cwd=str(tmp_path),
             use_pty=False,
         )

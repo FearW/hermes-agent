@@ -32,6 +32,7 @@ from tools.delegate_tool import (
     _strip_blocked_tools,
     _resolve_child_credential_pool,
     _resolve_delegation_credentials,
+    _is_mcp_toolset_name,
 )
 
 
@@ -106,6 +107,19 @@ class TestStripBlockedTools(unittest.TestCase):
     def test_empty_input(self):
         result = _strip_blocked_tools([])
         self.assertEqual(result, [])
+
+
+class TestMcpToolsetAlias(unittest.TestCase):
+    def test_is_mcp_toolset_name_resolves_registry_alias(self):
+        from tools.registry import registry
+
+        registry.register_toolset_alias("my_mcp_server", "mcp-my_mcp_server")
+        try:
+            self.assertTrue(_is_mcp_toolset_name("mcp-my_mcp_server"))
+            self.assertTrue(_is_mcp_toolset_name("my_mcp_server"))
+            self.assertFalse(_is_mcp_toolset_name("non_mcp"))
+        finally:
+            registry.unregister_toolset_alias("my_mcp_server")
 
 
 class TestDelegateTask(unittest.TestCase):

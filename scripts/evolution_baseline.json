@@ -1,0 +1,10 @@
+{
+  "runs_total": 0,
+  "completion_rate": 0.0,
+  "interruption_rate": 0.0,
+  "avg_retry_count": 0.0,
+  "fallback_rate": 0.0,
+  "avg_latency_seconds": 0.0,
+  "avg_cost_usd": 0.0
+}
+

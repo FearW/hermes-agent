@@ -112,6 +112,29 @@ uv run hermes memory doctor
 uv run hermes doctor
 ```
 
+## 自进化闭环（v1）
+
+本仓库已落地最小自进化闭环能力：
+
+- 运行结果事件：`$HERMES_HOME/evolution/outcomes.jsonl`
+- 用户反馈事件：`$HERMES_HOME/evolution/feedback.jsonl`
+- 汇总脚本：`scripts/build_evolution_summary.py`
+- 基线校验：`scripts/check_evolution_baseline.py`
+- A/B 对比：`scripts/compare_evolution_runs.py`
+
+### 零指令反馈（默认开启）
+
+不需要学习任何新命令。用户正常对话即可，系统会从真实使用行为中提取反馈信号并写入
+`feedback.jsonl`，用于后续策略评估与版本对比。当前 v1 已接入低侵入行为信号（如重试/撤销）。
+
+### 评测与回归门禁示例
+
+```bash
+uv run python scripts/build_evolution_summary.py
+uv run python scripts/check_evolution_baseline.py --summary ~/.hermes/evolution/summary.json --baseline scripts/evolution_baseline.json
+uv run python scripts/compare_evolution_runs.py --a control_summary.json --b candidate_summary.json
+```
+
 ## 安装能力
 
 ```bash

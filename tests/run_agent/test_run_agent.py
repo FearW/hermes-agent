@@ -52,6 +52,27 @@ def test_is_destructive_command_treats_install_as_mutating():
     assert run_agent._is_destructive_command("install template.env .env") is True
 
 
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("rm -rf build", True),
+        ("mv old.txt new.txt", True),
+        ("git reset --hard HEAD~1", True),
+        ("git clean -fd", True),
+        ("echo hello > out.txt", True),
+        ("python script.py > out.txt", True),
+        ("echo hello >> out.txt", False),
+        ("echo 'a > b'", False),
+        ("echo done && rm temp.txt", True),
+        ("pwd; mv a b", True),
+        ("printf 'safe command only'", False),
+        ("", False),
+    ],
+)
+def test_is_destructive_command_cases(command: str, expected: bool):
+    assert run_agent._is_destructive_command(command) is expected
+
+
 @pytest.fixture()
 def agent():
     """Minimal AIAgent with mocked OpenAI client and tool loading."""

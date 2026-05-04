@@ -4333,9 +4333,35 @@ class GatewayRunner:
             return await self._handle_personality_command(event)
 
         if canonical == "retry":
+            try:
+                from agent.evolution_loop import record_user_feedback
+                record_user_feedback(
+                    session_id=getattr(event, "session_id", "") or "",
+                    run_id="",
+                    score=2,
+                    tags=["implicit", "retry"],
+                    note="User triggered /retry",
+                    strategy_version=os.getenv("HERMES_STRATEGY_VERSION", "default"),
+                    experiment_bucket=os.getenv("HERMES_EXPERIMENT_BUCKET", "control"),
+                )
+            except Exception:
+                pass
             return await self._handle_retry_command(event)
         
         if canonical == "undo":
+            try:
+                from agent.evolution_loop import record_user_feedback
+                record_user_feedback(
+                    session_id=getattr(event, "session_id", "") or "",
+                    run_id="",
+                    score=1,
+                    tags=["implicit", "undo"],
+                    note="User triggered /undo",
+                    strategy_version=os.getenv("HERMES_STRATEGY_VERSION", "default"),
+                    experiment_bucket=os.getenv("HERMES_EXPERIMENT_BUCKET", "control"),
+                )
+            except Exception:
+                pass
             return await self._handle_undo_command(event)
         
         if canonical == "sethome":

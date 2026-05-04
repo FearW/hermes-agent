@@ -456,7 +456,7 @@ def _is_mcp_toolset_name(name: str) -> bool:
     try:
         from tools.registry import registry
 
-        target = registry.get_toolset_alias_target(str(name))
+        target = registry.resolve_toolset_alias(str(name))
     except Exception:
         target = None
     return bool(target and str(target).startswith("mcp-"))

@@ -353,6 +353,34 @@ class MemoryManager:
                     provider.name, e,
                 )
 
+    def on_session_switch(
+        self,
+        new_session_id: str,
+        *,
+        parent_session_id: str = "",
+        reset: bool = False,
+        **kwargs,
+    ) -> None:
+        """Notify all providers that session_id rotated mid-process.
+
+        Providers may cache per-session state (document IDs, turn buffers,
+        counters). This hook allows them to refresh or reset that state so
+        subsequent writes land in the correct session record.
+        """
+        for provider in self._providers:
+            try:
+                provider.on_session_switch(
+                    new_session_id,
+                    parent_session_id=parent_session_id,
+                    reset=reset,
+                    **kwargs,
+                )
+            except Exception as e:
+                logger.debug(
+                    "Memory provider '%s' on_session_switch failed (non-fatal): %s",
+                    provider.name, e,
+                )
+
     def on_pre_compress(self, messages: List[Dict[str, Any]]) -> str:
         """Notify all providers before context compression.
 
