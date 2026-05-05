@@ -119,6 +119,9 @@ COMMAND_REGISTRY: list[CommandDef] = [
                cli_only=True, args_hint="[name]"),
     CommandDef("voice", "切换语音模式", "Configuration",
                args_hint="[on|off|tts|status]", subcommands=("on", "off", "tts", "status")),
+    CommandDef("sleep", "查看或切换睡眠模式档位", "Configuration",
+               args_hint="[off|light|balanced|deep|status]",
+               subcommands=("off", "light", "balanced", "deep", "status")),
 
     # Tools & Skills
     CommandDef("tools", "管理工具：/tools [list|disable|enable] [name...]", "Tools & Skills",
@@ -139,6 +142,9 @@ COMMAND_REGISTRY: list[CommandDef] = [
                subcommands=("connect", "disconnect", "status")),
     CommandDef("plugins", "列出已安装插件及其状态",
                "Tools & Skills", cli_only=True),
+    CommandDef("dream", "立即运行一次梦境/睡眠维护",
+               "Tools & Skills", args_hint="[memory|l4|lifecycle|all|status]",
+               subcommands=("memory", "l4", "lifecycle", "all", "status")),
 
     # Info
     CommandDef("commands", "分页浏览全部命令与技能", "Info",

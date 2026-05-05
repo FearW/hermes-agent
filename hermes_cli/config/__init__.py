@@ -681,6 +681,7 @@ DEFAULT_CONFIG = {
         "profile": "balanced",  # off, light, balanced, deep
         "memory_review_interval": 8,  # user turns between background memory review
         "skill_review_interval": 12,  # tool iterations between skill/workflow review
+        "memory_token_threshold": 8000,  # token-cumulative trigger for memory review
         "background_review": True,
         "external_memory_sync": True,
         "l4_periodic_archive": True,

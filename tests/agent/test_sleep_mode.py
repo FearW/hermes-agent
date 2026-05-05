@@ -1,3 +1,5 @@
+import logging
+
 from agent.sleep_mode import (
     apply_sleep_mode_to_maintenance_config,
     resolve_sleep_mode,
@@ -11,6 +13,7 @@ def test_resolve_sleep_mode_balanced_defaults():
     assert mode["profile"] == "balanced"
     assert mode["memory_review_interval"] == 8
     assert mode["skill_review_interval"] == 12
+    assert mode["memory_token_threshold"] == 8000
     assert mode["background_review"] is True
 
 
@@ -90,3 +93,56 @@ def test_sleep_mode_off_disables_gateway_maintenance():
     assert maintenance["retention_loop"] is False
     assert maintenance["l4_periodic_archive"] is False
     assert maintenance["l4_compaction"] is False
+
+
+def test_sleep_mode_unknown_profile_warns_and_falls_back(caplog):
+    with caplog.at_level(logging.WARNING, logger="agent.sleep_mode"):
+        mode = resolve_sleep_mode({"sleep_mode": {"profile": "maximum"}})
+
+    assert mode["profile"] == "balanced"
+    assert mode["enabled"] is True
+    assert any("Unknown sleep_mode profile" in rec.message for rec in caplog.records)
+
+
+def test_sleep_mode_unknown_key_warns_and_is_dropped(caplog):
+    with caplog.at_level(logging.WARNING, logger="agent.sleep_mode"):
+        mode = resolve_sleep_mode({
+            "sleep_mode": {
+                "profile": "balanced",
+                "memory_review_intrval": 2,  # typo on purpose
+            }
+        })
+
+    assert mode["memory_review_interval"] == 8  # default, not the typo value
+    assert "memory_review_intrval" not in mode
+    assert any(
+        "Ignoring unknown sleep_mode field" in rec.message
+        and "memory_review_intrval" in rec.message
+        for rec in caplog.records
+    )
+
+
+def test_sleep_mode_invalid_int_warns_and_coerces_to_zero(caplog):
+    with caplog.at_level(logging.WARNING, logger="agent.sleep_mode"):
+        mode = resolve_sleep_mode({
+            "sleep_mode": {
+                "profile": "balanced",
+                "maintenance_interval_seconds": "not-a-number",
+            }
+        })
+
+    assert mode["maintenance_interval_seconds"] == 0
+    assert any(
+        "maintenance_interval_seconds" in rec.message
+        and "non-integer" in rec.message
+        for rec in caplog.records
+    )
+
+
+def test_sleep_mode_non_mapping_config_warns_and_uses_defaults(caplog):
+    with caplog.at_level(logging.WARNING, logger="agent.sleep_mode"):
+        mode = resolve_sleep_mode({"sleep_mode": "balanced"})
+
+    assert mode["profile"] == "balanced"
+    assert mode["enabled"] is True
+    assert any("not a mapping" in rec.message for rec in caplog.records)

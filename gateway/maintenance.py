@@ -1,45 +1,95 @@
+"""Gateway maintenance shim.
+
+The actual task runner lives in :mod:`agent.background_scheduler`. This
+module exposes ``start_scheduler()`` — the gateway's single entry point —
+plus thin backward-compatible shims for the legacy ``retention_loop`` and
+``l4_periodic_archive_loop`` functions so out-of-tree imports don't break.
+"""
+
 from __future__ import annotations
 
 import asyncio
-import datetime
 import logging
+import warnings
+from typing import Any
 
-from agent.capability_lifecycle import run_lifecycle_maintenance
+from agent.background_scheduler import (
+    BackgroundScheduler,
+    BackgroundTask,
+    SessionStoreIdleProbe,
+    _builtin_memory_action,
+    _capability_lifecycle_action,
+    _l4_compaction_action,
+    _l4_periodic_archive_action,
+    _retention_action,
+    build_scheduler,
+)
+from agent.capability_lifecycle import run_lifecycle_maintenance  # re-export for tests
 
 logger = logging.getLogger("gateway.maintenance")
 
+__all__ = [
+    "start_scheduler",
+    "retention_loop",
+    "l4_periodic_archive_loop",
+    "run_lifecycle_maintenance",
+]
+
 
 def _seconds_since_latest_activity(session_store) -> float:
-    """Return seconds since the newest session activity, or inf if unknown."""
-    try:
-        entries = list(session_store.list_sessions())
-    except Exception:
-        return float("inf")
-
-    latest: datetime.datetime | None = None
-    for entry in entries:
-        updated = getattr(entry, "updated_at", None)
-        if not isinstance(updated, datetime.datetime):
-            continue
-        if latest is None or updated > latest:
-            latest = updated
-
-    if latest is None:
-        return float("inf")
-
-    if latest.tzinfo is None:
-        now = datetime.datetime.now()
-    else:
-        now = datetime.datetime.now(latest.tzinfo)
-    return max(0.0, (now - latest).total_seconds())
+    """Legacy helper retained so existing imports don't break."""
+    return SessionStoreIdleProbe(session_store).seconds_since_activity()
 
 
-def _idle_retry_delay(interval_seconds: int, idle_before_maintenance_seconds: int) -> int:
-    if interval_seconds <= 0:
-        return 60
-    if idle_before_maintenance_seconds <= 0:
-        return interval_seconds
-    return min(interval_seconds, max(30, min(300, idle_before_maintenance_seconds // 6 or 30)))
+def start_scheduler(
+    session_store: Any,
+    *,
+    config: dict[str, Any] | None = None,
+    retention_days: int = 14,
+    initial_delay: int = 120,
+    poll_interval: int = 60,
+    l4_max_entries: int = 2000,
+    l4_max_age_days: int = 180,
+    l4_keep_priority_at_least: int = 4,
+    l4_max_sessions_per_cycle: int = 50,
+    stop_event: asyncio.Event | None = None,
+) -> tuple[asyncio.Task, BackgroundScheduler]:
+    """Start the unified gateway maintenance scheduler as an asyncio task.
+
+    Returns ``(task, scheduler)`` so the gateway can cancel + inspect state.
+    """
+    scheduler = build_scheduler(
+        config,
+        session_store=session_store,
+        retention_days=retention_days,
+        l4_max_entries=l4_max_entries,
+        l4_max_age_days=l4_max_age_days,
+        l4_keep_priority_at_least=l4_keep_priority_at_least,
+        l4_max_sessions_per_cycle=l4_max_sessions_per_cycle,
+    )
+    probe = SessionStoreIdleProbe(session_store)
+    task = asyncio.create_task(
+        scheduler.run_forever(
+            probe,
+            stop_event=stop_event,
+            initial_delay=initial_delay,
+            poll_interval=poll_interval,
+        ),
+        name="gateway-background-scheduler",
+    )
+    logger.info("Started unified background scheduler with %d task(s)", len(scheduler.tasks))
+    return task, scheduler
+
+
+# ---------------------------------------------------------------------------
+# Deprecated thin shims — retained for backward compatibility.
+#
+# Both shims delegate to ``BackgroundScheduler.run_forever`` with a tailored
+# task list, so idle-gating, error isolation, adaptive backoff, and atomic
+# state persistence all match the unified runtime. The legacy parameter
+# surface (``initial_delay``, ``interval_seconds``, etc.) is preserved for
+# out-of-tree callers.
+# ---------------------------------------------------------------------------
 
 
 async def retention_loop(
@@ -54,45 +104,64 @@ async def retention_loop(
     l4_keep_priority_at_least: int = 4,
     idle_before_maintenance_seconds: int = 0,
 ) -> None:
-    await asyncio.sleep(initial_delay)
-    while True:
-        if idle_before_maintenance_seconds > 0:
-            idle_seconds = _seconds_since_latest_activity(session_store)
-            if idle_seconds < idle_before_maintenance_seconds:
-                logger.debug(
-                    "Retention maintenance waiting for idle threshold: %.0fs / %.0fs",
-                    idle_seconds,
-                    idle_before_maintenance_seconds,
-                )
-                await asyncio.sleep(
-                    _idle_retry_delay(interval_seconds, idle_before_maintenance_seconds)
-                )
-                continue
-        try:
-            pruned = session_store.archive_and_prune_expired_transcripts(older_than_days=older_than_days)
-            if pruned:
-                logger.info("Retention maintenance archived/pruned %d expired sessions", pruned)
-            lifecycle = run_lifecycle_maintenance()
-            if any(lifecycle.values()):
-                logger.info("Lifecycle maintenance updated states: %s", lifecycle)
-            from tools.memory_tool import compact_builtin_memory
+    """Deprecated. Prefer :func:`start_scheduler`.
 
-            builtin = compact_builtin_memory()
-            if builtin.get("memory_removed") or builtin.get("user_removed"):
-                logger.info("Built-in memory auto-compacted: %s", builtin)
-            if l4_compaction:
-                from agent.l4_archive import compact_archive
-
-                compacted = compact_archive(
+    Thin shim: runs retention + builtin memory + lifecycle + (optional) L4
+    compaction on the unified ``BackgroundScheduler``. Idle gating and error
+    isolation are provided by the scheduler.
+    """
+    warnings.warn(
+        "gateway.maintenance.retention_loop is deprecated; use "
+        "gateway.maintenance.start_scheduler instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    cadence = max(60, int(interval_seconds))
+    tasks: list[BackgroundTask] = [
+        BackgroundTask(
+            name="retention_archive",
+            action=lambda: _retention_action(session_store, older_than_days),
+            base_cadence_s=cadence,
+            idle_required_s=max(0, int(idle_before_maintenance_seconds)),
+            tags=("retention", "gateway"),
+        ),
+        BackgroundTask(
+            name="builtin_memory",
+            action=_builtin_memory_action,
+            base_cadence_s=cadence,
+            tags=("memory",),
+        ),
+        BackgroundTask(
+            name="capability_lifecycle",
+            action=_capability_lifecycle_action,
+            base_cadence_s=cadence,
+            tags=("lifecycle",),
+        ),
+    ]
+    if l4_compaction:
+        tasks.append(
+            BackgroundTask(
+                name="l4_compaction",
+                action=lambda: _l4_compaction_action(
                     max_entries=l4_max_entries,
                     max_age_days=l4_max_age_days,
                     keep_priority_at_least=l4_keep_priority_at_least,
-                )
-                if compacted.get("deleted"):
-                    logger.info("L4 compaction deleted %(deleted)d row(s), %(remaining)d remaining", compacted)
-        except Exception as exc:
-            logger.debug("Retention maintenance cycle failed: %s", exc)
-        await asyncio.sleep(interval_seconds)
+                ),
+                base_cadence_s=cadence,
+                tags=("l4",),
+            )
+        )
+    scheduler = BackgroundScheduler({"enabled": True}, tasks)
+    # Legacy retention_loop fired on the very first iteration after
+    # initial_delay. Reset the scheduler's staggered next_run_at seeds so
+    # out-of-tree callers relying on "first cycle runs immediately"
+    # keep working.
+    for rt in scheduler._runtime.values():
+        rt.next_run_at = 0.0
+    probe = SessionStoreIdleProbe(session_store)
+    await scheduler.run_forever(
+        probe, initial_delay=max(0, int(initial_delay)), poll_interval=60
+    )
 
 
 async def l4_periodic_archive_loop(
@@ -103,53 +172,35 @@ async def l4_periodic_archive_loop(
     max_sessions_per_cycle: int = 50,
     idle_before_maintenance_seconds: int = 0,
 ) -> None:
-    """Periodically archive sessions into L4 (every 2h, sessions idle 30+ min)."""
-    await asyncio.sleep(initial_delay)
-    while True:
-        if idle_before_maintenance_seconds > 0:
-            idle_seconds = _seconds_since_latest_activity(session_store)
-            if idle_seconds < idle_before_maintenance_seconds:
-                logger.debug(
-                    "L4 periodic archive waiting for idle threshold: %.0fs / %.0fs",
-                    idle_seconds,
-                    idle_before_maintenance_seconds,
-                )
-                await asyncio.sleep(
-                    _idle_retry_delay(interval_seconds, idle_before_maintenance_seconds)
-                )
-                continue
-        try:
-            from agent.l4_archive import (
-                is_session_archived, summarize_messages, _connect, _insert_entry, _migrate_legacy_json_if_needed
-            )
-            import datetime
-            archived_count = 0
-            for entry in session_store.list_sessions():
-                if max_sessions_per_cycle > 0 and archived_count >= max_sessions_per_cycle:
-                    break
-                sid = getattr(entry, "session_id", "")
-                if not sid or is_session_archived(sid):
-                    continue
-                updated = getattr(entry, "updated_at", None)
-                if isinstance(updated, datetime.datetime):
-                    if (datetime.datetime.now() - updated).total_seconds() < 1800:
-                        continue
-                messages = session_store.load_transcript(sid)
-                if not messages or len(messages) < 5:
-                    continue
-                src = getattr(entry, "platform", "unknown") or "unknown"
-                src = src.value if hasattr(src, "value") else str(src)
-                arch_entry = summarize_messages(sid, src, messages)
-                conn = _connect()
-                try:
-                    _migrate_legacy_json_if_needed(conn)
-                    _insert_entry(conn, arch_entry)
-                    conn.commit()
-                    archived_count += 1
-                finally:
-                    conn.close()
-            if archived_count:
-                logger.info("L4 periodic archive: archived %d session(s)", archived_count)
-        except Exception as exc:
-            logger.debug("L4 periodic archive cycle failed: %s", exc)
-        await asyncio.sleep(interval_seconds)
+    """Deprecated. Prefer :func:`start_scheduler`.
+
+    Thin shim: runs the L4 periodic archive on the unified scheduler with
+    the same knobs the original loop accepted.
+    """
+    warnings.warn(
+        "gateway.maintenance.l4_periodic_archive_loop is deprecated; use "
+        "gateway.maintenance.start_scheduler instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    cadence = max(60, int(interval_seconds))
+    tasks: list[BackgroundTask] = [
+        BackgroundTask(
+            name="l4_periodic_archive",
+            action=lambda: _l4_periodic_archive_action(
+                session_store,
+                max_sessions_per_cycle=max_sessions_per_cycle,
+            ),
+            base_cadence_s=cadence,
+            idle_required_s=max(0, int(idle_before_maintenance_seconds)),
+            tags=("l4", "gateway"),
+        ),
+    ]
+    scheduler = BackgroundScheduler({"enabled": True}, tasks)
+    # Legacy loop fired on the very first iteration after initial_delay.
+    for rt in scheduler._runtime.values():
+        rt.next_run_at = 0.0
+    probe = SessionStoreIdleProbe(session_store)
+    await scheduler.run_forever(
+        probe, initial_delay=max(0, int(initial_delay)), poll_interval=60
+    )

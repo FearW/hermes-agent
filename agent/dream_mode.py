@@ -1,9 +1,9 @@
 """Dream mode runtime for sleep-time maintenance.
 
-Dream mode is the visible/manual surface for Hermes sleep mode.  It reuses
-existing maintenance primitives instead of introducing another memory backend:
-built-in memory compaction, capability lifecycle maintenance, and L4 archive
-compaction.
+Dream mode is the visible/manual surface for Hermes sleep mode.  It delegates
+every action to ``agent.background_scheduler.BackgroundScheduler`` so that
+the CLI ``/dream`` command, the Web UI "run now" button, and the gateway
+maintenance loop all share one code path.
 """
 
 from __future__ import annotations
@@ -14,11 +14,15 @@ from pathlib import Path
 from typing import Any, Dict
 
 from hermes_constants import get_hermes_home
+from utils import atomic_json_write
 
+from agent.background_scheduler import (
+    STATE_FILE,
+    AlwaysReadyProbe,
+    build_scheduler,
+    record_skipped_run,
+)
 from agent.sleep_mode import resolve_sleep_mode
-
-
-STATE_FILE = "dream_state.json"
 
 
 def _state_path() -> Path:
@@ -51,9 +55,7 @@ def load_dream_state() -> dict[str, Any]:
 
 
 def save_dream_state(state: dict[str, Any]) -> None:
-    path = _state_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_json_write(_state_path(), state)
 
 
 def dream_status(config: Dict[str, Any] | None) -> dict[str, Any]:
@@ -64,6 +66,7 @@ def dream_status(config: Dict[str, Any] | None) -> dict[str, Any]:
         "profile": sleep.get("profile", "balanced"),
         "sleep_mode": sleep,
         "state": state,
+        "task_states": state.get("tasks") or {},
         "actions": [
             "builtin_memory_compaction",
             "capability_lifecycle_maintenance",
@@ -72,61 +75,45 @@ def dream_status(config: Dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
-def run_dream_cycle(config: Dict[str, Any] | None, *, reason: str = "manual") -> dict[str, Any]:
+def run_dream_cycle(
+    config: Dict[str, Any] | None,
+    *,
+    reason: str = "manual",
+    tags: tuple[str, ...] | None = ("dream",),
+) -> dict[str, Any]:
+    """Run one maintenance cycle on behalf of the user.
+
+    Delegates to ``BackgroundScheduler.run_once``. Disabled sleep mode is
+    still recorded (so the UI can show a "skipped: disabled" card).
+    """
     sleep = resolve_sleep_mode(config or {})
     started = _now()
-    result: dict[str, Any] = {
-        "ok": True,
-        "reason": reason,
-        "profile": sleep.get("profile", "balanced"),
-        "started_at": started,
-        "actions": {},
-        "errors": [],
-    }
 
     if not sleep.get("enabled", True):
-        result["ok"] = False
-        result["skipped"] = "sleep mode is disabled"
-        _persist_result(result, started)
+        result: dict[str, Any] = {
+            "ok": False,
+            "reason": reason,
+            "profile": sleep.get("profile", "balanced"),
+            "started_at": started,
+            "actions": {},
+            "errors": [],
+            "skipped": "sleep mode is disabled",
+        }
+        _persist_skipped_result(result, started)
         return result
 
-    if sleep.get("background_review", True):
-        try:
-            from tools.memory_tool import compact_builtin_memory
-
-            result["actions"]["builtin_memory"] = compact_builtin_memory()
-        except Exception as exc:  # pragma: no cover - defensive maintenance guard
-            result["ok"] = False
-            result["errors"].append(f"builtin memory compaction failed: {exc}")
-
-    try:
-        from agent.capability_lifecycle import run_lifecycle_maintenance
-
-        result["actions"]["capability_lifecycle"] = run_lifecycle_maintenance()
-    except Exception as exc:  # pragma: no cover - defensive maintenance guard
-        result["ok"] = False
-        result["errors"].append(f"capability lifecycle failed: {exc}")
-
-    if sleep.get("l4_compaction", True):
-        try:
-            from agent.l4_archive import compact_archive
-
-            result["actions"]["l4_compaction"] = compact_archive()
-        except Exception as exc:  # pragma: no cover - defensive maintenance guard
-            result["ok"] = False
-            result["errors"].append(f"L4 compaction failed: {exc}")
-
-    _persist_result(result, started)
-    return result
+    scheduler = build_scheduler(config or {}, sleep_cfg=sleep)
+    summary = scheduler.run_once(tags=tags)
+    summary["reason"] = reason
+    summary["profile"] = sleep.get("profile", "balanced")
+    return summary
 
 
-def _persist_result(result: dict[str, Any], started: float) -> None:
+def _persist_skipped_result(result: dict[str, Any], started: float) -> None:
+    """Persist a 'skipped' dream run — delegates to the shared writer in
+    ``agent.background_scheduler.record_skipped_run`` so this path uses
+    the same atomic write + schema as a real BackgroundScheduler cycle."""
     finished = _now()
     result["finished_at"] = finished
     result["duration_seconds"] = round(finished - started, 3)
-    state = load_dream_state()
-    state["last_run_at"] = finished
-    state["last_duration_seconds"] = result["duration_seconds"]
-    state["last_result"] = result
-    state["runs"] = int(state.get("runs") or 0) + 1
-    save_dream_state(state)
+    record_skipped_run(result, state_path=_state_path())

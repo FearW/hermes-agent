@@ -90,3 +90,28 @@ def record_user_feedback(
     }
     _append_jsonl(_evolution_dir() / "feedback.jsonl", payload)
 
+
+def record_background_event(
+    *,
+    session_id: str,
+    event: str,
+    detail: str = "",
+    data: Optional[Dict[str, Any]] = None,
+    timestamp_ms: Optional[int] = None,
+) -> None:
+    """Record a non-outcome background event (errors, scheduler cycles, etc.).
+
+    Stored under ``evolution/background_events.jsonl`` so the evolution loop
+    tooling can include these alongside run outcomes without polluting the
+    strict ``run_outcome`` schema.
+    """
+    payload: Dict[str, Any] = {
+        "type": "background_event",
+        "timestamp_ms": int(timestamp_ms or (time.time() * 1000)),
+        "session_id": session_id or "",
+        "event": event or "",
+        "detail": detail or "",
+    }
+    if data:
+        payload["data"] = dict(data)
+    _append_jsonl(_evolution_dir() / "background_events.jsonl", payload)

@@ -482,6 +482,16 @@ export interface DreamRunResult {
   actions?: Record<string, unknown>;
   errors?: string[];
   skipped?: string;
+  /** Present when run completed via BackgroundScheduler */
+  task_states?: Record<string, unknown>;
+}
+
+export interface DreamTaskStateRow {
+  current_cadence_s?: number;
+  consecutive_empty?: number;
+  last_run_at?: number | null;
+  last_changed?: number;
+  next_run_at?: number;
 }
 
 export interface DreamStatusResponse {
@@ -493,7 +503,10 @@ export interface DreamStatusResponse {
     last_duration_seconds?: number | null;
     last_result?: DreamRunResult | null;
     runs?: number;
+    tasks?: Record<string, DreamTaskStateRow>;
   };
+  /** Per-task scheduler stats (from dream_state.json), when present */
+  task_states?: Record<string, DreamTaskStateRow>;
   actions: string[];
 }
 

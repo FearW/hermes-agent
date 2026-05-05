@@ -1468,6 +1468,9 @@ async def update_dream_config(body: DreamConfigUpdate):
         if profile not in {"off", "light", "balanced", "deep"}:
             raise HTTPException(status_code=400, detail="Invalid dream profile")
         sleep["profile"] = profile
+        # Align with CLI /sleep off: choosing profile "off" always disables sleep.
+        if profile == "off":
+            sleep["enabled"] = False
     if body.report_actions is not None:
         sleep["report_actions"] = bool(body.report_actions)
     if body.idle_before_maintenance_seconds is not None:
@@ -1476,6 +1479,10 @@ async def update_dream_config(body: DreamConfigUpdate):
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail="Invalid dream idle threshold") from exc
         sleep["idle_before_maintenance_seconds"] = idle_before
+    # Turning sleep back on while profile is still "off" (stale config) would
+    # resolve to disabled — bump to balanced so the switch matches user intent.
+    if sleep.get("enabled") is True and str(sleep.get("profile") or "").lower() == "off":
+        sleep["profile"] = "balanced"
     config["sleep_mode"] = sleep
     save_config(config)
     return await get_dream_status()

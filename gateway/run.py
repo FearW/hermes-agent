@@ -4427,6 +4427,12 @@ class GatewayRunner:
         if canonical == "voice":
             return await self._handle_voice_command(event)
 
+        if canonical == "sleep":
+            return await self._handle_sleep_command(event)
+
+        if canonical == "dream":
+            return await self._handle_dream_command(event)
+
         if self._draining:
             return f"⏳ 网关正在{self._status_action_gerund()}，当前暂时不接收新的任务。"
 
@@ -6764,6 +6770,116 @@ class GatewayRunner:
                 if adapter:
                     self._set_adapter_auto_tts_disabled(adapter, chat_id, disabled=True)
                 return "语音模式已关闭。"
+
+    async def _handle_sleep_command(self, event: MessageEvent) -> str:
+        """Handle /sleep — view or switch the sleep-mode profile."""
+        from agent.sleep_mode import resolve_sleep_mode
+        from hermes_cli.config import load_config as _load_full_config
+        from hermes_cli.config.loader import save_config as _save_full_config
+
+        arg = (event.get_command_args() or "").strip().lower() or "status"
+
+        if arg == "status":
+            sleep = resolve_sleep_mode(_load_full_config())
+            state = "enabled" if sleep.get("enabled") else "disabled"
+            return (
+                f"Sleep mode: {sleep.get('profile', 'balanced')} ({state})\n"
+                f"memory_review_interval={sleep.get('memory_review_interval')} · "
+                f"skill_review_interval={sleep.get('skill_review_interval')} · "
+                f"memory_token_threshold={sleep.get('memory_token_threshold')}\n"
+                f"maintenance_interval_seconds={sleep.get('maintenance_interval_seconds')} · "
+                f"l4_interval_seconds={sleep.get('l4_interval_seconds')} · "
+                f"idle_before_maintenance_seconds={sleep.get('idle_before_maintenance_seconds')}\n"
+                "用法：/sleep [off|light|balanced|deep|status]"
+            )
+
+        if arg not in {"off", "light", "balanced", "deep"}:
+            return "未知的睡眠档位。用法：/sleep [off|light|balanced|deep|status]"
+
+        try:
+            cfg = _load_full_config()
+            sleep_cfg = dict(cfg.get("sleep_mode") or {})
+            sleep_cfg["profile"] = arg
+            sleep_cfg["enabled"] = arg != "off"
+            cfg["sleep_mode"] = sleep_cfg
+            _save_full_config(cfg)
+        except Exception as exc:
+            return f"Sleep mode 档位切换失败: {exc}"
+        return (
+            f"✓ Sleep mode profile set to '{arg}' (saved to config).\n"
+            f"网关维护节奏将在下一次载入时生效。"
+        )
+
+    async def _handle_dream_command(self, event: MessageEvent) -> str:
+        """Handle /dream — immediately run one maintenance cycle."""
+        from agent.dream_mode import dream_status, run_dream_cycle
+        from hermes_cli.config import load_config as _load_full_config
+
+        arg = (event.get_command_args() or "").strip().lower() or "all"
+        cfg = _load_full_config()
+
+        if arg == "status":
+            status = dream_status(cfg)
+            last = (status.get("state") or {}).get("last_result") or {}
+            lines = [
+                f"Dream profile: {status.get('profile', 'balanced')} "
+                f"({'enabled' if status.get('enabled') else 'disabled'})"
+            ]
+            if last:
+                lines.append(
+                    f"Last run: ok={last.get('ok')} · "
+                    f"duration={last.get('duration_seconds', 0)}s · "
+                    f"reason={last.get('reason', 'manual')}"
+                )
+                actions = last.get("actions") or {}
+                if isinstance(actions, dict):
+                    for name, result in actions.items():
+                        changed = (
+                            result.get("changed")
+                            if isinstance(result, dict)
+                            else None
+                        )
+                        lines.append(f"· {name}: changed={changed}")
+            else:
+                lines.append("No dream cycle has run yet.")
+            return "\n".join(lines)
+
+        tag_map = {
+            "all": None,
+            "memory": ("memory",),
+            "l4": ("l4",),
+            "lifecycle": ("lifecycle",),
+        }
+        if arg not in tag_map:
+            return "未知的 dream 参数。用法：/dream [all|memory|l4|lifecycle|status]"
+
+        tags = tag_map[arg]
+        try:
+            result = await asyncio.to_thread(
+                run_dream_cycle, cfg, reason=f"gateway:/dream {arg}", tags=tags
+            )
+        except Exception as exc:
+            return f"Dream cycle failed: {exc}"
+
+        if result.get("skipped"):
+            return f"Dream cycle skipped: {result['skipped']}"
+
+        lines = [
+            f"✓ Dream cycle complete in {result.get('duration_seconds', 0)}s "
+            f"(ok={result.get('ok', True)})"
+        ]
+        actions = result.get("actions") or {}
+        if isinstance(actions, dict):
+            for name, task_result in actions.items():
+                changed = (
+                    task_result.get("changed")
+                    if isinstance(task_result, dict)
+                    else None
+                )
+                lines.append(f"· {name}: changed={changed}")
+        for err in result.get("errors") or []:
+            lines.append(f"! {err}")
+        return "\n".join(lines)
 
     async def _handle_voice_channel_join(self, event: MessageEvent) -> str:
         """Join the user's current Discord voice channel."""
@@ -12764,40 +12880,24 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
 
     maintenance_tasks: list[asyncio.Task] = []
     try:
-        from gateway.maintenance import retention_loop, l4_periodic_archive_loop
+        from gateway.maintenance import start_scheduler
         from hermes_cli.config import load_config as _load_full_config
         from agent.sleep_mode import apply_sleep_mode_to_maintenance_config
 
-        _maintenance_cfg = apply_sleep_mode_to_maintenance_config(_load_full_config())
+        _full_cfg = _load_full_config()
+        _maintenance_cfg = apply_sleep_mode_to_maintenance_config(_full_cfg)
         if _maintenance_cfg.get("enabled", True):
-            if _maintenance_cfg.get("retention_loop", True):
-                maintenance_tasks.append(asyncio.create_task(
-                    retention_loop(
-                        runner.session_store,
-                        older_than_days=int(_maintenance_cfg.get("retention_days", 14)),
-                        initial_delay=int(_maintenance_cfg.get("initial_delay_seconds", 300)),
-                        interval_seconds=int(_maintenance_cfg.get("interval_seconds", 21600)),
-                        l4_compaction=bool(_maintenance_cfg.get("l4_compaction", True)),
-                        l4_max_entries=int(_maintenance_cfg.get("l4_max_entries", 2000)),
-                        l4_max_age_days=int(_maintenance_cfg.get("l4_max_age_days", 180)),
-                        l4_keep_priority_at_least=int(_maintenance_cfg.get("l4_keep_priority_at_least", 4)),
-                        idle_before_maintenance_seconds=int(_maintenance_cfg.get("idle_before_maintenance_seconds", 0)),
-                    ),
-                    name="gateway-retention-maintenance",
-                ))
-            if _maintenance_cfg.get("l4_periodic_archive", True):
-                maintenance_tasks.append(asyncio.create_task(
-                    l4_periodic_archive_loop(
-                        runner.session_store,
-                        initial_delay=int(_maintenance_cfg.get("l4_initial_delay_seconds", 120)),
-                        interval_seconds=int(_maintenance_cfg.get("l4_interval_seconds", 7200)),
-                        max_sessions_per_cycle=int(_maintenance_cfg.get("l4_max_sessions_per_cycle", 50)),
-                        idle_before_maintenance_seconds=int(_maintenance_cfg.get("idle_before_maintenance_seconds", 0)),
-                    ),
-                    name="gateway-l4-periodic-archive",
-                ))
-            if maintenance_tasks:
-                logger.info("Started %d gateway memory maintenance task(s).", len(maintenance_tasks))
+            _sched_task, _ = start_scheduler(
+                runner.session_store,
+                config=_full_cfg,
+                retention_days=int(_maintenance_cfg.get("retention_days", 14)),
+                initial_delay=int(_maintenance_cfg.get("initial_delay_seconds", 120)),
+                l4_max_entries=int(_maintenance_cfg.get("l4_max_entries", 2000)),
+                l4_max_age_days=int(_maintenance_cfg.get("l4_max_age_days", 180)),
+                l4_keep_priority_at_least=int(_maintenance_cfg.get("l4_keep_priority_at_least", 4)),
+                l4_max_sessions_per_cycle=int(_maintenance_cfg.get("l4_max_sessions_per_cycle", 50)),
+            )
+            maintenance_tasks.append(_sched_task)
     except Exception as exc:
         logger.debug("Gateway memory maintenance tasks not started: %s", exc)
     

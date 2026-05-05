@@ -19,7 +19,6 @@ import re
 import shutil
 import sys
 import json
-import re
 import concurrent.futures
 import base64
 import atexit
@@ -6360,6 +6359,10 @@ class HermesCLI:
             self._handle_voice_command(cmd_original)
         elif canonical == "busy":
             self._handle_busy_command(cmd_original)
+        elif canonical == "sleep":
+            self._handle_sleep_command(cmd_original)
+        elif canonical == "dream":
+            self._handle_dream_command(cmd_original)
         else:
             # Check for user-defined quick commands (bypass agent loop, no LLM call)
             base_cmd = cmd_lower.split()[0]
@@ -7086,6 +7089,196 @@ class HermesCLI:
             _cprint(f"  {_DIM}{behavior}{_RST}")
         else:
             _cprint(f"  {_ACCENT}✓ Busy input mode set to '{arg}' (session only){_RST}（仅当前会话生效）")
+
+    def _handle_sleep_command(self, cmd: str):
+        """Handle /sleep — view or switch the sleep-mode profile.
+
+        Usage:
+            /sleep              Show current sleep-mode status
+            /sleep status       Show current sleep-mode status
+            /sleep off          Disable sleep mode (no background maintenance)
+            /sleep light        Lightweight maintenance cadence
+            /sleep balanced     Default balanced cadence
+            /sleep deep         Aggressive maintenance cadence
+        """
+        from agent.sleep_mode import resolve_sleep_mode
+
+        parts = cmd.strip().split(maxsplit=1)
+        arg = parts[1].strip().lower() if len(parts) >= 2 else "status"
+
+        if arg == "status":
+            sleep = resolve_sleep_mode(self.config)
+            state = "enabled" if sleep.get("enabled") else "disabled"
+            _cprint(
+                f"  {_ACCENT}Sleep mode: {sleep.get('profile', 'balanced')} ({state}){_RST}"
+            )
+            _cprint(
+                f"  {_DIM}memory_review_interval={sleep.get('memory_review_interval')} · "
+                f"skill_review_interval={sleep.get('skill_review_interval')} · "
+                f"memory_token_threshold={sleep.get('memory_token_threshold')}{_RST}"
+            )
+            _cprint(
+                f"  {_DIM}maintenance_interval_seconds={sleep.get('maintenance_interval_seconds')} · "
+                f"l4_interval_seconds={sleep.get('l4_interval_seconds')} · "
+                f"idle_before_maintenance_seconds={sleep.get('idle_before_maintenance_seconds')}{_RST}"
+            )
+            _cprint(f"  {_DIM}用法：/sleep [off|light|balanced|deep|status]{_RST}")
+            return
+
+        if arg not in {"off", "light", "balanced", "deep"}:
+            _cprint(f"  {_DIM}(._.) Unknown sleep profile: {arg}（未知档位）{_RST}")
+            _cprint(f"  {_DIM}用法：/sleep [off|light|balanced|deep|status]{_RST}")
+            return
+
+        if save_config_value("sleep_mode.profile", arg):
+            # Also reset enabled=true for non-off profiles so a prior /sleep off
+            # doesn't keep things disabled after the user picks a new profile.
+            if arg != "off":
+                save_config_value("sleep_mode.enabled", True)
+            else:
+                save_config_value("sleep_mode.enabled", False)
+            # Refresh the local copy so in-process memory triggers use the
+            # new cadence without a restart.
+            try:
+                merged = resolve_sleep_mode({"sleep_mode": {"profile": arg}})
+                if hasattr(self, "agent") and self.agent is not None:
+                    self.agent._sleep_mode = merged
+                    self.agent._memory_nudge_interval = int(
+                        merged.get("memory_review_interval", 0) or 0
+                    )
+                    self.agent._skill_nudge_interval = int(
+                        merged.get("skill_review_interval", 0) or 0
+                    )
+                    self.agent._memory_token_threshold = int(
+                        merged.get("memory_token_threshold", 0) or 0
+                    )
+            except Exception:
+                pass
+            _cprint(
+                f"  {_ACCENT}✓ Sleep mode profile set to '{arg}' (saved to config){_RST}"
+                f"（睡眠模式档位已保存）"
+            )
+        else:
+            _cprint(
+                f"  {_ACCENT}✓ Sleep mode profile set to '{arg}' (session only){_RST}"
+                f"（仅当前会话生效）"
+            )
+
+    def _handle_dream_command(self, cmd: str):
+        """Handle /dream — immediately run one maintenance cycle.
+
+        Usage:
+            /dream              Run all dream tasks now
+            /dream all          Run all dream tasks now
+            /dream memory       Run built-in memory compaction only
+            /dream l4           Run L4 compaction only
+            /dream lifecycle    Run capability lifecycle maintenance only
+            /dream status       Show last cycle status
+        """
+        from agent.dream_mode import dream_status, run_dream_cycle
+
+        parts = cmd.strip().split(maxsplit=1)
+        arg = parts[1].strip().lower() if len(parts) >= 2 else "all"
+
+        if arg == "status":
+            status = dream_status(self.config)
+            last = (status.get("state") or {}).get("last_result") or {}
+            _cprint(
+                f"  {_ACCENT}Dream profile: {status.get('profile', 'balanced')} "
+                f"({'enabled' if status.get('enabled') else 'disabled'}){_RST}"
+            )
+            if last:
+                _cprint(
+                    f"  {_DIM}Last run: ok={last.get('ok')} · "
+                    f"duration={last.get('duration_seconds', 0)}s · "
+                    f"reason={last.get('reason', 'manual')}{_RST}"
+                )
+                actions = last.get("actions") or {}
+                if isinstance(actions, dict):
+                    for name, result in actions.items():
+                        changed = (
+                            result.get("changed")
+                            if isinstance(result, dict)
+                            else None
+                        )
+                        _cprint(f"  {_DIM}· {name}: changed={changed}{_RST}")
+            else:
+                _cprint(f"  {_DIM}No dream cycle has run yet.{_RST}")
+            return
+
+        tag_map = {
+            "all": None,
+            "memory": ("memory",),
+            "l4": ("l4",),
+            "lifecycle": ("lifecycle",),
+        }
+        if arg not in tag_map:
+            _cprint(f"  {_DIM}(._.) Unknown dream argument: {arg}（未知参数）{_RST}")
+            _cprint(f"  {_DIM}用法：/dream [all|memory|l4|lifecycle|status]{_RST}")
+            return
+
+        tags = tag_map[arg]
+        _cprint(
+            f"  {_ACCENT}Running dream cycle ({arg})… this may take a few seconds.{_RST}"
+        )
+
+        # Run the cycle on a worker thread so the prompt thread isn't
+        # blocked while builtin_memory + lifecycle + l4_compaction churn
+        # (multi-second to multi-tens-of-seconds total). Periodic feedback
+        # every 5s reassures the user that the cycle is still alive.
+        import threading as _threading
+
+        result_holder: dict[str, Any] = {}
+        error_holder: dict[str, BaseException] = {}
+        done = _threading.Event()
+
+        def _dream_worker() -> None:
+            try:
+                result_holder["result"] = run_dream_cycle(
+                    self.config, reason=f"manual:/dream {arg}", tags=tags
+                )
+            except BaseException as exc:  # noqa: BLE001
+                error_holder["error"] = exc
+            finally:
+                done.set()
+
+        worker = _threading.Thread(
+            target=_dream_worker, name="cli-dream-cycle", daemon=True
+        )
+        worker.start()
+
+        elapsed = 0
+        while not done.wait(timeout=5.0):
+            elapsed += 5
+            _cprint(f"  {_DIM}… still running ({elapsed}s){_RST}")
+
+        if error_holder:
+            _cprint(
+                f"  {_DIM}(._.) Dream cycle failed: {error_holder['error']}{_RST}"
+            )
+            return
+
+        result = result_holder.get("result") or {}
+
+        if result.get("skipped"):
+            _cprint(f"  {_DIM}Skipped: {result['skipped']}{_RST}")
+            return
+
+        ok = result.get("ok", True)
+        duration = result.get("duration_seconds", 0)
+        _cprint(
+            f"  {_ACCENT}✓ Dream cycle complete in {duration}s (ok={ok}){_RST}"
+        )
+        actions = result.get("actions") or {}
+        if isinstance(actions, dict):
+            for name, task_result in actions.items():
+                changed = (
+                    task_result.get("changed") if isinstance(task_result, dict) else None
+                )
+                _cprint(f"  {_DIM}· {name}: changed={changed}{_RST}")
+        errors = result.get("errors") or []
+        for err in errors:
+            _cprint(f"  {_DIM}! {err}{_RST}")
 
     def _handle_fast_command(self, cmd: str):
         """Handle /fast — toggle fast mode (OpenAI Priority Processing / Anthropic Fast Mode)."""

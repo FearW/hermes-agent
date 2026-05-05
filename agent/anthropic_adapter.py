@@ -1237,19 +1237,28 @@ def _normalize_tool_input_schema(schema: Any) -> Dict[str, Any]:
 
 
 def convert_tools_to_anthropic(tools: List[Dict]) -> List[Dict]:
-    """Convert OpenAI tool definitions to Anthropic format."""
+    """Convert OpenAI tool definitions to Anthropic format.
+
+    Preserves ``cache_control`` when present on the OpenAI-format tool so
+    the caller can mark the last tool for prompt caching (Anthropic caches
+    the whole tools array up to and including the marker).
+    """
     if not tools:
         return []
     result = []
     for t in tools:
         fn = t.get("function", {})
-        result.append({
+        entry: Dict[str, Any] = {
             "name": fn.get("name", ""),
             "description": fn.get("description", ""),
             "input_schema": _normalize_tool_input_schema(
                 fn.get("parameters", {"type": "object", "properties": {}})
             ),
-        })
+        }
+        cache_control = t.get("cache_control")
+        if isinstance(cache_control, dict):
+            entry["cache_control"] = dict(cache_control)
+        result.append(entry)
     return result
 
 

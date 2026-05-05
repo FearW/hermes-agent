@@ -254,6 +254,8 @@ class TestWebServerEndpoints:
         assert data["skipped"] == "sleep mode is disabled"
 
     def test_dream_off_profile_disables_status_even_with_stale_enabled(self):
+        from hermes_cli.config import load_config
+
         self.client.put("/api/dream/config", json={"enabled": True, "profile": "balanced"})
         self.client.put("/api/dream/config", json={"profile": "off"})
 
@@ -263,6 +265,24 @@ class TestWebServerEndpoints:
         data = resp.json()
         assert data["enabled"] is False
         assert data["profile"] == "off"
+        sleep_mode = load_config().get("sleep_mode") or {}
+        assert sleep_mode.get("enabled") is False
+        assert sleep_mode.get("profile") == "off"
+
+    def test_dream_status_includes_task_states_key(self):
+        resp = self.client.get("/api/dream/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "task_states" in data
+
+    def test_dream_enable_true_bumps_stale_profile_off_to_balanced(self):
+        from hermes_cli.config import load_config
+
+        self.client.put("/api/dream/config", json={"profile": "off", "enabled": False})
+        self.client.put("/api/dream/config", json={"enabled": True})
+        sleep_mode = load_config().get("sleep_mode") or {}
+        assert sleep_mode["enabled"] is True
+        assert sleep_mode["profile"] == "balanced"
 
     def test_get_env_vars(self):
         resp = self.client.get("/api/env")

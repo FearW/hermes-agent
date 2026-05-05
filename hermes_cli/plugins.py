@@ -594,6 +594,58 @@ def invoke_hook(hook_name: str, **kwargs: Any) -> List[Any]:
     return get_plugin_manager().invoke_hook(hook_name, **kwargs)
 
 
+def get_pre_tool_call_block_message(
+    tool_name: str,
+    args: Dict[str, Any],
+    *,
+    task_id: str = "",
+    session_id: str = "",
+    tool_call_id: str = "",
+) -> Optional[str]:
+    """Run ``pre_tool_call`` hooks and return a user-facing block message if any.
+
+    Plugin callbacks may block a tool by returning one of:
+
+    * A non-empty ``str`` — used as the error text returned to the model.
+    * A ``dict`` with ``"block": True`` and ``"message"`` or ``"error"`` (str).
+    * A ``dict`` with only ``"error"`` (str) — treated as a block.
+
+    The first blocking return wins. If nothing blocks, returns ``None``.
+
+    (``run_agent`` calls this *before* ``handle_function_call`` so the
+    agent path can short-circuit without double-invoking ``pre_tool_call``;
+    the registry path still uses ``invoke_hook("pre_tool_call", ...)`` inside
+    ``handle_function_call`` when not skipped.)
+    """
+    try:
+        results = invoke_hook(
+            "pre_tool_call",
+            tool_name=tool_name,
+            args=args,
+            task_id=task_id,
+            session_id=session_id,
+            tool_call_id=tool_call_id,
+        )
+    except Exception:
+        return None
+    for ret in results:
+        if ret is None:
+            continue
+        if isinstance(ret, str):
+            if ret.strip():
+                return ret
+            continue
+        if isinstance(ret, dict):
+            if ret.get("block") and (ret.get("message") or ret.get("error")):
+                msg = ret.get("message") or ret.get("error")
+                if isinstance(msg, str) and msg.strip():
+                    return msg
+            err = ret.get("error")
+            if isinstance(err, str) and err.strip():
+                return err
+    return None
+
+
 def get_plugin_tool_names() -> Set[str]:
     """Return the set of tool names registered by plugins."""
     return get_plugin_manager()._plugin_tool_names
