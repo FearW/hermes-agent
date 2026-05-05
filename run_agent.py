@@ -13470,10 +13470,6 @@ class AIAgent:
                                 "Empty response after tool calls — nudging model "
                                 "to continue processing"
                             )
-                            self._emit_status(
-                                "⚠️ Model returned empty after tool calls — "
-                                "nudging to continue"
-                            )
                             # Append the empty assistant message first so the
                             # message sequence stays valid:
                             #   tool(result) → assistant("(empty)") → user(nudge)
