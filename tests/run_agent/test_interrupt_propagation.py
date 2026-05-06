@@ -32,6 +32,8 @@ class TestInterruptPropagationToChild(unittest.TestCase):
         agent._active_children = []
         agent._active_children_lock = threading.Lock()
         agent.quiet_mode = True
+        agent.model = "test-model"
+        agent._base_url = None
         return agent
 
     def test_parent_interrupt_sets_child_flag(self):
