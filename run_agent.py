@@ -54,32 +54,7 @@ from pathlib import Path
 from hermes_constants import get_hermes_home
 
 
-_OPENAI_CLS_CACHE: Optional[type] = None
-
-
-def _load_openai_cls() -> type:
-    """Import and cache ``openai.OpenAI``."""
-    global _OPENAI_CLS_CACHE
-    if _OPENAI_CLS_CACHE is None:
-        from openai import OpenAI as _cls
-        _OPENAI_CLS_CACHE = _cls
-    return _OPENAI_CLS_CACHE
-
-
-class _OpenAIProxy:
-    """Module-level proxy that looks like ``openai.OpenAI`` but imports lazily."""
-
-    __slots__ = ()
-
-    def __call__(self, *args, **kwargs):
-        return _load_openai_cls()(*args, **kwargs)
-
-    def __instancecheck__(self, obj):
-        return isinstance(obj, _load_openai_cls())
-
-    def __repr__(self):
-        return "<lazy openai.OpenAI proxy>"
-
+from agent.client_factory import _OpenAIProxy, _load_openai_cls  # noqa: E402 — shared lazy proxy
 
 OpenAI = _OpenAIProxy()
 

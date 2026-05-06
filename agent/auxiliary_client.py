@@ -45,10 +45,33 @@ import logging
 import os
 import threading
 import time
+from collections import OrderedDict
 from pathlib import Path  # noqa: F401 — used by test mocks
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 from urllib.parse import urlparse, parse_qs, urlunparse
+
+from agent.client_errors import (  # noqa: F401 — re-exported for backward compat
+    _is_payment_error,
+    _is_connection_error,
+    _is_auth_error,
+    _is_unsupported_parameter_error,
+    _is_unsupported_temperature_error,
+)
+from agent.client_factory import (  # noqa: F401 — re-exported for backward compat
+    _OpenAIProxy,
+    _load_openai_cls,
+    _to_openai_base_url,
+    _to_async_client,
+    _normalize_resolved_model,
+)
+from agent.temperature_policy import (  # noqa: F401 — re-exported for backward compat
+    OMIT_TEMPERATURE,
+    _is_kimi_model,
+    _fixed_temperature_for_model,
+    fixed_temperature_for_model,
+)
+from agent.response_utils import extract_content_or_reasoning  # noqa: F401 — re-exported
 
 # NOTE: `from openai import OpenAI` is deliberately NOT at module top — the
 # openai SDK pulls a large type tree (~240 ms cold, including responses/*,
@@ -66,42 +89,10 @@ from urllib.parse import urlparse, parse_qs, urlunparse
 if TYPE_CHECKING:
     from openai import OpenAI  # noqa: F401 — type hints only
 
-_OPENAI_CLS_CACHE: Optional[type] = None
-
-
-def _load_openai_cls() -> type:
-    """Import and cache ``openai.OpenAI``."""
-    global _OPENAI_CLS_CACHE
-    if _OPENAI_CLS_CACHE is None:
-        from openai import OpenAI as _cls
-        _OPENAI_CLS_CACHE = _cls
-    return _OPENAI_CLS_CACHE
-
-
-class _OpenAIProxy:
-    """Module-level proxy that looks like the ``openai.OpenAI`` class.
-
-    Forwards ``OpenAI(...)`` calls and ``isinstance(x, OpenAI)`` checks to the
-    real SDK class, importing the SDK lazily on first use.
-    """
-
-    __slots__ = ()
-
-    def __call__(self, *args, **kwargs):
-        return _load_openai_cls()(*args, **kwargs)
-
-    def __instancecheck__(self, obj):
-        return isinstance(obj, _load_openai_cls())
-
-    def __repr__(self):
-        return "<lazy openai.OpenAI proxy>"
-
-
 OpenAI = _OpenAIProxy()  # module-level name, resolves lazily on call/isinstance
 
 from agent.credential_pool import load_pool
-from hermes_cli.config import get_hermes_home
-from hermes_constants import OPENROUTER_BASE_URL
+from hermes_constants import OPENROUTER_BASE_URL, get_hermes_home
 from utils import base_url_host_matches, base_url_hostname, normalize_proxy_env_vars
 
 logger = logging.getLogger(__name__)
@@ -182,38 +173,7 @@ def _normalize_aux_provider(provider: Optional[str]) -> str:
     return _PROVIDER_ALIASES.get(normalized, normalized)
 
 
-# Sentinel: when returned by _fixed_temperature_for_model(), callers must
-# strip the ``temperature`` key from API kwargs entirely so the provider's
-# server-side default applies.  Kimi/Moonshot models manage temperature
-# internally — sending *any* value (even the "correct" one) can conflict
-# with gateway-side mode selection (thinking → 1.0, non-thinking → 0.6).
-OMIT_TEMPERATURE: object = object()
-
-
-def _is_kimi_model(model: Optional[str]) -> bool:
-    """True for any Kimi / Moonshot model that manages temperature server-side."""
-    bare = (model or "").strip().lower().rsplit("/", 1)[-1]
-    return bare.startswith("kimi-") or bare == "kimi"
-
-
-def _fixed_temperature_for_model(
-    model: Optional[str],
-    base_url: Optional[str] = None,
-) -> "Optional[float] | object":
-    """Return a temperature directive for models with strict contracts.
-
-    Returns:
-        ``OMIT_TEMPERATURE`` — caller must remove the ``temperature`` key so the
-            provider chooses its own default.  Used for all Kimi / Moonshot
-            models whose gateway selects temperature server-side.
-        ``float`` — a specific value the caller must use (reserved for future
-            models with fixed-temperature contracts).
-        ``None`` — no override; caller should use its own default.
-    """
-    if _is_kimi_model(model):
-        logger.debug("Omitting temperature for Kimi model %r (server-managed)", model)
-        return OMIT_TEMPERATURE
-    return None
+from agent.temperature_policy import OMIT_TEMPERATURE as OMIT_TEMPERATURE  # noqa: F811 — re-export
 
 # Default auxiliary models for direct API-key providers (cheap/fast for side tasks)
 _API_KEY_PROVIDER_AUX_MODELS: Dict[str, str] = {
@@ -338,23 +298,6 @@ def _codex_cloudflare_headers(access_token: str) -> Dict[str, str]:
     except Exception:
         pass
     return headers
-
-
-def _to_openai_base_url(base_url: str) -> str:
-    """Normalize an Anthropic-style base URL to OpenAI-compatible format.
-
-    Some providers (MiniMax, MiniMax-CN) expose an ``/anthropic`` endpoint for
-    the Anthropic Messages API and a separate ``/v1`` endpoint for OpenAI chat
-    completions.  The auxiliary client uses the OpenAI SDK, so it must hit the
-    ``/v1`` surface.  Passing the raw ``inference_base_url`` causes requests to
-    land on ``/anthropic/chat/completions`` — a 404.
-    """
-    url = str(base_url or "").strip().rstrip("/")
-    if url.endswith("/anthropic"):
-        rewritten = url[: -len("/anthropic")] + "/v1"
-        logger.debug("Auxiliary client: rewrote base URL %s → %s", url, rewritten)
-        return rewritten
-    return url
 
 
 def _select_pool_entry(provider: str) -> Tuple[bool, Optional[Any]]:
@@ -1581,102 +1524,6 @@ def _get_provider_chain() -> List[tuple]:
     ]
 
 
-def _is_payment_error(exc: Exception) -> bool:
-    """Detect payment/credit/quota exhaustion errors.
-
-    Returns True for HTTP 402 (Payment Required) and for 429/other errors
-    whose message indicates billing exhaustion rather than rate limiting.
-    """
-    status = getattr(exc, "status_code", None)
-    if status == 402:
-        return True
-    err_lower = str(exc).lower()
-    # OpenRouter and other providers include "credits" or "afford" in 402 bodies,
-    # but sometimes wrap them in 429 or other codes.
-    if status in (402, 429, None):
-        if any(kw in err_lower for kw in ("credits", "insufficient funds",
-                                           "can only afford", "billing",
-                                           "payment required")):
-            return True
-    return False
-
-
-def _is_connection_error(exc: Exception) -> bool:
-    """Detect connection/network errors that warrant provider fallback.
-
-    Returns True for errors indicating the provider endpoint is unreachable
-    (DNS failure, connection refused, TLS errors, timeouts).  These are
-    distinct from API errors (4xx/5xx) which indicate the provider IS
-    reachable but returned an error.
-    """
-    from openai import APIConnectionError, APITimeoutError
-
-    if isinstance(exc, (APIConnectionError, APITimeoutError)):
-        return True
-    # urllib3 / httpx / httpcore connection errors
-    err_type = type(exc).__name__
-    if any(kw in err_type for kw in ("Connection", "Timeout", "DNS", "SSL")):
-        return True
-    err_lower = str(exc).lower()
-    if any(kw in err_lower for kw in (
-        "connection refused", "name or service not known",
-        "no route to host", "network is unreachable",
-        "timed out", "connection reset",
-    )):
-        return True
-    return False
-
-
-def _is_auth_error(exc: Exception) -> bool:
-    """Detect auth failures that should trigger provider-specific refresh."""
-    status = getattr(exc, "status_code", None)
-    if status == 401:
-        return True
-    err_lower = str(exc).lower()
-    return "error code: 401" in err_lower or "authenticationerror" in type(exc).__name__.lower()
-
-
-def _is_unsupported_parameter_error(exc: Exception, param: str) -> bool:
-    """Detect provider 400s for an unsupported request parameter.
-
-    Different OpenAI-compatible endpoints phrase the same class of error a few
-    ways: ``Unsupported parameter: X``, ``unsupported_parameter`` with a
-    ``param`` field, ``X is not supported``, ``unknown parameter: X``,
-    ``unrecognized request argument: X``.  We match on both the parameter
-    name and a generic "unsupported/unknown/unrecognized parameter" marker so
-    call sites can reactively retry without the offending key instead of
-    surfacing a noisy auxiliary failure.
-
-    Generalizes the temperature-specific detector that originally shipped
-    with PR #15621 so the same retry strategy can cover ``max_tokens``,
-    ``seed``, ``top_p``, and any future quirk. Credit @nicholasrae (PR #15416)
-    for the generalization pattern.
-    """
-    param_lower = (param or "").lower()
-    if not param_lower:
-        return False
-    err_lower = str(exc).lower()
-    if param_lower not in err_lower:
-        return False
-    return any(marker in err_lower for marker in (
-        "unsupported parameter",
-        "unsupported_parameter",
-        "not supported",
-        "does not support",
-        "unknown parameter",
-        "unrecognized request argument",
-        "unrecognized parameter",
-        "invalid parameter",
-    ))
-
-
-def _is_unsupported_temperature_error(exc: Exception) -> bool:
-    """Back-compat wrapper: detect API errors where the model rejects ``temperature``.
-
-    Delegates to :func:`_is_unsupported_parameter_error`; kept as a separate
-    public symbol because existing tests and call sites import it by name.
-    """
-    return _is_unsupported_parameter_error(exc, "temperature")
 
 
 def _evict_cached_clients(provider: str) -> None:
@@ -1893,62 +1740,6 @@ def _resolve_auto(main_runtime: Optional[Dict[str, Any]] = None) -> Tuple[Option
 # below — never look up auth env vars ad-hoc.
 
 
-def _to_async_client(sync_client, model: str, is_vision: bool = False):
-    """Convert a sync client to its async counterpart, preserving Codex routing.
-
-    When ``is_vision=True`` and the underlying base URL is Copilot, the
-    resulting async client carries the ``Copilot-Vision-Request: true``
-    header so the request is routed to Copilot's vision-capable
-    infrastructure (otherwise vision payloads silently time out).
-    """
-    from openai import AsyncOpenAI
-
-    if isinstance(sync_client, CodexAuxiliaryClient):
-        return AsyncCodexAuxiliaryClient(sync_client), model
-    if isinstance(sync_client, AnthropicAuxiliaryClient):
-        return AsyncAnthropicAuxiliaryClient(sync_client), model
-    try:
-        from agent.gemini_native_adapter import GeminiNativeClient, AsyncGeminiNativeClient
-
-        if isinstance(sync_client, GeminiNativeClient):
-            return AsyncGeminiNativeClient(sync_client), model
-    except ImportError:
-        pass
-    try:
-        from agent.copilot_acp_client import CopilotACPClient
-        if isinstance(sync_client, CopilotACPClient):
-            return sync_client, model
-    except ImportError:
-        pass
-
-    async_kwargs = {
-        "api_key": sync_client.api_key,
-        "base_url": str(sync_client.base_url),
-    }
-    sync_base_url = str(sync_client.base_url)
-    if base_url_host_matches(sync_base_url, "openrouter.ai"):
-        async_kwargs["default_headers"] = dict(_OR_HEADERS)
-    elif base_url_host_matches(sync_base_url, "api.githubcopilot.com"):
-        from hermes_cli.copilot_auth import copilot_request_headers
-
-        async_kwargs["default_headers"] = copilot_request_headers(
-            is_agent_turn=True, is_vision=is_vision
-        )
-    elif base_url_host_matches(sync_base_url, "api.kimi.com"):
-        async_kwargs["default_headers"] = {"User-Agent": "claude-code/0.1.0"}
-    return AsyncOpenAI(**async_kwargs), model
-
-
-def _normalize_resolved_model(model_name: Optional[str], provider: str) -> Optional[str]:
-    """Normalize a resolved model for the provider that will receive it."""
-    if not model_name:
-        return model_name
-    try:
-        from hermes_cli.model_normalize import normalize_model_for_provider
-
-        return normalize_model_for_provider(model_name, provider)
-    except Exception:
-        return model_name
 
 
 def resolve_provider_client(
@@ -2714,7 +2505,7 @@ def auxiliary_max_tokens_param(value: int) -> dict:
 # replaced in-place.  This bounds cache growth to one entry per unique
 # provider config rather than one per (config × event-loop), which previously
 # caused unbounded fd accumulation in long-running gateway processes (#10200).
-_client_cache: Dict[tuple, tuple] = {}
+_client_cache: OrderedDict = OrderedDict()
 _client_cache_lock = threading.Lock()
 _CLIENT_CACHE_MAX_SIZE = 64  # safety belt — evict oldest when exceeded
 
@@ -2746,6 +2537,12 @@ def _store_cached_client(cache_key: tuple, client: Any, default_model: Optional[
             except Exception:
                 pass
         _client_cache[cache_key] = (client, default_model, bound_loop)
+        while len(_client_cache) > _CLIENT_CACHE_MAX_SIZE:
+            _old_key, (_old_client, _old_model, _old_loop) = _client_cache.popitem(last=False)
+            try:
+                _old_client.close()
+            except Exception:
+                pass
 
 
 def _refresh_nous_auxiliary_client(
@@ -2976,12 +2773,14 @@ def _get_cached_client(
                 )
                 if loop_ok:
                     effective = _compat_model(cached_client, model, cached_default)
+                    _client_cache.move_to_end(cache_key)
                     return cached_client, effective
                 # Stale — evict and fall through to create a new client.
                 _force_close_async_httpx(cached_client)
                 del _client_cache[cache_key]
             else:
                 effective = _compat_model(cached_client, model, cached_default)
+                _client_cache.move_to_end(cache_key)
                 return cached_client, effective
     # Build outside the lock
     client, default_model = resolve_provider_client(
@@ -3003,9 +2802,8 @@ def _get_cached_client(
                 # Safety belt: if the cache has grown beyond the max, evict
                 # the oldest entries (FIFO — dict preserves insertion order).
                 while len(_client_cache) >= _CLIENT_CACHE_MAX_SIZE:
-                    evict_key, evict_entry = next(iter(_client_cache.items()))
+                    evict_key, evict_entry = _client_cache.popitem(last=False)
                     _force_close_async_httpx(evict_entry[0])
-                    del _client_cache[evict_key]
                 _client_cache[cache_key] = (client, default_model, bound_loop)
             else:
                 client, default_model, _ = _client_cache[cache_key]
@@ -3542,62 +3340,6 @@ def call_llm(
                 return _validate_llm_response(
                     fb_client.chat.completions.create(**fb_kwargs), task)
         raise
-
-
-def extract_content_or_reasoning(response) -> str:
-    """Extract content from an LLM response, falling back to reasoning fields.
-
-    Mirrors the main agent loop's behavior when a reasoning model (DeepSeek-R1,
-    Qwen-QwQ, etc.) returns ``content=None`` with reasoning in structured fields.
-
-    Resolution order:
-      1. ``message.content`` — strip inline think/reasoning blocks, check for
-         remaining non-whitespace text.
-      2. ``message.reasoning`` / ``message.reasoning_content`` — direct
-         structured reasoning fields (DeepSeek, Moonshot, Novita, etc.).
-      3. ``message.reasoning_details`` — OpenRouter unified array format.
-
-    Returns the best available text, or ``""`` if nothing found.
-    """
-    import re
-
-    msg = response.choices[0].message
-    content = (msg.content or "").strip()
-
-    if content:
-        # Strip inline think/reasoning blocks (mirrors _strip_think_blocks)
-        cleaned = re.sub(
-            r"<(?:think|thinking|reasoning|thought|REASONING_SCRATCHPAD)>"
-            r".*?"
-            r"</(?:think|thinking|reasoning|thought|REASONING_SCRATCHPAD)>",
-            "", content, flags=re.DOTALL | re.IGNORECASE,
-        ).strip()
-        if cleaned:
-            return cleaned
-
-    # Content is empty or reasoning-only — try structured reasoning fields
-    reasoning_parts: list[str] = []
-    for field in ("reasoning", "reasoning_content"):
-        val = getattr(msg, field, None)
-        if val and isinstance(val, str) and val.strip() and val not in reasoning_parts:
-            reasoning_parts.append(val.strip())
-
-    details = getattr(msg, "reasoning_details", None)
-    if details and isinstance(details, list):
-        for detail in details:
-            if isinstance(detail, dict):
-                summary = (
-                    detail.get("summary")
-                    or detail.get("content")
-                    or detail.get("text")
-                )
-                if summary and summary not in reasoning_parts:
-                    reasoning_parts.append(summary.strip() if isinstance(summary, str) else str(summary))
-
-    if reasoning_parts:
-        return "\n\n".join(reasoning_parts)
-
-    return ""
 
 
 async def async_call_llm(

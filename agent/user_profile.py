@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict
 
 from hermes_constants import get_hermes_home
+
+logger = logging.getLogger(__name__)
 
 PROFILE_PATH = get_hermes_home() / "profile.json"
 
@@ -33,6 +36,7 @@ def load_user_profile() -> Dict[str, Any]:
     try:
         data = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
     except Exception:
+        logger.debug("profile load failed", exc_info=True)
         return dict(DEFAULT_PROFILE)
     if not isinstance(data, dict):
         return dict(DEFAULT_PROFILE)

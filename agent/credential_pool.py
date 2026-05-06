@@ -42,6 +42,7 @@ def _load_config_safe() -> Optional[dict]:
 
         return load_config()
     except Exception:
+        logger.debug("config load failed", exc_info=True)
         return None
 
 

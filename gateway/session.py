@@ -768,7 +768,7 @@ class SessionStore:
             from hermes_state import SessionDB
             self._db = SessionDB()
         except Exception as e:
-            print(f"[gateway] Warning: SQLite session store unavailable, falling back to JSONL: {e}")
+            logger.warning("SQLite session store unavailable, falling back to JSONL: %s", e)
     
     def _ensure_loaded(self) -> None:
         """Load sessions index from disk if not already loaded."""
@@ -794,7 +794,7 @@ class SessionStore:
                             # Skip entries with unknown/removed platform values
                             continue
             except Exception as e:
-                print(f"[gateway] Warning: Failed to load sessions: {e}")
+                logger.warning("Failed to load sessions: %s", e)
 
         self._loaded = True
     
@@ -867,9 +867,9 @@ class SessionStore:
         config_mtime_ns: Optional[int] = None
         try:
             import yaml as _yaml
-            from hermes_constants import get_hermes_home
+            from hermes_constants import get_config_path
 
-            config_path = get_hermes_home() / "config.yaml"
+            config_path = get_config_path()
             if config_path.exists():
                 try:
                     config_mtime_ns = int(config_path.stat().st_mtime_ns)
@@ -1107,7 +1107,7 @@ class SessionStore:
             try:
                 self._db.create_session(**db_create_kwargs)
             except Exception as e:
-                print(f"[gateway] Warning: Failed to create SQLite session: {e}")
+                logger.warning("Failed to create SQLite session: %s", e)
 
         return entry
 
