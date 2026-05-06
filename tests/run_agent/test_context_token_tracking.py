@@ -36,6 +36,9 @@ class _FakeOpenAIClient:
     base_url = "https://api.openai.com/v1"
     _default_headers = None
 
+    def __init__(self, **kwargs):
+        pass
+
 
 def _make_agent(monkeypatch, api_mode, provider, response_fn):
     _patch_bootstrap(monkeypatch)

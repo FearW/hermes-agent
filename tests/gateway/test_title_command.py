@@ -95,7 +95,7 @@ class TestHandleTitleCommand:
         runner = _make_runner(session_db=db)
         event = _make_event(text="/title")
         result = await runner._handle_title_command(event)
-        assert "No title set" in result
+        assert "还没有标题" in result
         assert "/title" in result
         db.close()
 
@@ -121,7 +121,7 @@ class TestHandleTitleCommand:
         runner = _make_runner(session_db=None)
         event = _make_event(text="/title My Title")
         result = await runner._handle_title_command(event)
-        assert "not available" in result
+        assert "不可用" in result
 
     @pytest.mark.asyncio
     async def test_title_too_long(self, tmp_path):
@@ -162,7 +162,7 @@ class TestHandleTitleCommand:
         runner = _make_runner(session_db=db)
         event = _make_event(text="/title \x00\x01\x02")
         result = await runner._handle_title_command(event)
-        assert "empty after cleanup" in result
+        assert "为空" in result
         db.close()
 
     @pytest.mark.asyncio

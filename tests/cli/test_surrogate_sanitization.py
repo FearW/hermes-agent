@@ -112,16 +112,16 @@ class TestSanitizeMessagesSurrogates:
 class TestRunConversationSurrogateSanitization:
     """Integration: verify run_conversation sanitizes user_message."""
 
+    @patch("openai.OpenAI")
     @patch("run_agent.AIAgent._build_system_prompt")
     @patch("run_agent.AIAgent._interruptible_streaming_api_call")
     @patch("run_agent.AIAgent._interruptible_api_call")
-    def test_user_message_surrogates_sanitized(self, mock_api, mock_stream, mock_sys):
+    def test_user_message_surrogates_sanitized(self, mock_api, mock_stream, mock_sys, mock_openai):
         """Surrogates in user_message are stripped before API call."""
         from run_agent import AIAgent
 
         mock_sys.return_value = "system prompt"
 
-        # Mock streaming to return a simple response
         mock_choice = MagicMock()
         mock_choice.message.content = "response"
         mock_choice.message.tool_calls = None
@@ -138,7 +138,14 @@ class TestRunConversationSurrogateSanitization:
         mock_stream.return_value = mock_response
         mock_api.return_value = mock_response
 
-        agent = AIAgent(model="test/model", quiet_mode=True, skip_memory=True, skip_context_files=True)
+        agent = AIAgent(
+            model="test/model",
+            api_key="test-key",
+            base_url="http://localhost:8000/v1",
+            quiet_mode=True,
+            skip_memory=True,
+            skip_context_files=True,
+        )
         agent.client = MagicMock()
 
         # Pass a message with surrogates

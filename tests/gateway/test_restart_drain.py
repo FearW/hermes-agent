@@ -32,7 +32,7 @@ async def test_restart_command_while_busy_requests_drain_without_interrupt(monke
 
     result = await runner._handle_message(event)
 
-    assert result == "⏳ Draining 1 active agent(s) before restart..."
+    assert result == "⏳ 正在等待 1 个活动代理排空后重启……"
     running_agent.interrupt.assert_not_called()
     runner.request_restart.assert_called_once_with(detached=True, via_service=False)
 
@@ -58,7 +58,7 @@ async def test_drain_queue_mode_queues_follow_up_without_interrupt():
     assert session_key in adapter._pending_messages
     assert adapter._pending_messages[session_key].text == "follow up"
     assert not adapter._active_sessions[session_key].is_set()
-    assert any("queued for the next turn" in message for message in adapter.sent)
+    assert any("下一轮" in message for message in adapter.sent)
 
 
 @pytest.mark.asyncio
@@ -76,7 +76,7 @@ async def test_draining_rejects_new_session_messages():
 
     result = await runner._handle_message(event)
 
-    assert result == "⏳ Gateway is restarting and is not accepting new work right now."
+    assert result == "⏳ 网关正在restarting，当前暂时不接收新的任务。"
 
 
 def test_load_busy_input_mode_prefers_env_then_config_then_default(tmp_path, monkeypatch):

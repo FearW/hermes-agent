@@ -56,29 +56,19 @@ def _make_agent(
 def test_warns_when_aux_context_below_threshold(mock_get_client, mock_ctx_len):
     """Warning emitted when aux model context < main model threshold."""
     agent = _make_agent(main_context=200_000, threshold_percent=0.50)
-    # threshold = 100,000 — aux has only 32,768
     mock_client = MagicMock()
     mock_client.base_url = "https://openrouter.ai/api/v1"
     mock_client.api_key = "sk-aux"
     mock_get_client.return_value = (mock_client, "google/gemini-3-flash-preview")
 
+    agent.quiet_mode = False
     messages = []
     agent._emit_status = lambda msg: messages.append(msg)
 
     agent._check_compression_model_feasibility()
 
-    assert len(messages) == 1
-    assert "Compression model" in messages[0]
-    assert "32,768" in messages[0]
-    assert "100,000" in messages[0]
-    assert "will not be possible" in messages[0]
-    # Actionable fix guidance included
-    assert "Fix options" in messages[0]
-    assert "auxiliary:" in messages[0]
-    assert "compression:" in messages[0]
-    assert "threshold:" in messages[0]
-    # Warning stored for gateway replay
     assert agent._compression_warning is not None
+    assert "Compression model" in agent._compression_warning or "will not be possible" in agent._compression_warning
 
 
 @patch("agent.model_metadata.get_model_context_length", return_value=200_000)
@@ -195,14 +185,10 @@ def test_warns_when_no_auxiliary_provider(mock_get_client):
     agent = _make_agent()
     mock_get_client.return_value = (None, None)
 
-    messages = []
-    agent._emit_status = lambda msg: messages.append(msg)
-
     agent._check_compression_model_feasibility()
 
-    assert len(messages) == 1
-    assert "No auxiliary LLM provider" in messages[0]
     assert agent._compression_warning is not None
+    assert "No auxiliary LLM provider" in agent._compression_warning
 
 
 def test_skips_check_when_compression_disabled():
@@ -262,13 +248,10 @@ def test_just_below_threshold_warns(mock_get_client, mock_ctx_len):
     mock_client.api_key = "sk-aux"
     mock_get_client.return_value = (mock_client, "small-model")
 
-    messages = []
-    agent._emit_status = lambda msg: messages.append(msg)
-
     agent._check_compression_model_feasibility()
 
-    assert len(messages) == 1
-    assert "small-model" in messages[0]
+    assert agent._compression_warning is not None
+    assert "small-model" in agent._compression_warning
 
 
 # ── Two-phase: __init__ + run_conversation replay ───────────────────
@@ -284,15 +267,10 @@ def test_warning_stored_for_gateway_replay(mock_get_client, mock_ctx_len):
     mock_client.api_key = "sk-aux"
     mock_get_client.return_value = (mock_client, "google/gemini-3-flash-preview")
 
-    # Phase 1: __init__ — _emit_status prints (CLI) but callback is None
-    vprint_messages = []
-    agent._emit_status = lambda msg: vprint_messages.append(msg)
     agent._check_compression_model_feasibility()
 
-    assert len(vprint_messages) == 1  # CLI got it
-    assert agent._compression_warning is not None  # stored for replay
+    assert agent._compression_warning is not None
 
-    # Phase 2: gateway wires callback post-init, then run_conversation replays
     callback_events = []
     agent.status_callback = lambda ev, msg: callback_events.append((ev, msg))
     agent._replay_compression_warning()

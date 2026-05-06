@@ -85,7 +85,7 @@ async def test_compress_focus_topic_passed_to_agent():
     assert call_kwargs.kwargs.get("focus_topic") == "database schema"
 
     # Verify focus is mentioned in response
-    assert 'Focus: "database schema"' in result
+    assert '聚焦主题："database schema"' in result
 
 
 @pytest.mark.asyncio
@@ -111,4 +111,4 @@ async def test_compress_no_focus_passes_none():
     assert call_kwargs.kwargs.get("focus_topic") is None
 
     # No focus line in response
-    assert "Focus:" not in result
+    assert "聚焦主题" not in result

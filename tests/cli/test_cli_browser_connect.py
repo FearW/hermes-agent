@@ -32,7 +32,7 @@ class TestChromeDebugLaunch:
             assert HermesCLI._try_launch_chrome_debug(9333, "Windows") is True
 
         _assert_chrome_debug_cmd(captured["cmd"], r"C:\Chrome\chrome.exe", 9333)
-        assert captured["kwargs"]["start_new_session"] is True
+        assert "start_new_session" not in captured["kwargs"]
 
     def test_windows_launch_falls_back_to_common_install_dirs(self, monkeypatch):
         captured = {}

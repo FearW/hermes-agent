@@ -529,3 +529,7 @@ def apply_nous_managed_defaults(
         changed.add("image_gen")
 
     return changed
+
+
+def prompt_enable_tool_gateway(config: Dict[str, object]) -> None:
+    pass

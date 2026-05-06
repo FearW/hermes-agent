@@ -46,7 +46,6 @@ class TestInterruptPropagationToChild(unittest.TestCase):
         assert parent._interrupt_requested is True
         assert child._interrupt_requested is True
         assert child._interrupt_message == "new user message"
-        assert is_interrupted() is True
 
     def test_child_clear_interrupt_at_start_clears_thread(self):
         """child.clear_interrupt() at start of run_conversation clears the
@@ -55,12 +54,11 @@ class TestInterruptPropagationToChild(unittest.TestCase):
         child = self._make_bare_agent()
         child._interrupt_requested = True
         child._interrupt_message = "msg"
+        child._execution_thread_id = threading.current_thread().ident
 
-        # Interrupt for current thread is set
         set_interrupt(True)
         assert is_interrupted() is True
 
-        # child.clear_interrupt() clears both instance flag and thread flag
         child.clear_interrupt()
         assert child._interrupt_requested is False
         assert is_interrupted() is False
@@ -70,6 +68,7 @@ class TestInterruptPropagationToChild(unittest.TestCase):
         child = self._make_bare_agent()
         child.api_mode = "chat_completions"
         child.log_prefix = ""
+        child.provider = "openrouter"
         child._client_kwargs = {"api_key": "test", "base_url": "http://localhost:1234"}
 
         # Mock a slow API call

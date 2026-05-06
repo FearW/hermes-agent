@@ -904,6 +904,7 @@ class AIAgent:
         "have been dropped to keep the conversation alive. See issue #15236.]"
     )
     _CONTEXT_PRESSURE_COOLDOWN = 300.0
+    _context_pressure_last_warned: Dict[str, tuple[float, float]] = {}
 
     @property
     def base_url(self) -> str:
@@ -2148,7 +2149,6 @@ class AIAgent:
         )
         self._user_turn_count = 0
         self._context_pressure_warned_at = 0.0
-        self._context_pressure_last_warned: Dict[str, tuple[float, float]] = {}
 
         # Cumulative token usage for the session
         self.session_prompt_tokens = 0

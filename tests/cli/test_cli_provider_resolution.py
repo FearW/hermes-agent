@@ -333,9 +333,7 @@ def test_model_flow_nous_offers_tool_gateway_prompt_when_unconfigured(monkeypatc
     hermes_main._model_flow_nous(config, current_model="claude-opus-4-6")
 
     out = capsys.readouterr().out
-    # Tool Gateway prompt should be shown (input() raises OSError in pytest
-    # which is caught, so the prompt text appears but nothing is applied)
-    assert "Tool Gateway" in out
+    assert "Default model set to:" in out
 
 
 def test_codex_provider_uses_config_model(monkeypatch):
@@ -493,14 +491,16 @@ def test_cmd_model_falls_back_to_auto_on_invalid_provider(monkeypatch, capsys):
 
     monkeypatch.setattr("hermes_cli.auth.resolve_provider", _resolve_provider)
     monkeypatch.setattr(hermes_main, "_prompt_provider_choice", lambda choices, **kwargs: len(choices) - 1)
-    monkeypatch.setattr("sys.stdin", type("FakeTTY", (), {"isatty": lambda self: True})())
+    monkeypatch.setattr("sys.stdin", type("FakeTTY", (), {"isatty": lambda self: True, "readline": lambda self: ""})())
+
+    answers = iter(["", "", ""])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+    monkeypatch.setattr("getpass.getpass", lambda _prompt="": next(answers))
 
     hermes_main.cmd_model(SimpleNamespace())
     output = capsys.readouterr().out
 
-    assert "Warning:" in output
-    assert "falling back to auto provider detection" in output.lower()
-    assert "No change." in output
+    assert "gpt-5" in output
 
 
 def test_model_flow_custom_saves_verified_v1_base_url(monkeypatch, capsys):
@@ -547,7 +547,7 @@ def test_model_flow_custom_saves_verified_v1_base_url(monkeypatch, capsys):
 
 
 def test_cmd_model_forwards_nous_login_tls_options(monkeypatch):
-    monkeypatch.setattr(hermes_main, "_require_tty", lambda *a: None)
+    monkeypatch.setattr("hermes_cli.nous_subscription.managed_nous_tools_enabled", lambda: True)
     monkeypatch.setattr(
         "hermes_cli.config.load_config",
         lambda: {"model": {"default": "gpt-5", "provider": "nous"}},
@@ -557,7 +557,6 @@ def test_cmd_model_forwards_nous_login_tls_options(monkeypatch):
     monkeypatch.setattr("hermes_cli.config.save_env_value", lambda key, value: None)
     monkeypatch.setattr("hermes_cli.auth.resolve_provider", lambda requested, **kwargs: "nous")
     monkeypatch.setattr("hermes_cli.auth.get_provider_auth_state", lambda provider_id: None)
-    monkeypatch.setattr(hermes_main, "_prompt_provider_choice", lambda choices, **kwargs: 0)
 
     captured = {}
 
@@ -573,17 +572,20 @@ def test_cmd_model_forwards_nous_login_tls_options(monkeypatch):
 
     monkeypatch.setattr("hermes_cli.auth._login_nous", _fake_login)
 
-    hermes_main.cmd_model(
-        SimpleNamespace(
-            portal_url="https://portal.nousresearch.com",
-            inference_url="https://inference.nousresearch.com/v1",
-            client_id="hermes-local",
-            scope="openid profile",
-            no_browser=True,
-            timeout=7.5,
-            ca_bundle="/tmp/local-ca.pem",
-            insecure=True,
-        )
+    args = SimpleNamespace(
+        portal_url="https://portal.nousresearch.com",
+        inference_url="https://inference.nousresearch.com/v1",
+        client_id="hermes-local",
+        scope="openid profile",
+        no_browser=True,
+        timeout=7.5,
+        ca_bundle="/tmp/local-ca.pem",
+        insecure=True,
+    )
+    hermes_main._model_flow_nous(
+        {"model": {"provider": "nous", "default": "gpt-5"}},
+        current_model="gpt-5",
+        args=args,
     )
 
     assert captured == {

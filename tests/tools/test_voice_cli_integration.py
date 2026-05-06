@@ -31,6 +31,8 @@ def _make_voice_cli(**overrides):
     cli._voice_tts_done = threading.Event()
     cli._voice_tts_done.set()
     cli._pending_input = queue.Queue()
+    cli._attached_images = []
+    cli._no_speech_count = 0
     cli._app = None
     cli.console = SimpleNamespace(width=80)
     for k, v in overrides.items():
@@ -855,7 +857,7 @@ class TestHandleVoiceCommandReal:
         cli._enable_voice_mode.assert_not_called()
         cli._disable_voice_mode.assert_not_called()
         # Should print usage via _cprint
-        assert any("Unknown" in str(c) or "unknown" in str(c)
+        assert any("未知" in str(c) or "子命令" in str(c)
                     for c in mock_cp.call_args_list)
 
 

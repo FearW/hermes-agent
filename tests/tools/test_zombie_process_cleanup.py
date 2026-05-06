@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 import threading
+import asyncio
 
 import pytest
 
@@ -110,8 +111,8 @@ class TestAgentCloseMethod:
             agent.client = None
 
             with patch("tools.process_registry.process_registry") as mock_registry, \
-                 patch("tools.terminal_tool.cleanup_vm") as mock_cleanup_vm, \
-                 patch("tools.browser_tool.cleanup_browser") as mock_cleanup_browser:
+                 patch("run_agent.cleanup_vm") as mock_cleanup_vm, \
+                 patch("run_agent.cleanup_browser") as mock_cleanup_browser:
                 agent.close()
 
                 mock_registry.kill_all.assert_called_once_with(
@@ -172,9 +173,9 @@ class TestAgentCloseMethod:
             with patch(
                 "tools.process_registry.process_registry"
             ) as mock_reg, patch(
-                "tools.terminal_tool.cleanup_vm"
+                "run_agent.cleanup_vm"
             ) as mock_vm, patch(
-                "tools.browser_tool.cleanup_browser"
+                "run_agent.cleanup_browser"
             ) as mock_browser:
                 mock_reg.kill_all.side_effect = RuntimeError("boom")
 
@@ -182,6 +183,65 @@ class TestAgentCloseMethod:
 
                 mock_vm.assert_called_once()
                 mock_browser.assert_called_once()
+
+
+class _FakeGateway:
+    def __init__(self):
+        self._running = True
+        self._draining = False
+        self._restart_requested = False
+        self._restart_detached = False
+        self._restart_via_service = False
+        self._stop_task = None
+        self._exit_reason = None
+        self._exit_code = None
+        self._restart_drain_timeout = 0.01
+        self._running_agents = {}
+        self._running_agents_ts = {}
+        self._agent_cache = {}
+        self._agent_cache_lock = threading.Lock()
+        self.adapters = {}
+        self._background_tasks = set()
+        self._failed_platforms = []
+        self._shutdown_event = asyncio.Event()
+        self._pending_messages = {}
+        self._pending_approvals = {}
+        self._busy_ack_ts = {}
+
+    def _running_agent_count(self):
+        return len(self._running_agents)
+
+    def _update_runtime_status(self, *_a, **_kw):
+        pass
+
+    async def _notify_active_sessions_of_shutdown(self):
+        pass
+
+    async def _drain_active_agents(self, timeout):
+        agents = dict(self._running_agents)
+        self._running_agents.clear()
+        return agents, False
+
+    def _finalize_shutdown_agents(self, active_agents):
+        for agent in active_agents.values():
+            self._cleanup_agent_resources(agent)
+
+    def _cleanup_agent_resources(self, agent):
+        if agent is None:
+            return
+        try:
+            if hasattr(agent, "shutdown_memory_provider"):
+                agent.shutdown_memory_provider()
+        except Exception:
+            pass
+        try:
+            if hasattr(agent, "close"):
+                agent.close()
+        except Exception:
+            pass
+
+    def _increment_restart_failure_counts(self, keys):
+        pass
 
 
 class TestGatewayCleanupWiring:
@@ -192,15 +252,7 @@ class TestGatewayCleanupWiring:
         import asyncio
         from unittest.mock import MagicMock, patch
 
-        runner = MagicMock()
-        runner._running = True
-        runner._running_agents = {}
-        runner.adapters = {}
-        runner._background_tasks = set()
-        runner._pending_messages = {}
-        runner._pending_approvals = {}
-        runner._shutdown_event = asyncio.Event()
-        runner._exit_reason = None
+        runner = _FakeGateway()
 
         mock_agent_1 = MagicMock()
         mock_agent_2 = MagicMock()
@@ -214,6 +266,7 @@ class TestGatewayCleanupWiring:
         loop = asyncio.new_event_loop()
         try:
             with patch("gateway.status.remove_pid_file"), \
+                 patch("gateway.status.release_gateway_runtime_lock"), \
                  patch("gateway.status.write_runtime_status"), \
                  patch("tools.terminal_tool.cleanup_all_environments"), \
                  patch("tools.browser_tool.cleanup_all_browsers"):

@@ -103,7 +103,7 @@ class TestGatewayPersonalityNone:
             result = await runner._handle_personality_command(event)
 
         assert runner._ephemeral_system_prompt == ""
-        assert "cleared" in result.lower()
+        assert "已清除" in result
 
     @pytest.mark.asyncio
     async def test_default_clears_ephemeral_prompt(self, tmp_path):
