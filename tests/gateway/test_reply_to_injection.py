@@ -162,6 +162,8 @@ async def test_reply_snippet_truncated_to_500_chars():
 
 @pytest.mark.asyncio
 async def test_image_only_message_gets_default_follow_up_prompt_for_text_routing():
+    from agent.image_routing import IMAGE_ONLY_USER_MESSAGE
+
     runner = _make_runner()
     source = _source()
     runner._decide_image_input_mode = lambda: "text"
@@ -181,7 +183,7 @@ async def test_image_only_message_gets_default_follow_up_prompt_for_text_routing
     )
 
     runner._enrich_message_with_vision.assert_awaited_once_with(
-        "The user sent an image without any accompanying text. Ask what they'd like you to do with it.",
+        IMAGE_ONLY_USER_MESSAGE,
         ["/tmp/cat.jpg"],
     )
     assert result == "ENRICHED"
@@ -189,6 +191,8 @@ async def test_image_only_message_gets_default_follow_up_prompt_for_text_routing
 
 @pytest.mark.asyncio
 async def test_image_only_message_gets_default_follow_up_prompt_for_native_routing():
+    from agent.image_routing import IMAGE_ONLY_USER_MESSAGE
+
     runner = _make_runner()
     source = _source()
     runner._decide_image_input_mode = lambda: "native"
@@ -207,7 +211,4 @@ async def test_image_only_message_gets_default_follow_up_prompt_for_native_routi
     )
 
     assert runner._pending_native_image_paths == ["/tmp/cat.jpg"]
-    assert (
-        result
-        == "The user sent an image without any accompanying text. Ask what they'd like you to do with it."
-    )
+    assert result == IMAGE_ONLY_USER_MESSAGE

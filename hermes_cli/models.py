@@ -12,6 +12,7 @@ import os
 import urllib.request
 import urllib.error
 import time
+import urllib.parse
 from difflib import get_close_matches
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
@@ -152,7 +153,8 @@ def _xai_curated_models() -> list[str]:
     return list(_XAI_STATIC_FALLBACK)
 
 
-_PROVIDER_MODELS: dict[str, list[str]] = {
+_CORE_PROVIDER_MODELS: dict[str, list[str]] = {
+    # CPA / CLIProxyAPI (default in this fork)
     "cliproxyapi": [
         "gpt-5(8192)",
         "gpt-5",
@@ -167,6 +169,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "gemini-2.5-pro",
         "qwen3-coder-plus",
     ],
+    # Nous: used as an offline fallback when the live catalog/manifest is unavailable.
     "nous": [
         "moonshotai/kimi-k2.6",
         "xiaomi/mimo-v2.5-pro",
@@ -199,8 +202,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "openai/gpt-5.5-pro",
         "openai/gpt-5.4-nano",
     ],
-    # Native OpenAI Chat Completions (api.openai.com). Used by /model counts and
-    # provider_model_ids fallback when /v1/models is unavailable.
+    # Native OpenAI Chat Completions (api.openai.com) fallback catalog.
     "openai": [
         "gpt-5.4",
         "gpt-5.4-mini",
@@ -211,10 +213,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "gpt-4o",
         "gpt-4o-mini",
     ],
-    "openai-codex": _codex_curated_models(),
-    "copilot-acp": [
-        "copilot-acp",
-    ],
+    # GitHub Copilot fallback catalog.
     "copilot": [
         "gpt-5.4",
         "gpt-5.4-mini",
@@ -234,235 +233,574 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "gemini-2.5-pro",
         "grok-code-fast-1",
     ],
-    "gemini": [
-        "gemini-3.1-pro-preview",
-        "gemini-3-pro-preview",
-        "gemini-3-flash-preview",
-        "gemini-3.1-flash-lite-preview",
-    ],
-    "google-gemini-cli": [
-        "gemini-3.1-pro-preview",
-        "gemini-3-pro-preview",
-        "gemini-3-flash-preview",
-    ],
-    "zai": [
-        "glm-5.1",
-        "glm-5",
-        "glm-5v-turbo",
-        "glm-5-turbo",
-        "glm-4.7",
-        "glm-4.5",
-        "glm-4.5-flash",
-    ],
-    "xai": _xai_curated_models(),
-    "nvidia": [
-        # NVIDIA flagship reasoning models
-        "nvidia/nemotron-3-super-120b-a12b",
-        "nvidia/nemotron-3-nano-30b-a3b",
-        "nvidia/llama-3.3-nemotron-super-49b-v1.5",
-        # Third-party agentic models hosted on build.nvidia.com
-        # (map to OpenRouter defaults — users get familiar picks on NIM)
-        "qwen/qwen3.5-397b-a17b",
-        "deepseek-ai/deepseek-v3.2",
-        "moonshotai/kimi-k2.6",
-        "minimaxai/minimax-m2.5",
-        "z-ai/glm5",
-        "openai/gpt-oss-120b",
-    ],
-    "kimi-coding": [
-        "kimi-k2.6",
-        "kimi-k2.5",
-        "kimi-for-coding",
-        "kimi-k2-thinking",
-        "kimi-k2-thinking-turbo",
-        "kimi-k2-turbo-preview",
-        "kimi-k2-0905-preview",
-    ],
-    "kimi-coding-cn": [
-        "kimi-k2.6",
-        "kimi-k2.5",
-        "kimi-k2-thinking",
-        "kimi-k2-turbo-preview",
-        "kimi-k2-0905-preview",
-    ],
-    "stepfun": [
-        "step-3.5-flash",
-        "step-3.5-flash-2603",
-    ],
-    "moonshot": [
-        "kimi-k2.6",
-        "kimi-k2.5",
-        "kimi-k2-thinking",
-        "kimi-k2-turbo-preview",
-        "kimi-k2-0905-preview",
-    ],
-    "minimax": [
-        "MiniMax-M2.7",
-        "MiniMax-M2.5",
-        "MiniMax-M2.1",
-        "MiniMax-M2",
-    ],
-    "minimax-oauth": [
-        "MiniMax-M2.7",
-        "MiniMax-M2.7-highspeed",
-    ],
-    "minimax-cn": [
-        "MiniMax-M2.7",
-        "MiniMax-M2.5",
-        "MiniMax-M2.1",
-        "MiniMax-M2",
-    ],
-    "anthropic": [
-        "claude-opus-4-7",
-        "claude-opus-4-6",
-        "claude-sonnet-4-6",
-        "claude-opus-4-5-20251101",
-        "claude-sonnet-4-5-20250929",
-        "claude-opus-4-20250514",
-        "claude-sonnet-4-20250514",
-        "claude-haiku-4-5-20251001",
-    ],
-    "deepseek": [
-        "deepseek-v4-pro",
-        "deepseek-v4-flash",
-        "deepseek-chat",
-        "deepseek-reasoner",
-    ],
-    "xiaomi": [
-        "mimo-v2.5-pro",
-        "mimo-v2.5",
-        "mimo-v2-pro",
-        "mimo-v2-omni",
-        "mimo-v2-flash",
-    ],
-    "tencent-tokenhub": [
-        "hy3-preview",
-    ],
-    "arcee": [
-        "trinity-large-thinking",
-        "trinity-large-preview",
-        "trinity-mini",
-    ],
-    "gmi": [
-        "zai-org/GLM-5.1-FP8",
-        "deepseek-ai/DeepSeek-V3.2",
-        "moonshotai/Kimi-K2.5",
-        "google/gemini-3.1-flash-lite-preview",
-        "anthropic/claude-sonnet-4.6",
-        "openai/gpt-5.4",
-    ],
-    "opencode-zen": [
-        "kimi-k2.5",
-        "gpt-5.4-pro",
-        "gpt-5.4",
-        "gpt-5.3-codex",
-        "gpt-5.2",
-        "gpt-5.2-codex",
-        "gpt-5.1",
-        "gpt-5.1-codex",
-        "gpt-5.1-codex-max",
-        "gpt-5.1-codex-mini",
-        "gpt-5",
-        "gpt-5-codex",
-        "gpt-5-nano",
-        "claude-opus-4-6",
-        "claude-opus-4-5",
-        "claude-opus-4-1",
-        "claude-sonnet-4-6",
-        "claude-sonnet-4-5",
-        "claude-sonnet-4",
-        "claude-haiku-4-5",
-        "claude-3-5-haiku",
-        "gemini-3.1-pro",
-        "gemini-3-pro",
-        "gemini-3-flash",
-        "minimax-m2.7",
-        "minimax-m2.5",
-        "minimax-m2.5-free",
-        "minimax-m2.1",
-        "glm-5",
-        "glm-4.7",
-        "glm-4.6",
-        "kimi-k2-thinking",
-        "kimi-k2",
-        "qwen3-coder",
-        "big-pickle",
-    ],
-    "opencode-go": [
-        "kimi-k2.6",
-        "kimi-k2.5",
-        "glm-5.1",
-        "glm-5",
-        "mimo-v2.5-pro",
-        "mimo-v2.5",
-        "mimo-v2-pro",
-        "mimo-v2-omni",
-        "minimax-m2.7",
-        "minimax-m2.5",
-        "qwen3.6-plus",
-        "qwen3.5-plus",
-    ],
-    "kilocode": [
-        "anthropic/claude-opus-4.6",
-        "anthropic/claude-sonnet-4.6",
-        "openai/gpt-5.4",
-        "google/gemini-3-pro-preview",
-        "google/gemini-3-flash-preview",
-    ],
-    # Alibaba DashScope Coding platform (coding-intl) — default endpoint.
-    # Supports Qwen models + third-party providers (GLM, Kimi, MiniMax).
-    # Users with classic DashScope keys should override DASHSCOPE_BASE_URL
-    # to https://dashscope-intl.aliyuncs.com/compatible-mode/v1 (OpenAI-compat)
-    # or https://dashscope-intl.aliyuncs.com/apps/anthropic (Anthropic-compat).
-    "alibaba": [
-        "qwen3.6-plus",
-        "kimi-k2.5",
-        "qwen3.5-plus",
-        "qwen3-coder-plus",
-        "qwen3-coder-next",
-        # Third-party models available on coding-intl
-        "glm-5",
-        "glm-4.7",
-        "MiniMax-M2.5",
-    ],
-    # Curated HF model list — only agentic models that map to OpenRouter defaults.
-    "huggingface": [
-        "moonshotai/Kimi-K2.5",
-        "Qwen/Qwen3.5-397B-A17B",
-        "Qwen/Qwen3.5-35B-A3B",
-        "deepseek-ai/DeepSeek-V3.2",
-        "MiniMaxAI/MiniMax-M2.5",
-        "zai-org/GLM-5",
-        "XiaomiMiMo/MiMo-V2-Flash",
-        "moonshotai/Kimi-K2-Thinking",
-        "moonshotai/Kimi-K2.6",
-    ],
-    # AWS Bedrock — static fallback list used when dynamic discovery is
-    # unavailable (no boto3, no credentials, or API error).  The agent
-    # prefers live discovery via ListFoundationModels + ListInferenceProfiles.
-    # Use inference profile IDs (us.*) since most models require them.
-    "bedrock": [
-        "us.anthropic.claude-sonnet-4-6",
-        "us.anthropic.claude-opus-4-6-v1",
-        "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-        "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-        "us.amazon.nova-pro-v1:0",
-        "us.amazon.nova-lite-v1:0",
-        "us.amazon.nova-micro-v1:0",
-        "deepseek.v3.2",
-        "us.meta.llama4-maverick-17b-instruct-v1:0",
-        "us.meta.llama4-scout-17b-instruct-v1:0",
-    ],
-    # Azure Foundry: user-provided endpoint and model.
-    # Empty list because models depend on the endpoint configuration.
-    "azure-foundry": [],
+    # Vercel AI Gateway: derived from curated snapshot, small enough to keep hot.
+    "ai-gateway": [mid for mid, _ in VERCEL_AI_GATEWAY_MODELS],
 }
 
-# Vercel AI Gateway: derive the bare-model-id catalog from the curated
-# ``VERCEL_AI_GATEWAY_MODELS`` snapshot so both the picker (tuples with descriptions)
-# and the static fallback catalog (bare ids) stay in sync from a single
-# source of truth.
-_PROVIDER_MODELS["ai-gateway"] = [mid for mid, _ in VERCEL_AI_GATEWAY_MODELS]
+# Full provider catalog is intentionally lazy-loaded to reduce resident memory
+# for CPA-only users. Non-core provider lists are only constructed when a code
+# path actually needs them (e.g. setup/model picker for a specific provider).
+_FULL_PROVIDER_MODELS: dict[str, list[str]] | None = None
+
+
+def _non_core_provider_models() -> dict[str, list[str]]:
+    """Return non-core static provider catalogs.
+
+    IMPORTANT: This function must have no side effects besides allocating the
+    dict. Keeping it lazy prevents large model lists from becoming resident
+    memory for users who never touch these providers.
+    """
+    return {
+        "copilot-acp": [
+            "copilot-acp",
+        ],
+        "gemini": [
+            "gemini-3.1-pro-preview",
+            "gemini-3-pro-preview",
+            "gemini-3-flash-preview",
+            "gemini-3.1-flash-lite-preview",
+        ],
+        "google-gemini-cli": [
+            "gemini-3.1-pro-preview",
+            "gemini-3-pro-preview",
+            "gemini-3-flash-preview",
+        ],
+        "zai": [
+            "glm-5.1",
+            "glm-5",
+            "glm-5v-turbo",
+            "glm-5-turbo",
+            "glm-4.7",
+            "glm-4.5",
+            "glm-4.5-flash",
+        ],
+        "xai": _xai_curated_models(),
+        "nvidia": [
+            # NVIDIA flagship reasoning models
+            "nvidia/nemotron-3-super-120b-a12b",
+            "nvidia/nemotron-3-nano-30b-a3b",
+            "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+            # Third-party agentic models hosted on build.nvidia.com
+            # (map to OpenRouter defaults — users get familiar picks on NIM)
+            "qwen/qwen3.5-397b-a17b",
+            "deepseek-ai/deepseek-v3.2",
+            "moonshotai/kimi-k2.6",
+            "minimaxai/minimax-m2.5",
+            "z-ai/glm5",
+            "openai/gpt-oss-120b",
+        ],
+        "kimi-coding": [
+            "kimi-k2.6",
+            "kimi-k2.5",
+            "kimi-for-coding",
+            "kimi-k2-thinking",
+            "kimi-k2-thinking-turbo",
+            "kimi-k2-turbo-preview",
+            "kimi-k2-0905-preview",
+        ],
+        "kimi-coding-cn": [
+            "kimi-k2.6",
+            "kimi-k2.5",
+            "kimi-k2-thinking",
+            "kimi-k2-turbo-preview",
+            "kimi-k2-0905-preview",
+        ],
+        "stepfun": [
+            "step-3.5-flash",
+            "step-3.5-flash-2603",
+        ],
+        "moonshot": [
+            "kimi-k2.6",
+            "kimi-k2.5",
+            "kimi-k2-thinking",
+            "kimi-k2-turbo-preview",
+            "kimi-k2-0905-preview",
+        ],
+        "minimax": [
+            "MiniMax-M2.7",
+            "MiniMax-M2.5",
+            "MiniMax-M2.1",
+            "MiniMax-M2",
+        ],
+        "minimax-oauth": [
+            "MiniMax-M2.7",
+            "MiniMax-M2.7-highspeed",
+        ],
+        "minimax-cn": [
+            "MiniMax-M2.7",
+            "MiniMax-M2.5",
+            "MiniMax-M2.1",
+            "MiniMax-M2",
+        ],
+        "anthropic": [
+            "claude-opus-4-7",
+            "claude-opus-4-6",
+            "claude-sonnet-4-6",
+            "claude-opus-4-5-20251101",
+            "claude-sonnet-4-5-20250929",
+            "claude-opus-4-20250514",
+            "claude-sonnet-4-20250514",
+            "claude-haiku-4-5-20251001",
+        ],
+        "deepseek": [
+            "deepseek-v4-pro",
+            "deepseek-v4-flash",
+            "deepseek-chat",
+            "deepseek-reasoner",
+        ],
+        "xiaomi": [
+            "mimo-v2.5-pro",
+            "mimo-v2.5",
+            "mimo-v2-pro",
+            "mimo-v2-omni",
+            "mimo-v2-flash",
+        ],
+        "tencent-tokenhub": [
+            "hy3-preview",
+        ],
+        "arcee": [
+            "trinity-large-thinking",
+            "trinity-large-preview",
+            "trinity-mini",
+        ],
+        "gmi": [
+            "zai-org/GLM-5.1-FP8",
+            "deepseek-ai/DeepSeek-V3.2",
+            "moonshotai/Kimi-K2.5",
+            "google/gemini-3.1-flash-lite-preview",
+            "anthropic/claude-sonnet-4.6",
+            "openai/gpt-5.4",
+        ],
+        "opencode-zen": [
+            "kimi-k2.5",
+            "gpt-5.4-pro",
+            "gpt-5.4",
+            "gpt-5.3-codex",
+            "gpt-5.2",
+            "gpt-5.2-codex",
+            "gpt-5.1",
+            "gpt-5.1-codex",
+            "gpt-5.1-codex-max",
+            "gpt-5.1-codex-mini",
+            "gpt-5",
+            "gpt-5-codex",
+            "gpt-5-nano",
+            "claude-opus-4-6",
+            "claude-opus-4-5",
+            "claude-opus-4-1",
+            "claude-sonnet-4-6",
+            "claude-sonnet-4-5",
+            "claude-sonnet-4",
+            "claude-haiku-4-5",
+            "claude-3-5-haiku",
+            "gemini-3.1-pro",
+            "gemini-3-pro",
+            "gemini-3-flash",
+            "minimax-m2.7",
+            "minimax-m2.5",
+            "minimax-m2.5-free",
+            "minimax-m2.1",
+            "glm-5",
+            "glm-4.7",
+            "glm-4.6",
+            "kimi-k2-thinking",
+            "kimi-k2",
+            "qwen3-coder",
+            "big-pickle",
+        ],
+        "opencode-go": [
+            "kimi-k2.6",
+            "kimi-k2.5",
+            "glm-5.1",
+            "glm-5",
+            "mimo-v2.5-pro",
+            "mimo-v2.5",
+            "mimo-v2-pro",
+            "mimo-v2-omni",
+            "minimax-m2.7",
+            "minimax-m2.5",
+            "qwen3.6-plus",
+            "qwen3.5-plus",
+        ],
+        "kilocode": [
+            "anthropic/claude-opus-4.6",
+            "anthropic/claude-sonnet-4.6",
+            "openai/gpt-5.4",
+            "google/gemini-3-pro-preview",
+            "google/gemini-3-flash-preview",
+        ],
+        # Alibaba DashScope Coding platform (coding-intl) — default endpoint.
+        "alibaba": [
+            "qwen3.6-plus",
+            "kimi-k2.5",
+            "qwen3.5-plus",
+            "qwen3-coder-plus",
+            "qwen3-coder-next",
+            # Third-party models available on coding-intl
+            "glm-5",
+            "glm-4.7",
+            "MiniMax-M2.5",
+        ],
+        # Curated HF model list — only agentic models that map to OpenRouter defaults.
+        "huggingface": [
+            "moonshotai/Kimi-K2.5",
+            "Qwen/Qwen3.5-397B-A17B",
+            "Qwen/Qwen3.5-35B-A3B",
+            "deepseek-ai/DeepSeek-V3.2",
+            "MiniMaxAI/MiniMax-M2.5",
+            "zai-org/GLM-5",
+            "XiaomiMiMo/MiMo-V2-Flash",
+            "moonshotai/Kimi-K2-Thinking",
+            "moonshotai/Kimi-K2.6",
+        ],
+        # AWS Bedrock — static fallback list used when dynamic discovery is unavailable.
+        "bedrock": [
+            "us.anthropic.claude-sonnet-4-6",
+            "us.anthropic.claude-opus-4-6-v1",
+            "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+            "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+            "us.amazon.nova-pro-v1:0",
+            "us.amazon.nova-lite-v1:0",
+            "us.amazon.nova-micro-v1:0",
+            "deepseek.v3.2",
+            "us.meta.llama4-maverick-17b-instruct-v1:0",
+            "us.meta.llama4-scout-17b-instruct-v1:0",
+        ],
+        # Azure Foundry: user-provided endpoint and model (static list is empty).
+        "azure-foundry": [],
+    }
+
+
+def _provider_models_table() -> dict[str, list[str]]:
+    """Return the full provider -> model_ids mapping (lazy)."""
+    global _FULL_PROVIDER_MODELS
+    if _FULL_PROVIDER_MODELS is None:
+        table = dict(_CORE_PROVIDER_MODELS)
+        table.update(_non_core_provider_models())
+        _FULL_PROVIDER_MODELS = table
+    return _FULL_PROVIDER_MODELS
+
+
+def _static_models_for_provider(provider: str) -> list[str]:
+    """Return the static fallback models for *provider* (lazy for non-core)."""
+    if not provider:
+        return []
+    if provider in _CORE_PROVIDER_MODELS:
+        return _CORE_PROVIDER_MODELS.get(provider, [])
+    return _provider_models_table().get(provider, [])
+
+# ---------------------------------------------------------------------------
+# CPA channel model discovery (CPA-only forks)
+# ---------------------------------------------------------------------------
+
+_CPA_CHANNEL_ENDPOINTS: tuple[str, ...] = (
+    # Mirrors hermes_cli/web_server.py CPA management proxy endpoints.
+    "gemini-api-key",
+    "codex-api-key",
+    "claude-api-key",
+    "vertex-api-key",
+    "openai-compatibility",
+)
+
+_cpa_channel_models_cache: dict[str, Any] = {
+    "fetched_at": 0.0,
+    "models": [],
+}
+
+
+def _normalize_cpa_management_base(base_url: str) -> str:
+    """Return the CPA management base URL (no /v1 suffix).
+
+    Users typically configure CPA as an OpenAI-compatible endpoint ending in
+    /v1. The management endpoints are served at the same host without /v1,
+    and may also accept the legacy /v0/management/* prefix.
+    """
+    value = (base_url or "").strip().rstrip("/")
+    if not value:
+        return ""
+    parsed = urllib.parse.urlsplit(value)
+    path = parsed.path.rstrip("/")
+    if path.endswith("/v1"):
+        path = path[: -len("/v1")].rstrip("/")
+    # If someone accidentally configured /v0/management, strip it too.
+    if path.endswith("/v0/management"):
+        path = path[: -len("/v0/management")].rstrip("/")
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path, "", "")).rstrip("/")
+
+
+def _cpa_management_key_from_env() -> str:
+    """Best-effort CPA management key resolution for channel discovery.
+
+    Prefers the on-disk ~/.hermes/.env values (so restarts pick up changes),
+    then falls back to the process environment, then the dashboard password.
+    """
+    env_on_disk = {}
+    try:
+        from hermes_cli.config.env import load_env
+        env_on_disk = load_env()
+    except Exception:
+        env_on_disk = {}
+
+    # 1) Dedicated management keys (preferred).
+    key = (
+        str(env_on_disk.get("CPA_MANAGEMENT_KEY") or "").strip()
+        or str(env_on_disk.get("CLIPROXY_MANAGEMENT_KEY") or "").strip()
+        or os.getenv("CPA_MANAGEMENT_KEY", "").strip()
+        or os.getenv("CLIPROXY_MANAGEMENT_KEY", "").strip()
+    )
+    if key:
+        return key
+
+    # 2) Fall back to inference keys (many CPA deployments accept these).
+    key = (
+        str(env_on_disk.get("CLIPROXY_API_KEY") or "").strip()
+        or str(env_on_disk.get("CPA_API_KEY") or "").strip()
+        or os.getenv("CLIPROXY_API_KEY", "").strip()
+        or os.getenv("CPA_API_KEY", "").strip()
+    )
+    if key:
+        return key
+
+    # 3) Last resort: dashboard password from config.yaml (local-only setups).
+    try:
+        from hermes_cli.config import load_config
+        cfg = load_config()
+        dashboard = cfg.get("dashboard") if isinstance(cfg, dict) else None
+        if isinstance(dashboard, dict):
+            pw = str(dashboard.get("password") or "").strip()
+            if pw:
+                return pw
+    except Exception:
+        pass
+
+    return ""
+
+
+def _looks_like_model_id(value: str) -> bool:
+    """Heuristic filter to avoid collecting keys/URLs as model ids."""
+    v = (value or "").strip()
+    if not v:
+        return False
+    if len(v) > 96:
+        return False
+    lower = v.lower()
+    if lower.startswith(("http://", "https://")):
+        return False
+    if "-----begin" in lower or "private key" in lower:
+        return False
+    # Avoid obvious secrets / tokens.
+    if any(k in lower for k in ("sk-", "api_key", "apikey", "bearer", "token", "secret")):
+        return False
+    # Basic charset gate (model ids are typically ascii-ish).
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._:/()@+")
+    return all((ch in allowed) for ch in v)
+
+
+def _extract_model_ids_from_payload(payload: Any) -> list[str]:
+    """Recursively extract plausible model ids from CPA provider config payloads.
+
+    Strategy:
+    1) Strict pass: only collect strings that appear under model-id-ish keys
+       (prevents false positives from descriptive names, URLs, etc.).
+    2) Fallback pass: if strict finds nothing, run a legacy scan that collects
+       any string that matches the model-id heuristic.
+    """
+    # Keys that are likely to contain model identifiers (string or list of strings).
+    strict_keys = {
+        "model",
+        "model_id",
+        "modelid",
+        "model_name",
+        "modelname",
+        "models",
+        "model_ids",
+        "modelids",
+        "available_models",
+        "allowed_models",
+        "whitelist",
+        "allowlist",
+    }
+
+    def _collect_strict(node: Any, *, allow_string: bool = False) -> list[str]:
+        found: list[str] = []
+        if node is None:
+            return found
+        if isinstance(node, str):
+            if allow_string and _looks_like_model_id(node):
+                found.append(node.strip())
+            return found
+        if isinstance(node, (int, float, bool)):
+            return found
+        if isinstance(node, list):
+            for item in node:
+                found.extend(_collect_strict(item, allow_string=allow_string))
+            return found
+        if isinstance(node, dict):
+            for k, v in node.items():
+                key = str(k).lower()
+                if key in strict_keys:
+                    found.extend(_collect_strict(v, allow_string=True))
+                else:
+                    # Traverse nested structures to find deeper strict keys,
+                    # but don't collect arbitrary strings on the way.
+                    found.extend(_collect_strict(v, allow_string=False))
+            return found
+        return found
+
+    strict = _collect_strict(payload, allow_string=False)
+
+    # If strict pass found nothing, fall back to the broad heuristic scan for
+    # compatibility with unknown CPA payload shapes.
+    legacy: list[str] = []
+
+    def _collect_legacy(node: Any) -> None:
+        if node is None:
+            return
+        if isinstance(node, str):
+            if _looks_like_model_id(node):
+                legacy.append(node.strip())
+            return
+        if isinstance(node, (int, float, bool)):
+            return
+        if isinstance(node, list):
+            for item in node:
+                _collect_legacy(item)
+            return
+        if isinstance(node, dict):
+            for _, v in node.items():
+                _collect_legacy(v)
+
+    if not strict:
+        _collect_legacy(payload)
+
+    # Merge strict-first, then legacy, de-dup case-insensitively.
+    merged: list[str] = []
+    seen: set[str] = set()
+    for mid in strict + legacy:
+        low = str(mid).lower()
+        if low in seen:
+            continue
+        seen.add(low)
+        merged.append(str(mid))
+    return merged
+
+
+def _cpa_model_discovery_settings() -> dict[str, float | bool]:
+    """Load CPA model discovery settings from config.yaml (best-effort)."""
+    defaults = {
+        "enabled": True,
+        "cache_ttl_seconds": 60.0,
+        "timeout_per_request_seconds": 0.35,
+        "max_total_seconds": 1.5,
+    }
+    try:
+        from hermes_cli.config import load_config
+        cfg = load_config()
+        cpa = cfg.get("cpa") if isinstance(cfg, dict) else None
+        md = cpa.get("model_discovery") if isinstance(cpa, dict) else None
+        if isinstance(md, dict):
+            enabled = md.get("enabled")
+            if isinstance(enabled, bool):
+                defaults["enabled"] = enabled
+            for key in ("cache_ttl_seconds", "timeout_per_request_seconds", "max_total_seconds"):
+                val = md.get(key)
+                try:
+                    if val is not None:
+                        defaults[key] = float(val)
+                except (TypeError, ValueError):
+                    pass
+    except Exception:
+        pass
+    return defaults
+
+
+def _fetch_cpa_channel_models(
+    *,
+    base_url: str,
+    timeout_per_request: float = 0.35,
+    max_total_seconds: float = 1.5,
+    cache_ttl_seconds: float = 60.0,
+) -> list[str]:
+    """Fetch CPA channel model ids from the CPA management API.
+
+    This is intentionally best-effort:
+    - tight timeouts (avoid blocking /model for seconds)
+    - cached for a short TTL
+    - falls back to static catalogs on any failure
+    """
+    now = time.time()
+    cached_at = float(_cpa_channel_models_cache.get("fetched_at") or 0.0)
+    cached_models = _cpa_channel_models_cache.get("models") or []
+    if (now - cached_at) < cache_ttl_seconds and isinstance(cached_models, list):
+        return [str(x) for x in cached_models if isinstance(x, str)]
+
+    management_base = _normalize_cpa_management_base(base_url)
+    if not management_base:
+        return []
+
+    key = _cpa_management_key_from_env()
+    headers = {"Accept": "application/json", "User-Agent": _HERMES_USER_AGENT}
+    if key:
+        headers["X-Management-Key"] = key
+        headers["Authorization"] = f"Bearer {key}"
+
+    collected: list[str] = []
+    deadline = time.monotonic() + max_total_seconds
+
+    def _url_candidates(endpoint: str) -> list[str]:
+        clean = endpoint.strip("/")
+        primary = f"{management_base}/{clean}"
+        legacy = f"{management_base}/v0/management/{clean}"
+        return [primary] if primary == legacy else [primary, legacy]
+
+    for endpoint in _CPA_CHANNEL_ENDPOINTS:
+        if time.monotonic() >= deadline:
+            break
+        last_http_error: urllib.error.HTTPError | None = None
+        for url in _url_candidates(endpoint):
+            if time.monotonic() >= deadline:
+                break
+            req = urllib.request.Request(url, headers=headers, method="GET")
+            try:
+                with urllib.request.urlopen(req, timeout=timeout_per_request) as resp:
+                    raw = resp.read()
+                    ctype = resp.headers.get("Content-Type", "")
+                    text = raw.decode("utf-8", errors="replace")
+                    if "application/json" in ctype.lower():
+                        try:
+                            payload = json.loads(text) if text else {}
+                        except json.JSONDecodeError:
+                            payload = {"raw": text}
+                    else:
+                        payload = {"raw": text}
+                    collected.extend(_extract_model_ids_from_payload(payload))
+                    last_http_error = None
+                    break
+            except urllib.error.HTTPError as exc:
+                # Try legacy path when CPA returns 404/405 on the new route.
+                if exc.code in {404, 405}:
+                    last_http_error = exc
+                    continue
+                break
+            except Exception:
+                break
+
+        # If both candidates failed with 404/405, continue to next endpoint.
+        _ = last_http_error
+
+    # Final de-dup + cache.
+    seen: set[str] = set()
+    merged: list[str] = []
+    for mid in collected:
+        low = str(mid).lower()
+        if low in seen:
+            continue
+        seen.add(low)
+        merged.append(str(mid))
+
+    _cpa_channel_models_cache["fetched_at"] = now
+    _cpa_channel_models_cache["models"] = merged
+    return merged
 
 # ---------------------------------------------------------------------------
 # Nous Portal free-model helper
@@ -930,14 +1268,14 @@ _PROVIDER_ALIASES = {
 def get_default_model_for_provider(provider: str) -> str:
     """Return the default model for a provider, or empty string if unknown.
 
-    Uses the first entry in _PROVIDER_MODELS as the default.  This is the
+    Uses the first entry in the static provider catalog as the default. This is the
     model a user would be offered first in the ``hermes model`` picker.
 
     Used as a fallback when the user has configured a provider but never
     selected a model (e.g. ``hermes auth add openai-codex`` without
     ``hermes model``).
     """
-    models = _PROVIDER_MODELS.get(provider, [])
+    models = _static_models_for_provider(provider)
     return models[0] if models else ""
 
 
@@ -1063,7 +1401,7 @@ def get_curated_nous_model_ids() -> list[str]:
 
     Prefers the remotely-hosted catalog manifest (published under
     ``website/static/api/model-catalog.json``); falls back to the in-repo
-    snapshot in ``_PROVIDER_MODELS["nous"]`` when the manifest is
+    snapshot in Hermes' static fallback list when the manifest is
     unreachable. Always returns a list (never None).
     """
     try:
@@ -1073,7 +1411,7 @@ def get_curated_nous_model_ids() -> list[str]:
         remote = None
     if remote:
         return list(remote)
-    return list(_PROVIDER_MODELS.get("nous", []))
+    return list(_static_models_for_provider("nous"))
 
 
 def _ai_gateway_model_is_free(pricing: Any) -> bool:
@@ -1486,7 +1824,7 @@ def curated_models_for_provider(
     """Return ``(model_id, description)`` tuples for a provider's model list.
 
     Tries to fetch the live model list from the provider's API first,
-    falling back to the static ``_PROVIDER_MODELS`` catalog if the API
+    falling back to the static fallback catalog if the API
     is unreachable.
     """
     normalized = normalize_provider(provider)
@@ -1499,7 +1837,7 @@ def curated_models_for_provider(
         return [(m, "") for m in live]
 
     # Fallback to static catalog
-    models = _PROVIDER_MODELS.get(normalized, [])
+    models = _static_models_for_provider(normalized)
     return [(m, "") for m in models]
 
 
@@ -1513,7 +1851,7 @@ def _model_in_provider_catalog(name_lower: str, providers: set[str]) -> bool:
     return any(
         name_lower == model.lower()
         for provider in providers
-        for model in _PROVIDER_MODELS.get(provider, [])
+        for model in _static_models_for_provider(provider)
     )
 
 
@@ -1540,7 +1878,7 @@ def _resolve_static_model_alias(
     family = identity.family
 
     def _match(provider: str) -> Optional[str]:
-        models = _PROVIDER_MODELS.get(provider, [])
+        models = _static_models_for_provider(provider)
         if not models:
             return None
         prefix = (
@@ -1557,7 +1895,7 @@ def _resolve_static_model_alias(
         if matched := _match(provider):
             return provider, matched
 
-    for provider in _PROVIDER_MODELS:
+    for provider in _provider_models_table():
         if provider in current_keys or provider in _AGGREGATOR_PROVIDERS:
             continue
         if matched := _match(provider):
@@ -1598,7 +1936,7 @@ def detect_static_provider_for_model(
     # openrouter requires an explicit model name to be useful.
     resolved_provider = _PROVIDER_ALIASES.get(name_lower, name_lower)
     if resolved_provider not in {"custom", "openrouter"}:
-        default_models = _PROVIDER_MODELS.get(resolved_provider, [])
+        default_models = _static_models_for_provider(resolved_provider)
         if (
             resolved_provider in _PROVIDER_LABELS
             and default_models
@@ -1612,7 +1950,7 @@ def detect_static_provider_for_model(
         return None
 
     # --- Step 1: check static provider catalogs for a direct match ---
-    for pid, models in _PROVIDER_MODELS.items():
+    for pid, models in _provider_models_table().items():
         if pid in current_keys or pid in _AGGREGATOR_PROVIDERS:
             continue
         if any(name_lower == m.lower() for m in models):
@@ -1953,7 +2291,7 @@ def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) 
         except Exception:
             pass
         if normalized == "copilot-acp":
-            return list(_PROVIDER_MODELS.get("copilot", []))
+            return list(_static_models_for_provider("copilot"))
     if normalized == "nous":
         # Try live Nous Portal /models endpoint
         try:
@@ -1965,6 +2303,48 @@ def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) 
                     return live
         except Exception:
             pass
+    if normalized in {"cliproxyapi", "cpa"}:
+        # CPA-only mode: merge models discovered from CPA management channel
+        # configs into the static curated list. This keeps `/model` aligned with
+        # what CPA can actually route right now, without forcing users to
+        # maintain the list in Hermes.
+        curated_static = list(_static_models_for_provider("cliproxyapi"))
+        try:
+            from hermes_cli.runtime_provider import resolve_runtime_provider
+
+            runtime = resolve_runtime_provider()
+            base_url = str(runtime.get("base_url") or "").strip()
+            settings = _cpa_model_discovery_settings()
+            if not settings.get("enabled", True):
+                discovered = []
+            else:
+                ttl = 0.0 if force_refresh else float(settings.get("cache_ttl_seconds", 60.0))
+                discovered = _fetch_cpa_channel_models(
+                    base_url=base_url,
+                    cache_ttl_seconds=ttl,
+                    timeout_per_request=float(settings.get("timeout_per_request_seconds", 0.35)),
+                    max_total_seconds=float(settings.get("max_total_seconds", 1.5)),
+                )
+        except Exception:
+            discovered = []
+        if not discovered:
+            return curated_static
+        seen: set[str] = set()
+        merged: list[str] = []
+        # Prefer discovered models first so users see what's configured.
+        for mid in discovered:
+            key = str(mid).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(str(mid))
+        for mid in curated_static:
+            key = str(mid).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(str(mid))
+        return merged
     if normalized == "stepfun":
         try:
             from hermes_cli.auth import resolve_api_key_provider_credentials
@@ -2038,7 +2418,7 @@ def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) 
                 return ids
         except Exception:
             pass
-    curated_static = list(_PROVIDER_MODELS.get(normalized, []))
+    curated_static = list(_static_models_for_provider(normalized))
     if normalized in _MODELS_DEV_PREFERRED:
         return _merge_with_models_dev(normalized, curated_static)
     return curated_static

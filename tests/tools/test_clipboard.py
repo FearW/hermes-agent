@@ -831,6 +831,7 @@ class TestPreprocessImagesWithVision:
             result = cli._preprocess_images_with_vision("", [img])
         assert isinstance(result, str)
         assert "A test image with colored pixels." in result
+        assert "The user attached no caption" in result
 
     def test_missing_image_skipped(self, cli, tmp_path):
         missing = tmp_path / "gone.png"

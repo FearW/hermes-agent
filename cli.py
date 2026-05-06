@@ -4220,12 +4220,13 @@ class HermesCLI:
         image later with ``vision_analyze`` if needed.
         """
         import asyncio as _asyncio
+        from agent.image_routing import IMAGE_ONLY_REPLY_GUIDANCE
         from tools.vision_tools import vision_analyze_tool
 
         analysis_prompt = (
-            "\u8bf7\u7528\u4e2d\u6587\u8be6\u7ec6\u63cf\u8ff0\u8fd9\u5f20\u56fe\u7247\u4e2d\u53ef\u89c1\u7684\u4e00\u5207\u3002"
-            "\u5305\u62ec\u6587\u5b57\u3001\u4ee3\u7801\u3001\u6570\u636e\u3001\u7269\u4f53\u3001\u4eba\u7269\u3001\u5e03\u5c40\u3001\u989c\u8272\u4ee5\u53ca\u5176\u4ed6\u91cd\u8981\u89c6\u89c9\u4fe1\u606f\u3002"
-            "\u5982\u679c\u56fe\u7247\u91cc\u7684\u6587\u5b57\u662f\u82f1\u6587\uff0c\u53ef\u4ee5\u4fdd\u7559\u82f1\u6587\u539f\u6587\uff1b\u4e0d\u8981\u8f93\u51fa\u65e5\u8bed\u3001\u5fb7\u8bed\u6216\u5176\u4ed6\u8bed\u8a00\u3002"
+            "Describe everything visible in this image in detail: text, code, objects, "
+            "people, layout, colors, and other important visual information. "
+            "Preserve non-English text as seen."
         )
 
         enriched_parts = []
@@ -4243,32 +4244,34 @@ class HermesCLI:
                 if result.get("success"):
                     description = result.get("analysis", "")
                     enriched_parts.append(
-                        f"[\u7528\u6237\u9644\u52a0\u4e86\u4e00\u5f20\u56fe\u7247\u3002\u56fe\u7247\u5185\u5bb9\u5982\u4e0b\uff1a\n{description}]\n"
-                        f"[\u5982\u679c\u9700\u8981\u66f4\u4ed4\u7ec6\u67e5\u770b\uff0c\u8bf7\u4f7f\u7528 vision_analyze\uff0cimage_url: {img_path}]"
+                        f"[The user attached an image. Description:\n{description}]\n"
+                        f"[For more detail use vision_analyze with image_url: {img_path}]"
                     )
                     if announce:
                         _cprint(f"  {_DIM}✓ 图片已分析{_RST}")
                 else:
                     enriched_parts.append(
-                        f"[\u7528\u6237\u9644\u52a0\u4e86\u4e00\u5f20\u56fe\u7247\uff0c\u4f46\u81ea\u52a8\u5206\u6790\u5931\u8d25\u3002"
-                        f"\u4f60\u53ef\u4ee5\u5c1d\u8bd5\u4f7f\u7528 vision_analyze \u67e5\u770b\uff0cimage_url: {img_path}]"
+                        "[The user attached an image but auto-analysis failed. "
+                        f"Try vision_analyze with image_url: {img_path}]"
                     )
                     if announce:
                         _cprint(f"  {_DIM}⚠ 图片分析失败，已保留路径以便重试{_RST}")
             except Exception as e:
                 enriched_parts.append(
-                    f"[\u7528\u6237\u9644\u52a0\u4e86\u4e00\u5f20\u56fe\u7247\uff0c\u4f46\u5206\u6790\u5931\u8d25\uff08{e}\uff09\u3002"
-                    f"\u4f60\u53ef\u4ee5\u5c1d\u8bd5\u4f7f\u7528 vision_analyze \u67e5\u770b\uff0cimage_url: {img_path}]"
+                    f"[The user attached an image but analysis failed ({e}). "
+                    f"Try vision_analyze with image_url: {img_path}]"
                 )
                 if announce:
                     _cprint(f"  {_DIM}⚠ 图片分析出错，已保留路径以便重试{_RST}")
 
-        # Combine: vision descriptions first, then the user's original text
-        user_text = text if isinstance(text, str) and text else ""
+        # Combine: vision descriptions first, then caption or synthesized guidance.
+        user_text = (text if isinstance(text, str) and text else "").strip()
         if enriched_parts:
             prefix = "\n\n".join(enriched_parts)
-            return f"{prefix}\n\n{user_text}" if user_text else prefix
-        return user_text or "收到图片，你要怎么处理呢？"
+            if user_text:
+                return f"{prefix}\n\n{user_text}"
+            return f"{prefix}\n\n{IMAGE_ONLY_REPLY_GUIDANCE}"
+        return user_text or IMAGE_ONLY_REPLY_GUIDANCE
 
     def _show_tool_availability_warnings(self):
         """Show warnings about disabled tools due to missing API keys."""

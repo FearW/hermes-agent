@@ -435,6 +435,7 @@ from gateway.session import (
     is_shared_multi_user_session,
 )
 from gateway.delivery import DeliveryRouter
+from gateway import zh_user_inject as _user_zh  # adapter.send — user-visible Chinese only
 from gateway.platforms.base import (
     BasePlatformAdapter,
     MessageEvent,
@@ -513,12 +514,6 @@ def _build_media_placeholder(event) -> str:
         else:
             parts.append(f"[User sent a file: {url}]")
     return "\n".join(parts)
-
-
-_IMAGE_ONLY_FOLLOW_UP_PROMPT = (
-    "The user sent an image without any accompanying text. "
-    "Ask what they'd like you to do with it."
-)
 
 
 def _dequeue_pending_event(adapter, session_key: str) -> MessageEvent | None:
@@ -4645,7 +4640,9 @@ class GatewayRunner:
                 # Decide routing: native (attach pixels) vs text (vision_analyze
                 # pre-run + prepend description).  See agent/image_routing.py.
                 _img_mode = self._decide_image_input_mode()
-                _image_only_prompt = _IMAGE_ONLY_FOLLOW_UP_PROMPT
+                from agent.image_routing import IMAGE_ONLY_USER_MESSAGE
+
+                _image_only_prompt = IMAGE_ONLY_USER_MESSAGE
                 if not has_user_supplied_text and _is_shared_multi_user and source.user_name:
                     _image_only_prompt = f"[{source.user_name}] {_image_only_prompt}"
                 if _img_mode == "native":
@@ -4683,16 +4680,9 @@ class GatewayRunner:
                     _stt_meta = {"thread_id": source.thread_id} if source.thread_id else None
                     if _stt_adapter:
                         try:
-                            _stt_msg = (
-                                "🎤 I received your voice message but can't transcribe it — "
-                                "no speech-to-text provider is configured.\n\n"
-                                "To enable voice: install faster-whisper "
-                                "(`pip install faster-whisper` in the Hermes venv) "
-                                "and set `stt.enabled: true` in config.yaml, "
-                                "then /restart the gateway."
-                            )
+                            _stt_msg = "🎤 " + _user_zh.STT_USER_SETUP_HERMES
                             if self._has_setup_skill():
-                                _stt_msg += "\n\nFor full setup instructions, type: `/skill hermes-agent-setup`"
+                                _stt_msg += _user_zh.STT_USER_SETUP_SKILL_HINT
                             await _stt_adapter.send(
                                 source.chat_id,
                                 _stt_msg,
@@ -4770,7 +4760,7 @@ class GatewayRunner:
                     if _adapter:
                         await _adapter.send(
                             source.chat_id,
-                            "\n".join(_ctx_result.warnings) or "Context injection refused.",
+                            "\n".join(_ctx_result.warnings) or _user_zh.CONTEXT_INJECTION_REFUSED,
                         )
                     return None
                 if _ctx_result.expanded:
@@ -9452,9 +9442,10 @@ class GatewayRunner:
         from agent.memory_manager import sanitize_context
 
         analysis_prompt = (
-            "请用中文详细描述这张图片中可见的一切。"
-            "包括文字、代码、数据、物体、人物、布局、颜色以及其他重要视觉信息。"
-            "如果图片里的文字是英文，可以保留英文原文；不要输出日语、德语或其他语言。"
+            "Describe everything visible in this image in detail: text, code, objects, "
+            "people, layout, colors, and other important visual information. "
+            "Preserve non-English text as seen. Do not output languages other than "
+            "what appears in the image unless describing them."
         )
 
         enriched_parts = []
@@ -9470,31 +9461,36 @@ class GatewayRunner:
                     description = result.get("analysis", "")
                     description = sanitize_context(description)
                     enriched_parts.append(
-                        f"[用户发来一张图片。图片内容如下：\n{description}]\n"
-                        f"[如果需要更仔细查看，请使用 vision_analyze，image_url: {path}]"
+                        f"[The user sent an image. Description:\n{description}]\n"
+                        f"[For more detail use vision_analyze with image_url: {path}]"
                     )
                 else:
                     enriched_parts.append(
-                        "[用户发来一张图片，但自动分析失败。"
-                        f"你可以尝试使用 vision_analyze 查看，image_url: {path}]"
+                        "[The user sent an image but auto-analysis failed. "
+                        f"You can try vision_analyze with image_url: {path}]"
                     )
             except Exception as e:
                 logger.error("Vision auto-analysis error: %s", e)
                 enriched_parts.append(
-                    f"[用户发来一张图片，但分析失败（{e}）。"
-                    f"你可以尝试使用 vision_analyze 查看，image_url: {path}]"
+                    f"[The user sent an image but analysis failed ({e}). "
+                    f"Try vision_analyze with image_url: {path}]"
                 )
 
-        # Combine: vision descriptions first, then the user's original text
+        from agent.image_routing import IMAGE_ONLY_REPLY_GUIDANCE, is_synthetic_image_only_user_text
+
+        trimmed_user = (user_text or "").strip()
+        image_only_placeholder = is_synthetic_image_only_user_text(trimmed_user)
+
+        # Combine: vision descriptions first, then caption or synthesized guidance.
         if enriched_parts:
             prefix = "\n\n".join(enriched_parts)
-            if user_text:
-                return f"{prefix}\n\n{user_text}"
-            return (
-                f"{prefix}\n\n"
-                "[用户没有为图片附加文字。请先简短回复：收到图片，你要怎么处理呢？]"
-            )
-        return user_text
+            if trimmed_user and not image_only_placeholder:
+                return f"{prefix}\n\n{trimmed_user}"
+            return f"{prefix}\n\n{IMAGE_ONLY_REPLY_GUIDANCE}"
+
+        return (
+            trimmed_user if trimmed_user and not image_only_placeholder else IMAGE_ONLY_REPLY_GUIDANCE
+        )
 
     async def _enrich_message_with_transcription(
         self,
@@ -9513,14 +9509,10 @@ class GatewayRunner:
             The enriched message string with transcriptions prepended.
         """
         if not getattr(self.config, "stt_enabled", True):
-            disabled_note = "[The user sent voice message(s), but transcription is disabled in config. 用户发送了语音消息，但配置中已关闭转写。"
-            if self._has_setup_skill():
-                disabled_note += (
-                    " You have a skill called hermes-agent-setup that can help "
-                    "users configure Hermes features including voice, tools, and more. "
-                    "你可以提示用户使用 hermes-agent-setup 配置语音、工具等功能。"
-                )
-            disabled_note += "]"
+            disabled_note = (
+                "[The user sent voice message(s), but transcription is disabled in gateway config. "
+                "Tell the user they can enable stt.enabled in config.yaml for transcripts.]"
+            )
             if user_text:
                 return f"{disabled_note}\n\n{user_text}"
             return disabled_note
@@ -9535,7 +9527,7 @@ class GatewayRunner:
                 if result["success"]:
                     transcript = result["transcript"]
                     enriched_parts.append(
-                        f'[The user sent a voice message. 用户发送了一条语音消息，转写内容如下："{transcript}"]'
+                        f'[The user sent a voice message. Transcript: "{transcript}"]'
                     )
                 else:
                     error = result.get("error", "unknown error")
@@ -9544,31 +9536,21 @@ class GatewayRunner:
                         or error.startswith("Neither VOICE_TOOLS_OPENAI_KEY nor OPENAI_API_KEY is set")
                     ):
                         _no_stt_note = (
-                            "[The user sent a voice message but I can't listen "
-                            "to it right now — no STT provider is configured. "
-                            "A direct message has already been sent to the user "
-                            "with setup instructions. 用户发送了语音消息，但当前没有配置 STT provider，"
-                            "系统已向用户发送设置说明。"
+                            "[The user sent a voice message but No STT provider is configured "
+                            "to transcribe it. A setup message was sent to the user in chat.]"
                         )
                         if self._has_setup_skill():
-                            _no_stt_note += (
-                                " You have a skill called hermes-agent-setup "
-                                "that can help users configure Hermes features "
-                                "including voice, tools, and more. "
-                                "你可以提示用户使用 hermes-agent-setup 完成语音配置。"
-                            )
-                        _no_stt_note += "]"
+                            _no_stt_note += " You can mention `/skill hermes-agent-setup` for full setup."
                         enriched_parts.append(_no_stt_note)
                     else:
                         enriched_parts.append(
-                            "[The user sent a voice message but I had trouble "
-                            f"transcribing it. 用户发送了语音消息，但转写失败（{error}）。]"
+                            f"[The user sent a voice message but transcription failed ({error}).]"
                         )
             except Exception as e:
                 logger.error("Transcription error: %s", e)
                 enriched_parts.append(
-                    "[The user sent a voice message but something went wrong "
-                    "when I tried to listen to it. 用户发送了语音消息，但监听/转写时出错；请告知用户。]"
+                    "[The user sent a voice message but transcription raised an exception; "
+                    "tell the user to retry or check STT configuration.]"
                 )
 
         if enriched_parts:
@@ -9576,7 +9558,8 @@ class GatewayRunner:
             # Strip the empty-content placeholder from the Discord adapter
             # when we successfully transcribed the audio — it's redundant.
             _placeholder = "(The user sent a message with no text content)"
-            if user_text and user_text.strip() == _placeholder:
+            _ut = user_text.strip() if user_text else ""
+            if _ut in (_placeholder, "（用户发送了一条无正文的语音或媒体消息）"):
                 return prefix
             if user_text:
                 return f"{prefix}\n\n{user_text}"

@@ -375,6 +375,19 @@ DEFAULT_CONFIG = {
         "theme": "default",
         "tui": False,
     },
+    "cpa": {
+        "model_discovery": {
+            # When true, `/model` merges CPA channel-configured model ids into
+            # Hermes' static fallback catalog.
+            "enabled": True,
+            # Cache CPA-discovered model ids for this many seconds.
+            "cache_ttl_seconds": 60.0,
+            # Per-request timeout when querying CPA management endpoints.
+            "timeout_per_request_seconds": 0.35,
+            # Total wall-clock budget for a full discovery run across endpoints.
+            "max_total_seconds": 1.5,
+        },
+    },
     "agent": {
         "max_turns": 60,
         # Automatic continuation hard cap for long-running heavy turns.
