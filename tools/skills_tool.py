@@ -447,10 +447,6 @@ def _get_category_from_path(skill_path: Path) -> Optional[str]:
     return None
 
 
-# Token estimation — use the shared implementation from model_metadata.
-from agent.model_metadata import estimate_tokens_rough as _estimate_tokens
-
-
 def _parse_tags(tags_value) -> List[str]:
     """
     Parse tags from frontmatter value.

@@ -463,10 +463,10 @@ class TestSyncTurn:
         messages = self._get_retain_messages(provider)
         assert len(messages) == 2
         assert messages[0]["role"] == "user"
-        assert messages[0]["content"] == "hello"
+        assert messages[0]["content"] == "User: hello"
         assert "timestamp" in messages[0]
         assert messages[1]["role"] == "assistant"
-        assert messages[1]["content"] == "hi there"
+        assert messages[1]["content"] == "Assistant: hi there"
         assert "timestamp" in messages[1]
 
     def test_sync_turn_skipped_when_auto_retain_off(self, provider_with_config):
@@ -481,7 +481,7 @@ class TestSyncTurn:
         if p._sync_thread:
             p._sync_thread.join(timeout=5.0)
         item = p._client.aretain_batch.call_args.kwargs["items"][0]
-        assert item["tags"] == ["conv", "session1"]
+        assert set(item["tags"]) == {"conv", "session1", "session:test-session"}
 
     def test_sync_turn_uses_aretain_batch(self, provider):
         """sync_turn should use aretain_batch with retain_async."""
@@ -490,7 +490,7 @@ class TestSyncTurn:
             provider._sync_thread.join(timeout=5.0)
         provider._client.aretain_batch.assert_called_once()
         call_kwargs = provider._client.aretain_batch.call_args.kwargs
-        assert call_kwargs["document_id"] == "test-session"
+        assert call_kwargs["document_id"].startswith("test-session-")
         assert call_kwargs["retain_async"] is True
         assert len(call_kwargs["items"]) == 1
         assert call_kwargs["items"][0]["context"] == "conversation between Hermes Agent and the User"
@@ -553,7 +553,7 @@ class TestSyncTurn:
         if provider._sync_thread:
             provider._sync_thread.join(timeout=5.0)
         call_kwargs = provider._client.aretain_batch.call_args.kwargs
-        assert call_kwargs["document_id"] == "test-session"
+        assert call_kwargs["document_id"].startswith("test-session-")
 
     def test_sync_turn_error_does_not_raise(self, provider):
         """Errors in sync_turn should be swallowed (non-blocking)."""

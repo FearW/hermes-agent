@@ -43,11 +43,9 @@ try:
         ContentURI,
         EventID,
         EventType,
-        PaginationDirection,
         PresenceState,
         RoomCreatePreset,
         RoomID,
-        SyncToken,
         TrustState,
         UserID,
     )
@@ -56,7 +54,7 @@ except ImportError:
     # check_matrix_requirements() will return False and the adapter
     # won't be instantiated in production, but tests may exercise
     # adapter methods so stubs must have the right attributes.
-    ContentURI = EventID = RoomID = SyncToken = UserID = str  # type: ignore[misc,assignment]
+    ContentURI = EventID = RoomID = UserID = str  # type: ignore[misc,assignment]
 
     class _EventTypeStub:  # type: ignore[no-redef]
         ROOM_MESSAGE = "m.room.message"
@@ -65,12 +63,6 @@ except ImportError:
         ROOM_NAME = "m.room.name"
 
     EventType = _EventTypeStub  # type: ignore[misc,assignment]
-
-    class _PaginationDirectionStub:  # type: ignore[no-redef]
-        BACKWARD = "b"
-        FORWARD = "f"
-
-    PaginationDirection = _PaginationDirectionStub  # type: ignore[misc,assignment]
 
     class _PresenceStateStub:  # type: ignore[no-redef]
         ONLINE = "online"

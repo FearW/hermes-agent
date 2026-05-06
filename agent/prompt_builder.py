@@ -25,7 +25,6 @@ from agent.skill_utils import (
     skill_matches_platform,
 )
 from utils import atomic_json_write
-from agent.user_profile import build_user_profile_prompt
 
 logger = logging.getLogger(__name__)
 

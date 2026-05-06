@@ -26,7 +26,6 @@ try:
         LinkPreviewOptions = None
     from telegram.ext import (
         Application,
-        CommandHandler,
         CallbackQueryHandler,
         MessageHandler as TelegramMessageHandler,
         ContextTypes,
@@ -44,7 +43,6 @@ except ImportError:
     InlineKeyboardMarkup = Any
     LinkPreviewOptions = None
     Application = Any
-    CommandHandler = Any
     CallbackQueryHandler = Any
     TelegramMessageHandler = Any
     HTTPXRequest = Any

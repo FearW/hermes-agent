@@ -311,6 +311,5 @@ from hermes_cli.config.env import (
     use_anthropic_claude_code_credentials,
     save_anthropic_api_key,
     save_env_value_secure,
-    reload_env,
     get_env_value,
 )

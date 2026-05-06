@@ -489,6 +489,15 @@ class HindsightMemoryProvider(MemoryProvider):
         self._recall_fusion_precise_budget = "low"
         self._recall_fusion_broad_budget = "high"
 
+        # Hermes-side recall graph (community routing + PPR) over recalled lines.
+        self._recall_graph_enabled = True
+        self._recall_graph_ppr_enabled = True
+        self._recall_graph_community_routing = True
+        self._recall_graph_db_name = "hindsight_recall_graph.sqlite"
+        self._recall_graph_min_edge_weight = 2.0
+        self._recall_graph_rebuild_every = 15
+        self._local_graph = None
+
         # Bank
         self._bank_mission = ""
         self._bank_retain_mission: str | None = None
@@ -503,8 +512,10 @@ class HindsightMemoryProvider(MemoryProvider):
             cfg = _load_config()
             mode = cfg.get("mode", "cloud")
             if mode in ("local", "local_embedded"):
-                available, _ = _check_local_runtime()
-                return available
+                # "available" means the provider can be selected/initialized.
+                # The actual initialize() path will self-disable with a warning
+                # if the embedded runtime can't be imported (see initialize()).
+                return True
             if mode == "local_external":
                 return True
             has_key = bool(
@@ -757,6 +768,8 @@ class HindsightMemoryProvider(MemoryProvider):
             {"key": "memory_mode", "description": "Memory integration mode", "default": "hybrid", "choices": ["hybrid", "context", "tools"]},
             {"key": "recall_prefetch_method", "description": "Auto-recall method", "default": "recall", "choices": ["recall", "reflect"]},
             {"key": "retain_tags", "description": "Default tags applied to retained memories (comma-separated)", "default": ""},
+            # Back-compat alias (older configs/tests used `tags`)
+            {"key": "tags", "description": "Alias for retain_tags (comma-separated)", "default": ""},
             {"key": "retain_source", "description": "Metadata source value attached to retained memories", "default": ""},
             {"key": "retain_user_prefix", "description": "Label used before user turns in retained transcripts", "default": "User"},
             {"key": "retain_assistant_prefix", "description": "Label used before assistant turns in retained transcripts", "default": "Assistant"},
@@ -769,6 +782,12 @@ class HindsightMemoryProvider(MemoryProvider):
             {"key": "retain_context", "description": "Context label for retained memories", "default": "conversation between Hermes Agent and the User"},
             {"key": "recall_max_tokens", "description": "Maximum tokens for recall results", "default": 4096},
             {"key": "recall_max_input_chars", "description": "Maximum input query length for auto-recall", "default": 800},
+            {"key": "recall_graph_enabled", "description": "Enable Hermes-side recall graph (community routing + PPR reranking)", "default": True},
+            {"key": "recall_graph_ppr_enabled", "description": "Use Personalized PageRank to rerank recalled lines", "default": True},
+            {"key": "recall_graph_community_routing", "description": "Route recall via community summaries before PPR reranking", "default": True},
+            {"key": "recall_graph_db_name", "description": "SQLite filename under Hermes state/ for the recall graph", "default": "hindsight_recall_graph.sqlite"},
+            {"key": "recall_graph_min_edge_weight", "description": "Minimum co-occurrence edge weight to form communities", "default": 2.0},
+            {"key": "recall_graph_rebuild_every", "description": "Rebuild communities every N recall ingests", "default": 15},
             {
                 "key": "recall_fusion",
                 "description": "Single arecall, or dual (precise + broad budgets, merged with dedupe)",
@@ -1047,6 +1066,7 @@ class HindsightMemoryProvider(MemoryProvider):
         # Tags
         self._retain_tags = _normalize_retain_tags(
             self._config.get("retain_tags")
+            or self._config.get("tags")
             or os.environ.get("HINDSIGHT_RETAIN_TAGS", "")
         )
         self._tags = self._retain_tags or None
@@ -1081,6 +1101,38 @@ class HindsightMemoryProvider(MemoryProvider):
         self._recall_fusion_precise_budget = _pb if _pb in _VALID_BUDGETS else "low"
         _bb = self._config.get("recall_fusion_broad_budget", "high")
         self._recall_fusion_broad_budget = _bb if _bb in _VALID_BUDGETS else "high"
+
+        # Hermes-side recall graph (community routing + PPR reranking).
+        self._recall_graph_enabled = bool(self._config.get("recall_graph_enabled", True))
+        self._recall_graph_ppr_enabled = bool(self._config.get("recall_graph_ppr_enabled", True))
+        self._recall_graph_community_routing = bool(self._config.get("recall_graph_community_routing", True))
+        self._recall_graph_db_name = str(self._config.get("recall_graph_db_name") or self._recall_graph_db_name)
+        try:
+            self._recall_graph_min_edge_weight = float(
+                self._config.get("recall_graph_min_edge_weight", self._recall_graph_min_edge_weight)
+            )
+        except Exception:
+            self._recall_graph_min_edge_weight = 2.0
+        try:
+            self._recall_graph_rebuild_every = int(
+                self._config.get("recall_graph_rebuild_every", self._recall_graph_rebuild_every)
+            )
+        except Exception:
+            self._recall_graph_rebuild_every = 15
+
+        if self._recall_graph_enabled and self._local_graph is None:
+            try:
+                from plugins.memory.hindsight.local_graph import LocalRecallGraph
+
+                graph_path = get_hermes_home() / "state" / self._recall_graph_db_name
+                self._local_graph = LocalRecallGraph(
+                    db_path=graph_path,
+                    min_edge_weight=self._recall_graph_min_edge_weight,
+                    community_rebuild_every_ingests=self._recall_graph_rebuild_every,
+                )
+            except Exception as exc:
+                logger.debug("Failed to init Hermes-side recall graph: %s", exc, exc_info=True)
+                self._local_graph = None
 
         _client_version = "unknown"
         try:
@@ -1294,6 +1346,18 @@ class HindsightMemoryProvider(MemoryProvider):
                     )
                     lines = self._gather_recall_lines(query)
                     logger.debug("Prefetch: recall returned %d unique lines", len(lines))
+                    if lines and self._local_graph is not None and self._recall_graph_enabled:
+                        try:
+                            self._local_graph.ingest_recall_lines(lines)
+                            if self._recall_graph_ppr_enabled:
+                                lines = self._local_graph.rank_lines_ppr(
+                                    query=query,
+                                    candidate_lines=lines,
+                                    max_return=len(lines),
+                                    community_top_k=3 if self._recall_graph_community_routing else 0,
+                                )
+                        except Exception as exc:
+                            logger.debug("Local recall graph rerank failed: %s", exc, exc_info=True)
                     text = "\n".join(f"- {line}" for line in lines) if lines else ""
                 if text:
                     with self._prefetch_lock:
@@ -1687,6 +1751,12 @@ class HindsightMemoryProvider(MemoryProvider):
             except Exception:
                 pass
             self._client = None
+        if self._local_graph is not None:
+            try:
+                self._local_graph.close()
+            except Exception:
+                pass
+            self._local_graph = None
         # The module-global background event loop (_loop / _loop_thread)
         # is intentionally NOT stopped here. It is shared across every
         # HindsightMemoryProvider instance in the process — the plugin

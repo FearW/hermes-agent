@@ -42,6 +42,7 @@ try:
     from dingtalk_stream import ChatbotMessage
     from dingtalk_stream.frames import CallbackMessage, AckMessage
 
+    _ = CallbackMessage  # used for type hints / runtime payload shape
     DINGTALK_STREAM_AVAILABLE = True
 except ImportError:
     DINGTALK_STREAM_AVAILABLE = False

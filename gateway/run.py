@@ -450,7 +450,6 @@ from gateway.restart import (
 
 
 from gateway.whatsapp_identity import (
-    canonical_whatsapp_identifier as _canonical_whatsapp_identifier,  # noqa: F401
     expand_whatsapp_aliases as _expand_whatsapp_auth_aliases,
     normalize_whatsapp_identifier as _normalize_whatsapp_identifier,
 )
@@ -4612,162 +4611,222 @@ class GatewayRunner:
         turn. When the list is empty, the ``_enrich_message_with_vision``
         text path has already run and images are represented in-text.
         """
-        history = history or []
+        _ = history  # reserved: some enrichers may consult prior turns later
         message_text = event.text or ""
         has_user_supplied_text = bool(message_text.strip())
         # Reset per-call buffer; set only when native routing is chosen.
         self._pending_native_image_paths = []
 
-        _is_shared_multi_user = is_shared_multi_user_session(
+        is_shared = is_shared_multi_user_session(
             source,
             group_sessions_per_user=getattr(self.config, "group_sessions_per_user", True),
             thread_sessions_per_user=getattr(self.config, "thread_sessions_per_user", False),
         )
-        if _is_shared_multi_user and source.user_name:
-            message_text = f"[{source.user_name}] {message_text}"
+        message_text = self._maybe_prefix_shared_sender(message_text, source=source, is_shared=is_shared)
 
         if event.media_urls:
-            image_paths = []
-            audio_paths = []
-            for i, path in enumerate(event.media_urls):
-                mtype = event.media_types[i] if i < len(event.media_types) else ""
-                if mtype.startswith("image/") or event.message_type == MessageType.PHOTO:
-                    image_paths.append(path)
-                if mtype.startswith("audio/") or event.message_type in (MessageType.VOICE, MessageType.AUDIO):
-                    audio_paths.append(path)
-
+            image_paths, audio_paths = self._split_media_paths(event)
             if image_paths:
-                # Decide routing: native (attach pixels) vs text (vision_analyze
-                # pre-run + prepend description).  See agent/image_routing.py.
-                _img_mode = self._decide_image_input_mode()
-                from agent.image_routing import IMAGE_ONLY_USER_MESSAGE
-
-                _image_only_prompt = IMAGE_ONLY_USER_MESSAGE
-                if not has_user_supplied_text and _is_shared_multi_user and source.user_name:
-                    _image_only_prompt = f"[{source.user_name}] {_image_only_prompt}"
-                if _img_mode == "native":
-                    # Defer attachment to the run_conversation call site.
-                    self._pending_native_image_paths = list(image_paths)
-                    if not has_user_supplied_text:
-                        message_text = _image_only_prompt
-                    logger.info(
-                        "Image routing: native (model supports vision). %d image(s) will be attached inline.",
-                        len(image_paths),
-                    )
-                else:
-                    logger.info(
-                        "Image routing: text (mode=%s). Pre-analyzing %d image(s) via vision_analyze.",
-                        _img_mode, len(image_paths),
-                    )
-                    message_text = await self._enrich_message_with_vision(
-                        message_text if has_user_supplied_text else _image_only_prompt,
-                        image_paths,
-                    )
-
-            if audio_paths:
-                message_text = await self._enrich_message_with_transcription(
+                message_text = await self._process_inbound_images(
                     message_text,
-                    audio_paths,
+                    image_paths=image_paths,
+                    source=source,
+                    is_shared=is_shared,
+                    has_user_supplied_text=has_user_supplied_text,
                 )
-                _stt_fail_markers = (
-                    "No STT provider",
-                    "STT is disabled",
-                    "can't listen",
-                    "VOICE_TOOLS_OPENAI_KEY",
+            if audio_paths:
+                message_text = await self._process_inbound_audio(
+                    message_text,
+                    audio_paths=audio_paths,
+                    source=source,
                 )
-                if any(marker in message_text for marker in _stt_fail_markers):
-                    _stt_adapter = self.adapters.get(source.platform)
-                    _stt_meta = {"thread_id": source.thread_id} if source.thread_id else None
-                    if _stt_adapter:
-                        try:
-                            _stt_msg = "🎤 " + _user_zh.STT_USER_SETUP_HERMES
-                            if self._has_setup_skill():
-                                _stt_msg += _user_zh.STT_USER_SETUP_SKILL_HINT
-                            await _stt_adapter.send(
-                                source.chat_id,
-                                _stt_msg,
-                                metadata=_stt_meta,
-                            )
-                        except Exception:
-                            pass
 
         if event.media_urls and event.message_type == MessageType.DOCUMENT:
-            import mimetypes as _mimetypes
+            message_text = self._inject_document_notes(message_text, event)
 
-            _TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".log", ".json", ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg"}
-            for i, path in enumerate(event.media_urls):
-                mtype = event.media_types[i] if i < len(event.media_types) else ""
-                if mtype in ("", "application/octet-stream"):
-                    _ext = os.path.splitext(path)[1].lower()
-                    if _ext in _TEXT_EXTENSIONS:
-                        mtype = "text/plain"
-                    else:
-                        guessed, _ = _mimetypes.guess_type(path)
-                        if guessed:
-                            mtype = guessed
-                if not mtype.startswith(("application/", "text/")):
-                    continue
+        message_text = self._inject_reply_to_pointer(message_text, event)
 
-                basename = os.path.basename(path)
-                parts = basename.split("_", 2)
-                display_name = parts[2] if len(parts) >= 3 else basename
-                display_name = re.sub(r'[^\w.\- ]', '_', display_name)
+        message_text = await self._expand_at_context_references(
+            message_text,
+            source=source,
+        )
+        if message_text is None:
+            return None
 
-                if mtype.startswith("text/"):
-                    context_note = (
-                        f"[The user sent a text document: '{display_name}'. "
-                        f"Its content has been included below. "
-                        f"The file is also saved at: {path}]"
+        return message_text
+
+    def _maybe_prefix_shared_sender(self, message_text: str, *, source: SessionSource, is_shared: bool) -> str:
+        if is_shared and source.user_name:
+            return f"[{source.user_name}] {message_text}"
+        return message_text
+
+    def _split_media_paths(self, event: MessageEvent) -> tuple[list[str], list[str]]:
+        image_paths: list[str] = []
+        audio_paths: list[str] = []
+        for i, path in enumerate(event.media_urls or []):
+            mtype = event.media_types[i] if i < len(event.media_types or []) else ""
+            if mtype.startswith("image/") or event.message_type == MessageType.PHOTO:
+                image_paths.append(path)
+            if mtype.startswith("audio/") or event.message_type in (MessageType.VOICE, MessageType.AUDIO):
+                audio_paths.append(path)
+        return image_paths, audio_paths
+
+    async def _process_inbound_images(
+        self,
+        message_text: str,
+        *,
+        image_paths: list[str],
+        source: SessionSource,
+        is_shared: bool,
+        has_user_supplied_text: bool,
+    ) -> str:
+        # Decide routing: native (attach pixels) vs text (vision_analyze
+        # pre-run + prepend description).  See agent/image_routing.py.
+        _img_mode = self._decide_image_input_mode()
+        from agent.image_routing import IMAGE_ONLY_USER_MESSAGE
+
+        _image_only_prompt = IMAGE_ONLY_USER_MESSAGE
+        if not has_user_supplied_text and is_shared and source.user_name:
+            _image_only_prompt = f"[{source.user_name}] {_image_only_prompt}"
+
+        if _img_mode == "native":
+            # Defer attachment to the run_conversation call site.
+            self._pending_native_image_paths = list(image_paths)
+            if not has_user_supplied_text:
+                message_text = _image_only_prompt
+            logger.info(
+                "Image routing: native (model supports vision). %d image(s) will be attached inline.",
+                len(image_paths),
+            )
+            return message_text
+
+        logger.info(
+            "Image routing: text (mode=%s). Pre-analyzing %d image(s) via vision_analyze.",
+            _img_mode, len(image_paths),
+        )
+        return await self._enrich_message_with_vision(
+            message_text if has_user_supplied_text else _image_only_prompt,
+            image_paths,
+        )
+
+    async def _process_inbound_audio(
+        self,
+        message_text: str,
+        *,
+        audio_paths: list[str],
+        source: SessionSource,
+    ) -> str:
+        message_text = await self._enrich_message_with_transcription(
+            message_text,
+            audio_paths,
+        )
+        _stt_fail_markers = (
+            "No STT provider",
+            "STT is disabled",
+            "can't listen",
+            "VOICE_TOOLS_OPENAI_KEY",
+        )
+        if any(marker in message_text for marker in _stt_fail_markers):
+            _stt_adapter = self.adapters.get(source.platform)
+            _stt_meta = {"thread_id": source.thread_id} if source.thread_id else None
+            if _stt_adapter:
+                try:
+                    _stt_msg = "🎤 " + _user_zh.STT_USER_SETUP_HERMES
+                    if self._has_setup_skill():
+                        _stt_msg += _user_zh.STT_USER_SETUP_SKILL_HINT
+                    await _stt_adapter.send(
+                        source.chat_id,
+                        _stt_msg,
+                        metadata=_stt_meta,
                     )
+                except Exception:
+                    pass
+        return message_text
+
+    def _inject_document_notes(self, message_text: str, event: MessageEvent) -> str:
+        import mimetypes as _mimetypes
+
+        _TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".log", ".json", ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg"}
+        for i, path in enumerate(event.media_urls or []):
+            mtype = event.media_types[i] if i < len(event.media_types or []) else ""
+            if mtype in ("", "application/octet-stream"):
+                _ext = os.path.splitext(path)[1].lower()
+                if _ext in _TEXT_EXTENSIONS:
+                    mtype = "text/plain"
                 else:
-                    context_note = (
-                        f"[The user sent a document: '{display_name}'. "
-                        f"The file is saved at: {path}. "
-                        f"Ask the user what they'd like you to do with it.]"
-                    )
-                message_text = f"{context_note}\n\n{message_text}"
+                    guessed, _ = _mimetypes.guess_type(path)
+                    if guessed:
+                        mtype = guessed
+            if not mtype.startswith(("application/", "text/")):
+                continue
 
+            basename = os.path.basename(path)
+            parts = basename.split("_", 2)
+            display_name = parts[2] if len(parts) >= 3 else basename
+            display_name = re.sub(r"[^\w.\- ]", "_", display_name)
+
+            if mtype.startswith("text/"):
+                context_note = (
+                    f"[The user sent a text document: '{display_name}'. "
+                    f"Its content has been included below. "
+                    f"The file is also saved at: {path}]"
+                )
+            else:
+                context_note = (
+                    f"[The user sent a document: '{display_name}'. "
+                    f"The file is saved at: {path}. "
+                    f"Ask the user what they'd like you to do with it.]"
+                )
+            message_text = f"{context_note}\n\n{message_text}"
+        return message_text
+
+    def _inject_reply_to_pointer(self, message_text: str, event: MessageEvent) -> str:
         if getattr(event, "reply_to_text", None) and event.reply_to_message_id:
             # Always inject the reply-to pointer — even when the quoted text
             # already appears in history. The prefix isn't deduplication, it's
             # disambiguation: it tells the agent *which* prior message the user
-            # is referencing. History can contain the same or similar text
-            # multiple times, and without an explicit pointer the agent has to
-            # guess (or answer for both subjects). Token overhead is minimal.
+            # is referencing.
             reply_snippet = event.reply_to_text[:500]
-            message_text = f'[Replying to: "{reply_snippet}"]\n\n{message_text}'
+            return f'[Replying to: "{reply_snippet}"]\n\n{message_text}'
+        return message_text
 
-        if "@" in message_text:
-            try:
-                from agent.context_references import preprocess_context_references_async
-                from agent.model_metadata import get_model_context_length
+    async def _expand_at_context_references(
+        self,
+        message_text: str,
+        *,
+        source: SessionSource,
+    ) -> Optional[str]:
+        if "@" not in (message_text or ""):
+            return message_text
+        try:
+            from agent.context_references import preprocess_context_references_async
+            from agent.model_metadata import get_model_context_length
 
-                _msg_cwd = os.environ.get("TERMINAL_CWD", os.path.expanduser("~"))
-                _msg_runtime = _resolve_runtime_agent_kwargs()
-                _msg_ctx_len = get_model_context_length(
-                    self._model,
-                    base_url=self._base_url or _msg_runtime.get("base_url") or "",
-                    api_key=_msg_runtime.get("api_key") or "",
-                )
-                _ctx_result = await preprocess_context_references_async(
-                    message_text,
-                    cwd=_msg_cwd,
-                    context_length=_msg_ctx_len,
-                    allowed_root=_msg_cwd,
-                )
-                if _ctx_result.blocked:
-                    _adapter = self.adapters.get(source.platform)
-                    if _adapter:
-                        await _adapter.send(
-                            source.chat_id,
-                            "\n".join(_ctx_result.warnings) or _user_zh.CONTEXT_INJECTION_REFUSED,
-                        )
-                    return None
-                if _ctx_result.expanded:
-                    message_text = _ctx_result.message
-            except Exception as exc:
-                logger.debug("@ context reference expansion failed: %s", exc)
-
+            _msg_cwd = os.environ.get("TERMINAL_CWD", os.path.expanduser("~"))
+            _msg_runtime = _resolve_runtime_agent_kwargs()
+            _msg_ctx_len = get_model_context_length(
+                self._model,
+                base_url=self._base_url or _msg_runtime.get("base_url") or "",
+                api_key=_msg_runtime.get("api_key") or "",
+            )
+            _ctx_result = await preprocess_context_references_async(
+                message_text,
+                cwd=_msg_cwd,
+                context_length=_msg_ctx_len,
+                allowed_root=_msg_cwd,
+            )
+            if _ctx_result.blocked:
+                _adapter = self.adapters.get(source.platform)
+                if _adapter:
+                    await _adapter.send(
+                        source.chat_id,
+                        "\n".join(_ctx_result.warnings) or _user_zh.CONTEXT_INJECTION_REFUSED,
+                    )
+                return None
+            if _ctx_result.expanded:
+                return _ctx_result.message
+        except Exception as exc:
+            logger.debug("@ context reference expansion failed: %s", exc)
         return message_text
 
     async def _handle_message_with_agent(self, event, source, _quick_key: str, run_generation: int):
@@ -5915,7 +5974,6 @@ class GatewayRunner:
 
         # Append a random tip to the reset message
         try:
-            from hermes_cli.tips import get_random_tip
             _tip_line = "\n✦ 提示：发送 `/help` 查看命令，发送 `/commands` 分页浏览全部命令。"
         except Exception:
             _tip_line = ""

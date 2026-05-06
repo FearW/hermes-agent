@@ -18,7 +18,6 @@ from utils import atomic_json_write
 
 from agent.background_scheduler import (
     STATE_FILE,
-    AlwaysReadyProbe,
     build_scheduler,
     record_skipped_run,
 )
