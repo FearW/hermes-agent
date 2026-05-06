@@ -585,8 +585,19 @@ function Install-CPA {
     $exe = Join-Path $cpaDir "CLIProxyAPI.exe"
 
     if (-not (Test-Path $exe)) {
-        $asset = "CLIProxyAPI_6.9.49_windows_amd64.zip"
-        $url = "https://github.com/Fwindy/CLIProxyAPI/releases/download/v6.9.49/$asset"
+        # Auto-detect latest version from GitHub API
+        Write-Info "Fetching latest CLIProxyAPI version..."
+        $version = "6.9.49"
+        try {
+            $release = Invoke-RestMethod -Uri "https://api.github.com/repos/Fwindy/CLIProxyAPI/releases/latest" -UseBasicParsing
+            $version = $release.tag_name -replace '^v', ''
+            Write-Success "Found latest version: v$version"
+        } catch {
+            Write-Warn "Failed to fetch latest version, falling back to v6.9.49"
+        }
+        
+        $asset = "CLIProxyAPI_${version}_windows_amd64.zip"
+        $url = "https://github.com/Fwindy/CLIProxyAPI/releases/download/v${version}/$asset"
         $zip = Join-Path $env:TEMP $asset
         try {
             Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
@@ -596,7 +607,7 @@ function Install-CPA {
                 Copy-Item $found.FullName $exe -Force
             }
             if (Test-Path $exe) {
-                Write-Success "CPA installed: $exe"
+                Write-Success "CPA installed: $exe (v$version)"
             } else {
                 Write-Warn "CPA archive downloaded but executable was not found. Check: $cpaDir"
                 return
