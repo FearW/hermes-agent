@@ -481,6 +481,11 @@ def _provider_models_table() -> dict[str, list[str]]:
     return _FULL_PROVIDER_MODELS
 
 
+# Backwards-compatible export used by hermes_cli.main and tests.  Keep this as
+# a lazy mapping so non-core provider lists are still built on first access.
+_PROVIDER_MODELS = _provider_models_table()
+
+
 def _static_models_for_provider(provider: str) -> list[str]:
     """Return the static fallback models for *provider* (lazy for non-core)."""
     if not provider:
