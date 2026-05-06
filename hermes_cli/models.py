@@ -153,7 +153,7 @@ def _xai_curated_models() -> list[str]:
     return list(_XAI_STATIC_FALLBACK)
 
 
-_CORE_PROVIDER_MODELS: dict[str, list[str]] = {
+_PROVIDER_MODELS: dict[str, list[str]] = {
     # CPA / CLIProxyAPI (default in this fork)
     "cliproxyapi": [
         "gpt-5(8192)",
@@ -236,12 +236,6 @@ _CORE_PROVIDER_MODELS: dict[str, list[str]] = {
     # Vercel AI Gateway: derived from curated snapshot, small enough to keep hot.
     "ai-gateway": [mid for mid, _ in VERCEL_AI_GATEWAY_MODELS],
 }
-
-# Full provider catalog is intentionally lazy-loaded to reduce resident memory
-# for CPA-only users. Non-core provider lists are only constructed when a code
-# path actually needs them (e.g. setup/model picker for a specific provider).
-_FULL_PROVIDER_MODELS: dict[str, list[str]] | None = None
-
 
 def _non_core_provider_models() -> dict[str, list[str]]:
     """Return non-core static provider catalogs.
@@ -471,28 +465,22 @@ def _non_core_provider_models() -> dict[str, list[str]]:
     }
 
 
+# Preserve the historical public module-level table.  CPA-specific dynamic
+# discovery augments lookup results elsewhere; it must not replace this export
+# because setup, tests, and older integrations import it directly.
+_PROVIDER_MODELS.update(_non_core_provider_models())
+
+
 def _provider_models_table() -> dict[str, list[str]]:
-    """Return the full provider -> model_ids mapping (lazy)."""
-    global _FULL_PROVIDER_MODELS
-    if _FULL_PROVIDER_MODELS is None:
-        table = dict(_CORE_PROVIDER_MODELS)
-        table.update(_non_core_provider_models())
-        _FULL_PROVIDER_MODELS = table
-    return _FULL_PROVIDER_MODELS
-
-
-# Backwards-compatible export used by hermes_cli.main and tests.  Keep this as
-# a lazy mapping so non-core provider lists are still built on first access.
-_PROVIDER_MODELS = _provider_models_table()
+    """Return the provider -> model_ids mapping."""
+    return _PROVIDER_MODELS
 
 
 def _static_models_for_provider(provider: str) -> list[str]:
-    """Return the static fallback models for *provider* (lazy for non-core)."""
+    """Return the static fallback models for *provider*."""
     if not provider:
         return []
-    if provider in _CORE_PROVIDER_MODELS:
-        return _CORE_PROVIDER_MODELS.get(provider, [])
-    return _provider_models_table().get(provider, [])
+    return _PROVIDER_MODELS.get(provider, [])
 
 # ---------------------------------------------------------------------------
 # CPA channel model discovery (CPA-only forks)
