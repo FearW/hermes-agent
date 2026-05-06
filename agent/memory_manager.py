@@ -31,12 +31,173 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 from agent.memory_provider import MemoryProvider
 from tools.registry import tool_error
 
 logger = logging.getLogger(__name__)
+
+_PREFETCH_TRUNC_SUFFIX = "[... truncated ...]"
+
+
+def _merge_prefetch_segments_bounded(
+    segments: List[Tuple[str, str]], max_chars: int
+) -> Tuple[str, bool, int]:
+    """Merge provider prefetch segments to at most *max_chars* (UTF-8/code units).
+
+    Providers earlier in *segments* take priority. If a segment must be cut,
+    ``_PREFETCH_TRUNC_SUFFIX`` is appended (English, for the model only).
+
+    Returns ``(merged_text, was_truncated, raw_total_chars)``.
+    """
+    if not segments:
+        return "", False, 0
+    raw_joined = "\n\n".join(text for _, text in segments)
+    raw_total = len(raw_joined)
+    if raw_total <= max_chars:
+        return raw_joined, False, raw_total
+
+    mlen = len(_PREFETCH_TRUNC_SUFFIX)
+    chunks: List[str] = []
+    pos = 0
+    for _name, text in segments:
+        sep = "\n\n" if chunks else ""
+        sl = len(sep)
+        room = max_chars - pos - sl
+        if room <= 0:
+            break
+        if len(text) <= room:
+            chunks.append(sep + text)
+            pos += sl + len(text)
+            continue
+        # Truncate this segment; need room for suffix (avoid suffix-only output).
+        if room <= mlen:
+            break
+        take = room - mlen
+        if take <= 0:
+            break
+        chunks.append(sep + text[:take] + _PREFETCH_TRUNC_SUFFIX)
+        break
+    merged = "".join(chunks)
+    truncated = raw_total > max_chars and len(merged) < raw_total
+    return merged, truncated, raw_total
+
+
+def merge_episodic_into_prefetch(
+    episodic_excerpt: str,
+    provider_prefetch: str,
+    max_chars: int,
+) -> Tuple[str, bool]:
+    """Prepend episodic excerpt, then provider recall. Trims provider text if needed.
+
+    When *max_chars* > 0, the episodic block (with English header) is kept in
+    full when possible; *provider_prefetch* is truncated from the end with
+    ``_PREFETCH_TRUNC_SUFFIX`` if the combined text exceeds *max_chars*.
+
+    Returns ``(merged_text, provider_text_was_trimmed)``.
+    """
+    ep = (episodic_excerpt or "").strip()
+    mem = (provider_prefetch or "").strip()
+    if not ep:
+        return mem, False
+    sep = "\n\n"
+    header = "[Episodic context: previous user/assistant turn excerpt]\n"
+    block = header + ep
+    if not mem:
+        if max_chars > 0 and len(block) > max_chars:
+            return block[:max_chars], False
+        return block, False
+    combined = f"{block}{sep}{mem}"
+    if max_chars <= 0 or len(combined) <= max_chars:
+        return combined, False
+    mlen = len(_PREFETCH_TRUNC_SUFFIX)
+    room_for_mem = max_chars - len(block) - len(sep)
+    if room_for_mem <= mlen:
+        if max_chars >= len(block):
+            return block, True
+        return block[:max_chars], True
+    take = room_for_mem - mlen
+    if len(mem) <= take:
+        return f"{block}{sep}{mem}"[:max_chars], False
+    trimmed_mem = mem[:take] + _PREFETCH_TRUNC_SUFFIX
+    return f"{block}{sep}{trimmed_mem}", True
+
+
+def _message_text_content(msg: Dict[str, Any]) -> str:
+    """Extract plain text from an OpenAI-style message."""
+    c = msg.get("content")
+    if isinstance(c, str):
+        return c
+    if isinstance(c, list):
+        parts: List[str] = []
+        for b in c:
+            if isinstance(b, dict) and b.get("type") == "text":
+                parts.append(str(b.get("text") or ""))
+        return "\n".join(parts)
+    return ""
+
+
+def extract_previous_turn_excerpt(
+    messages: List[Dict[str, Any]],
+    current_user_idx: int,
+    max_chars: int,
+) -> str:
+    """Build a short excerpt of the turn before the current user message."""
+    if max_chars <= 0 or current_user_idx <= 0:
+        return ""
+    assistant_text: Optional[str] = None
+    user_text: Optional[str] = None
+    idx = current_user_idx - 1
+    while idx >= 0:
+        m = messages[idx]
+        if not isinstance(m, dict):
+            idx -= 1
+            continue
+        role = m.get("role")
+        if role == "assistant" and assistant_text is None:
+            assistant_text = _message_text_content(m).strip()
+            idx -= 1
+            continue
+        if role == "user" and assistant_text is not None and user_text is None:
+            user_text = _message_text_content(m).strip()
+            break
+        idx -= 1
+    if not assistant_text and not user_text:
+        return ""
+    parts = []
+    if user_text:
+        parts.append(f"User: {user_text}")
+    if assistant_text:
+        parts.append(f"Assistant: {assistant_text}")
+    body = "\n".join(parts)
+    if len(body) <= max_chars:
+        return body
+    return body[: max_chars - len(_PREFETCH_TRUNC_SUFFIX)] + _PREFETCH_TRUNC_SUFFIX
+
+
+LAST_PREFETCH_SNAPSHOT_NAME = "last_memory_prefetch.json"
+
+
+def write_last_prefetch_snapshot(hermes_home: str | Path, report: Dict[str, Any]) -> None:
+    """Persist last prefetch diagnostics for ``hermes memory doctor``."""
+    home = Path(hermes_home)
+    state_dir = home / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    path = state_dir / LAST_PREFETCH_SNAPSHOT_NAME
+    path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def load_last_prefetch_snapshot(hermes_home: str | Path) -> Optional[Dict[str, Any]]:
+    path = Path(hermes_home) / "state" / LAST_PREFETCH_SNAPSHOT_NAME
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +312,7 @@ class MemoryManager:
         self._providers: List[MemoryProvider] = []
         self._tool_to_provider: Dict[str, MemoryProvider] = {}
         self._has_external: bool = False  # True once a non-builtin provider is added
+        self.last_prefetch_report: Optional[Dict[str, Any]] = None
 
     # -- Registration --------------------------------------------------------
 
@@ -235,24 +397,100 @@ class MemoryManager:
 
     # -- Prefetch / recall ---------------------------------------------------
 
-    def prefetch_all(self, query: str, *, session_id: str = "") -> str:
+    def prefetch_all(
+        self,
+        query: str,
+        *,
+        session_id: str = "",
+        max_chars: Optional[int] = None,
+        prefetch_debug: bool = False,
+    ) -> str:
         """Collect prefetch context from all providers.
 
-        Returns merged context text labeled by provider. Empty providers
-        are skipped. Failures in one provider don't block others.
+        Returns merged context text. Empty providers are skipped. Failures in
+        one provider don't block others.
+
+        When *max_chars* is a positive integer, the merged text is capped by
+        provider registration order (earlier providers win). When *max_chars*
+        is ``None``, zero, or negative, no cap is applied (legacy behavior).
+
+        *prefetch_debug* logs per-provider sizes at DEBUG (English).
+
+        Populates ``last_prefetch_report`` (JSON-serializable dict) for
+        ``write_last_prefetch_snapshot`` / ``hermes memory doctor``.
         """
-        parts = []
+        segments: List[Tuple[str, str]] = []
         for provider in self._providers:
             try:
                 result = provider.prefetch(query, session_id=session_id)
                 if result and result.strip():
-                    parts.append(result)
+                    segments.append((provider.name, result))
             except Exception as e:
                 logger.debug(
                     "Memory provider '%s' prefetch failed (non-fatal): %s",
                     provider.name, e,
                 )
-        return "\n\n".join(parts)
+
+        if prefetch_debug and segments:
+            logger.debug(
+                "Memory prefetch raw segment sizes: %s",
+                ", ".join(f"{n}:{len(t)}" for n, t in segments),
+            )
+
+        if not segments:
+            self.last_prefetch_report = {
+                "version": 1,
+                "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                "session_id": session_id or "",
+                "query_chars": len(query),
+                "prefetch_debug": prefetch_debug,
+                "max_chars": max_chars if max_chars and max_chars > 0 else None,
+                "truncated_by_provider_budget": False,
+                "raw_merged_chars": 0,
+                "provider_merged_chars": 0,
+                "providers": [],
+            }
+            return ""
+
+        if max_chars is None or max_chars <= 0:
+            merged = "\n\n".join(t for _, t in segments)
+            raw_total = len(merged)
+            self.last_prefetch_report = {
+                "version": 1,
+                "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                "session_id": session_id or "",
+                "query_chars": len(query),
+                "prefetch_debug": prefetch_debug,
+                "max_chars": None,
+                "truncated_by_provider_budget": False,
+                "raw_merged_chars": raw_total,
+                "provider_merged_chars": len(merged),
+                "providers": [{"name": n, "chars": len(t)} for n, t in segments],
+            }
+            return merged
+
+        merged, truncated, raw_total = _merge_prefetch_segments_bounded(segments, max_chars)
+        self.last_prefetch_report = {
+            "version": 1,
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "session_id": session_id or "",
+            "query_chars": len(query),
+            "prefetch_debug": prefetch_debug,
+            "max_chars": max_chars,
+            "truncated_by_provider_budget": truncated,
+            "raw_merged_chars": raw_total,
+            "provider_merged_chars": len(merged),
+            "providers": [{"name": n, "chars": len(t)} for n, t in segments],
+        }
+        if truncated:
+            provider_summary = ",".join(f"{n}:{len(t)}" for n, t in segments)
+            logger.info(
+                "Memory prefetch truncated: raw_total_chars=%d max_chars=%d providers=%s",
+                raw_total,
+                max_chars,
+                provider_summary,
+            )
+        return merged
 
     def queue_prefetch_all(self, query: str, *, session_id: str = "") -> None:
         """Queue background prefetch on all providers for the next turn."""

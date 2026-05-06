@@ -5,7 +5,13 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from agent.memory_provider import MemoryProvider
-from agent.memory_manager import MemoryManager
+from agent.memory_manager import (
+    MemoryManager,
+    extract_previous_turn_excerpt,
+    load_last_prefetch_snapshot,
+    merge_episodic_into_prefetch,
+    write_last_prefetch_snapshot,
+)
 
 # ---------------------------------------------------------------------------
 # Concrete test provider
@@ -217,6 +223,107 @@ class TestMemoryManager:
 
         result = mgr.prefetch_all("query")
         assert result == "Has memories"
+
+    def test_prefetch_unbounded_matches_join(self):
+        """max_chars <= 0 or None preserves legacy full merge."""
+        mgr = MemoryManager()
+        p1 = FakeMemoryProvider("builtin")
+        p1._prefetch_result = "alpha"
+        p2 = FakeMemoryProvider("external")
+        p2._prefetch_result = "beta"
+        mgr.add_provider(p1)
+        mgr.add_provider(p2)
+        assert mgr.prefetch_all("q", max_chars=None) == "alpha\n\nbeta"
+        assert mgr.prefetch_all("q", max_chars=0) == "alpha\n\nbeta"
+        assert mgr.prefetch_all("q", max_chars=-1) == "alpha\n\nbeta"
+
+    def test_prefetch_max_chars_prioritizes_earlier_providers(self):
+        mgr = MemoryManager()
+        p1 = FakeMemoryProvider("builtin")
+        p1._prefetch_result = "A" * 30
+        p2 = FakeMemoryProvider("external")
+        p2._prefetch_result = "B" * 30
+        mgr.add_provider(p1)
+        mgr.add_provider(p2)
+        # raw = 30 + 2 + 30 = 62; cap 40 => keep first block only (sep+next needs >10 room)
+        out = mgr.prefetch_all("q", max_chars=40)
+        assert len(out) <= 40
+        assert out == "A" * 30
+
+    def test_prefetch_truncates_within_segment_with_suffix(self):
+        mgr = MemoryManager()
+        p1 = FakeMemoryProvider("ext")
+        p1._prefetch_result = "X" * 100
+        mgr.add_provider(p1)
+        out = mgr.prefetch_all("q", max_chars=50)
+        assert len(out) == 50
+        assert out.endswith("[... truncated ...]")
+        head = 50 - len("[... truncated ...]")
+        assert out[:head] == "X" * head
+
+    def test_prefetch_debug_logs_segment_sizes(self, caplog):
+        import logging
+
+        caplog.set_level(logging.DEBUG)
+        mgr = MemoryManager()
+        p1 = FakeMemoryProvider("builtin")
+        p1._prefetch_result = "hi"
+        mgr.add_provider(p1)
+        mgr.prefetch_all("q", prefetch_debug=True)
+        assert "Memory prefetch raw segment sizes" in caplog.text
+        assert "builtin:2" in caplog.text
+
+    def test_prefetch_truncation_logs_info(self, caplog):
+        import logging
+
+        caplog.set_level(logging.INFO)
+        mgr = MemoryManager()
+        p1 = FakeMemoryProvider("a")
+        p1._prefetch_result = "Z" * 50
+        p2 = FakeMemoryProvider("b")
+        p2._prefetch_result = "Y" * 50
+        mgr.add_provider(p1)
+        mgr.add_provider(p2)
+        mgr.prefetch_all("q", max_chars=40)
+        assert "Memory prefetch truncated" in caplog.text
+        assert "raw_total_chars=" in caplog.text
+
+    def test_prefetch_all_populates_last_prefetch_report(self):
+        mgr = MemoryManager()
+        p = FakeMemoryProvider("ext")
+        p._prefetch_result = "hello"
+        mgr.add_provider(p)
+        mgr.prefetch_all("query", session_id="s1", max_chars=100)
+        assert mgr.last_prefetch_report is not None
+        assert mgr.last_prefetch_report["session_id"] == "s1"
+        assert mgr.last_prefetch_report["provider_merged_chars"] == 5
+        assert mgr.last_prefetch_report["providers"] == [{"name": "ext", "chars": 5}]
+
+    def test_write_load_prefetch_snapshot(self, tmp_path):
+        home = tmp_path / ".hermes"
+        home.mkdir()
+        write_last_prefetch_snapshot(home, {"version": 1, "x": 2})
+        loaded = load_last_prefetch_snapshot(home)
+        assert loaded == {"version": 1, "x": 2}
+
+    def test_merge_episodic_trims_provider_tail(self):
+        hdr = "[Episodic context: previous user/assistant turn excerpt]\n"
+        ep = "User: hi\nAssistant: there"
+        mem = "x" * 200
+        out, trimmed = merge_episodic_into_prefetch(ep, mem, max_chars=len(hdr) + len(ep) + 2 + 80)
+        assert trimmed
+        assert len(out) <= len(hdr) + len(ep) + 2 + 80
+        assert "User: hi" in out
+        assert "[... truncated ...]" in out
+
+    def test_extract_previous_turn_excerpt(self):
+        msgs = [
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": "second"},
+            {"role": "user", "content": "current"},
+        ]
+        ex = extract_previous_turn_excerpt(msgs, 2, 500)
+        assert "first" in ex and "second" in ex
 
     def test_queue_prefetch_all(self):
         mgr = MemoryManager()

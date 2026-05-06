@@ -973,7 +973,7 @@ class SlashCommandCompleter(Completer):
         except Exception:
             pass
 
-    def get_completions(self, document, complete_event):
+    def get_completions(self, document, _complete_event):
         text = document.text_before_cursor
         if not text.startswith("/"):
             # Try @ context completion (Claude Code-style)

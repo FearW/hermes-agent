@@ -645,6 +645,7 @@ def skills_categories(verbose: bool = False, task_id: str = None) -> str:
         JSON string with list of categories and their descriptions
     """
     try:
+        _ = verbose  # Reserved for future non-default listing modes.
         # Use module-level SKILLS_DIR (respects monkeypatching) + external dirs
         all_dirs = [SKILLS_DIR] if SKILLS_DIR.exists() else []
         try:

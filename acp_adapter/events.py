@@ -127,7 +127,7 @@ def make_step_cb(
         step_callback(api_call_count: int, prev_tools: list)
     """
 
-    def _step(api_call_count: int, prev_tools: Any = None) -> None:
+    def _step(_api_call_count: int, prev_tools: Any = None) -> None:
         if prev_tools and isinstance(prev_tools, list):
             for tool_info in prev_tools:
                 tool_name = None

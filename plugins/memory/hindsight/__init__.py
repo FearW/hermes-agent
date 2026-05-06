@@ -484,6 +484,10 @@ class HindsightMemoryProvider(MemoryProvider):
         self._recall_types: list[str] | None = None
         self._recall_prompt_preamble = ""
         self._recall_max_input_chars = 800
+        # Dual-channel recall: two arecall passes (default: single, backward compatible).
+        self._recall_fusion = "single"
+        self._recall_fusion_precise_budget = "low"
+        self._recall_fusion_broad_budget = "high"
 
         # Bank
         self._bank_mission = ""
@@ -765,6 +769,24 @@ class HindsightMemoryProvider(MemoryProvider):
             {"key": "retain_context", "description": "Context label for retained memories", "default": "conversation between Hermes Agent and the User"},
             {"key": "recall_max_tokens", "description": "Maximum tokens for recall results", "default": 4096},
             {"key": "recall_max_input_chars", "description": "Maximum input query length for auto-recall", "default": 800},
+            {
+                "key": "recall_fusion",
+                "description": "Single arecall, or dual (precise + broad budgets, merged with dedupe)",
+                "default": "single",
+                "choices": ["single", "dual"],
+            },
+            {
+                "key": "recall_fusion_precise_budget",
+                "description": "First pass budget when recall_fusion is dual (tighter retrieval)",
+                "default": "low",
+                "choices": ["low", "mid", "high"],
+            },
+            {
+                "key": "recall_fusion_broad_budget",
+                "description": "Second pass budget when recall_fusion is dual (broader retrieval)",
+                "default": "high",
+                "choices": ["low", "mid", "high"],
+            },
             {"key": "recall_prompt_preamble", "description": "Custom preamble for recalled memories in context"},
             {"key": "timeout", "description": "API request timeout in seconds", "default": _DEFAULT_TIMEOUT},
             {"key": "idle_timeout", "description": "Embedded daemon idle timeout in seconds (0 disables auto-shutdown)", "default": _DEFAULT_IDLE_TIMEOUT, "when": {"mode": "local_embedded"}},
@@ -1053,14 +1075,31 @@ class HindsightMemoryProvider(MemoryProvider):
         self._recall_max_input_chars = int(self._config.get("recall_max_input_chars", 800))
         self._retain_async = self._config.get("retain_async", True)
 
+        fusion = self._config.get("recall_fusion", "single")
+        self._recall_fusion = fusion if fusion in ("single", "dual") else "single"
+        _pb = self._config.get("recall_fusion_precise_budget", "low")
+        self._recall_fusion_precise_budget = _pb if _pb in _VALID_BUDGETS else "low"
+        _bb = self._config.get("recall_fusion_broad_budget", "high")
+        self._recall_fusion_broad_budget = _bb if _bb in _VALID_BUDGETS else "high"
+
         _client_version = "unknown"
         try:
             from importlib.metadata import version as pkg_version
             _client_version = pkg_version("hindsight-client")
         except Exception:
             pass
-        logger.info("Hindsight initialized: mode=%s, api_url=%s, bank=%s, budget=%s, memory_mode=%s, prefetch_method=%s, client=%s",
-                     self._mode, self._api_url, self._bank_id, self._budget, self._memory_mode, self._prefetch_method, _client_version)
+        logger.info(
+            "Hindsight initialized: mode=%s, api_url=%s, bank=%s, budget=%s, memory_mode=%s, "
+            "prefetch_method=%s, recall_fusion=%s, client=%s",
+            self._mode,
+            self._api_url,
+            self._bank_id,
+            self._budget,
+            self._memory_mode,
+            self._prefetch_method,
+            self._recall_fusion,
+            _client_version,
+        )
         if self._bank_id_template:
             logger.debug("Hindsight bank resolved from template %r: profile=%s workspace=%s platform=%s user=%s -> bank=%s",
                          self._bank_id_template, self._agent_identity, self._agent_workspace,
@@ -1139,6 +1178,74 @@ class HindsightMemoryProvider(MemoryProvider):
             f"hindsight_retain to store facts."
         )
 
+    def _recall_base_kwargs(self, query: str) -> dict[str, Any]:
+        """Shared arecall parameters (bank, query, optional tags/types)."""
+        kwargs: dict[str, Any] = {"bank_id": self._bank_id, "query": query}
+        if self._recall_tags:
+            kwargs["tags"] = self._recall_tags
+            kwargs["tags_match"] = self._recall_tags_match
+        if self._recall_types:
+            kwargs["types"] = self._recall_types
+        return kwargs
+
+    def _merge_recall_result_lists(self, *responses: Any) -> list[str]:
+        """Merge multiple arecall responses in order; dedupe by normalized text (precise first)."""
+        seen: set[str] = set()
+        out: list[str] = []
+        for resp in responses:
+            rows = getattr(resp, "results", None) or []
+            for r in rows:
+                t = (getattr(r, "text", None) or "").strip()
+                if not t:
+                    continue
+                key = " ".join(t.lower().split())
+                if len(key) > 4000:
+                    key = key[:4000]
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(t)
+        return out
+
+    def _gather_recall_lines(self, query: str) -> list[str]:
+        """Run arecall (single or dual-channel) and return memory text lines in fuse order."""
+        if self._recall_fusion != "dual":
+            base = self._recall_base_kwargs(query)
+            recall_kwargs = {
+                **base,
+                "budget": self._budget,
+                "max_tokens": self._recall_max_tokens,
+            }
+            resp = self._run_hindsight_operation(lambda client: client.arecall(**recall_kwargs))
+            rows = getattr(resp, "results", None) or []
+            return [r.text.strip() for r in rows if getattr(r, "text", None) and str(r.text).strip()]
+
+        # Dual: narrow pass + broad pass (~half max_tokens each to keep cost near single-call).
+        half_tokens = max(256, int(self._recall_max_tokens) // 2)
+        base = self._recall_base_kwargs(query)
+        precise_kw = {
+            **base,
+            "budget": self._recall_fusion_precise_budget,
+            "max_tokens": half_tokens,
+        }
+        broad_kw = {
+            **base,
+            "budget": self._recall_fusion_broad_budget,
+            "max_tokens": half_tokens,
+        }
+        resp_p = self._run_hindsight_operation(lambda client: client.arecall(**precise_kw))
+        resp_b = self._run_hindsight_operation(lambda client: client.arecall(**broad_kw))
+        merged = self._merge_recall_result_lists(resp_p, resp_b)
+        n_p = len(getattr(resp_p, "results", None) or [])
+        n_b = len(getattr(resp_b, "results", None) or [])
+        logger.debug(
+            "Hindsight dual recall: precise_results=%d broad_results=%d merged_unique=%d",
+            n_p,
+            n_b,
+            len(merged),
+        )
+        return merged
+
     def prefetch(self, query: str, *, session_id: str = "") -> str:
         if self._prefetch_thread and self._prefetch_thread.is_alive():
             logger.debug("Prefetch: waiting for background thread to complete")
@@ -1178,21 +1285,16 @@ class HindsightMemoryProvider(MemoryProvider):
                     resp = self._run_hindsight_operation(lambda client: client.areflect(bank_id=self._bank_id, query=query, budget=self._budget))
                     text = resp.text or ""
                 else:
-                    recall_kwargs: dict = {
-                        "bank_id": self._bank_id, "query": query,
-                        "budget": self._budget, "max_tokens": self._recall_max_tokens,
-                    }
-                    if self._recall_tags:
-                        recall_kwargs["tags"] = self._recall_tags
-                        recall_kwargs["tags_match"] = self._recall_tags_match
-                    if self._recall_types:
-                        recall_kwargs["types"] = self._recall_types
-                    logger.debug("Prefetch: calling recall (bank=%s, query_len=%d, budget=%s)",
-                                 self._bank_id, len(query), self._budget)
-                    resp = self._run_hindsight_operation(lambda client: client.arecall(**recall_kwargs))
-                    num_results = len(resp.results) if resp.results else 0
-                    logger.debug("Prefetch: recall returned %d results", num_results)
-                    text = "\n".join(f"- {r.text}" for r in resp.results if r.text) if resp.results else ""
+                    logger.debug(
+                        "Prefetch: calling recall (bank=%s, query_len=%d, fusion=%s, budget=%s)",
+                        self._bank_id,
+                        len(query),
+                        self._recall_fusion,
+                        self._budget,
+                    )
+                    lines = self._gather_recall_lines(query)
+                    logger.debug("Prefetch: recall returned %d unique lines", len(lines))
+                    text = "\n".join(f"- {line}" for line in lines) if lines else ""
                 if text:
                     with self._prefetch_lock:
                         self._prefetch_result = text
@@ -1380,24 +1482,19 @@ class HindsightMemoryProvider(MemoryProvider):
             if not query:
                 return tool_error("Missing required parameter: query")
             try:
-                recall_kwargs: dict = {
-                    "bank_id": self._bank_id, "query": query, "budget": self._budget,
-                    "max_tokens": self._recall_max_tokens,
-                }
-                if self._recall_tags:
-                    recall_kwargs["tags"] = self._recall_tags
-                    recall_kwargs["tags_match"] = self._recall_tags_match
-                if self._recall_types:
-                    recall_kwargs["types"] = self._recall_types
-                logger.debug("Tool hindsight_recall: bank=%s, query_len=%d, budget=%s",
-                             self._bank_id, len(query), self._budget)
-                resp = self._run_hindsight_operation(lambda client: client.arecall(**recall_kwargs))
-                num_results = len(resp.results) if resp.results else 0
-                logger.debug("Tool hindsight_recall: %d results", num_results)
-                if not resp.results:
+                logger.debug(
+                    "Tool hindsight_recall: bank=%s, query_len=%d, budget=%s, fusion=%s",
+                    self._bank_id,
+                    len(query),
+                    self._budget,
+                    self._recall_fusion,
+                )
+                lines = self._gather_recall_lines(query)
+                logger.debug("Tool hindsight_recall: %d unique lines", len(lines))
+                if not lines:
                     return json.dumps({"result": "No relevant memories found."})
-                lines = [f"{i}. {r.text}" for i, r in enumerate(resp.results, 1)]
-                return json.dumps({"result": "\n".join(lines)})
+                numbered = [f"{i}. {t}" for i, t in enumerate(lines, 1)]
+                return json.dumps({"result": "\n".join(numbered)})
             except Exception as e:
                 logger.warning("hindsight_recall failed: %s", e, exc_info=True)
                 return tool_error(f"Failed to search memory: {e}")

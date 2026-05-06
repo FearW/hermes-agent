@@ -75,6 +75,9 @@ Config file: `~/.hermes/hindsight/config.json`
 | `recall_prompt_preamble` | — | Custom preamble for recalled memories in context |
 | `recall_tags` | — | Tags to filter when searching memories |
 | `recall_tags_match` | `any` | Tag matching mode: `any` / `all` / `any_strict` / `all_strict` |
+| `recall_fusion` | `single` | `single` — one `arecall` (default). `dual` — two passes: a **precise** recall with `recall_fusion_precise_budget` (default `low`) plus a **broad** pass with `recall_fusion_broad_budget` (default `high`), then merge with duplicate lines removed (precise results first). Splits `recall_max_tokens` across the two calls (~half each). |
+| `recall_fusion_precise_budget` | `low` | Budget for the first pass when `recall_fusion` is `dual` (`low` / `mid` / `high`). |
+| `recall_fusion_broad_budget` | `high` | Budget for the second pass when `recall_fusion` is `dual`. |
 | `auto_recall` | `true` | Automatically recall memories before each turn |
 
 ### Retain

@@ -1764,6 +1764,13 @@ class AIAgent:
         # broad pseudo-public config object on the agent instance.
         self._aux_compression_context_length_config = None
 
+        # Memory provider prefetch budget (<memory-context> injection), English logs.
+        self._memory_prefetch_char_limit = 6000
+        self._memory_prefetch_debug = False
+        self._memory_prefetch_snapshot = True
+        self._memory_prefetch_snapshot_preview_chars = 400
+        self._memory_episodic_trace_chars = 0
+
         # Persistent memory (MEMORY.md + USER.md) -- loaded from disk
         self._memory_store = None
         self._memory_enabled = False
@@ -1787,6 +1794,28 @@ class AIAgent:
                         user_char_limit=mem_config.get("user_char_limit", 1375),
                     )
                     self._memory_store.load_from_disk()
+                try:
+                    self._memory_prefetch_char_limit = int(
+                        mem_config.get("prefetch_char_limit", self._memory_prefetch_char_limit)
+                    )
+                except (TypeError, ValueError):
+                    self._memory_prefetch_char_limit = 6000
+                self._memory_prefetch_debug = bool(mem_config.get("prefetch_debug", False))
+                self._memory_prefetch_snapshot = bool(mem_config.get("prefetch_snapshot", True))
+                try:
+                    self._memory_prefetch_snapshot_preview_chars = max(
+                        0,
+                        int(mem_config.get("prefetch_snapshot_preview_chars", 400)),
+                    )
+                except (TypeError, ValueError):
+                    self._memory_prefetch_snapshot_preview_chars = 400
+                try:
+                    self._memory_episodic_trace_chars = max(
+                        0,
+                        int(mem_config.get("episodic_trace_chars", 0)),
+                    )
+                except (TypeError, ValueError):
+                    self._memory_episodic_trace_chars = 0
             except Exception:
                 pass  # Memory is optional -- don't break agent init
         
@@ -10789,7 +10818,50 @@ class AIAgent:
         if self._memory_manager:
             try:
                 _query = original_user_message if isinstance(original_user_message, str) else ""
-                _ext_prefetch_cache = self._memory_manager.prefetch_all(_query) or ""
+                _ext_prefetch_cache = (
+                    self._memory_manager.prefetch_all(
+                        _query,
+                        session_id=self.session_id or "",
+                        max_chars=self._memory_prefetch_char_limit,
+                        prefetch_debug=self._memory_prefetch_debug,
+                    )
+                    or ""
+                )
+                _episodic_excerpt = ""
+                _episodic_trimmed_mem = False
+                if self._memory_episodic_trace_chars > 0:
+                    from agent.memory_manager import (
+                        extract_previous_turn_excerpt,
+                        merge_episodic_into_prefetch,
+                    )
+
+                    _episodic_excerpt = extract_previous_turn_excerpt(
+                        messages,
+                        current_turn_user_idx,
+                        self._memory_episodic_trace_chars,
+                    )
+                    _ext_prefetch_cache, _episodic_trimmed_mem = merge_episodic_into_prefetch(
+                        _episodic_excerpt,
+                        _ext_prefetch_cache,
+                        self._memory_prefetch_char_limit,
+                    )
+
+                if self._memory_prefetch_snapshot and self._memory_manager.last_prefetch_report:
+                    from agent.memory_manager import write_last_prefetch_snapshot
+                    try:
+                        _rep = dict(self._memory_manager.last_prefetch_report)
+                        _rep["user_turn"] = self._user_turn_count
+                        _rep["episodic_excerpt_chars"] = len(_episodic_excerpt)
+                        _rep["provider_trimmed_after_episodic"] = _episodic_trimmed_mem
+                        _rep["final_injection_chars"] = len(_ext_prefetch_cache)
+                        _pc = self._memory_prefetch_snapshot_preview_chars
+                        if _pc > 0 and _ext_prefetch_cache:
+                            _rep["injection_preview"] = _ext_prefetch_cache[:_pc]
+                        else:
+                            _rep["injection_preview"] = ""
+                        write_last_prefetch_snapshot(get_hermes_home(), _rep)
+                    except Exception:
+                        pass
             except Exception:
                 pass
 

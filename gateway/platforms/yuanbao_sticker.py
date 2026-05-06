@@ -510,7 +510,7 @@ def search_stickers(query: str, limit: int = 10) -> list[dict]:
 
 def build_face_msg_body(
     face_index: int,
-    face_type: int = 1,
+    _face_type: int = 1,
     data: Optional[str] = None,
 ) -> list:
     """
@@ -523,7 +523,7 @@ def build_face_msg_body(
     Args:
         face_index: 保留字段，暂时不影响 wire format（Yuanbao 固定 index=0）。
                     当 face_index > 0 时视为旧版 QQ 表情 ID，直接放入 index。
-        face_type:  保留字段（兼容旧接口，当前未使用）。
+        _face_type: 保留字段（兼容旧接口，当前未使用）。
         data:       已序列化的 JSON 字符串；为 None 时仅传 index。
 
     Returns:

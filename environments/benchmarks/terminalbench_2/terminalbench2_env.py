@@ -406,7 +406,7 @@ class TerminalBench2EvalEnv(HermesAgentBaseEnv):
         """Collect trajectories (stub -- not used in eval-only mode)."""
         return None, []
 
-    async def score(self, rollout_group_data):
+    async def score(self, _rollout_group_data):
         """Score rollouts (stub -- not used in eval-only mode)."""
         return None
 

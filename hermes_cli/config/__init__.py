@@ -680,6 +680,19 @@ DEFAULT_CONFIG = {
         "user_profile_enabled": True,
         "memory_char_limit": 2200,  # ~800 tokens at 2.75 chars/token
         "user_char_limit": 1375,  # ~500 tokens at 2.75 chars/token
+        # Per-turn cap on prefetched memory merged into the user message at API time
+        # (<memory-context>). Separate from memory_char_limit, which bounds MEMORY.md /
+        # USER.md size on disk.
+        "prefetch_char_limit": 6000,
+        # When true, log per-provider prefetch sizes at DEBUG (English).
+        "prefetch_debug": False,
+        # Write ~/.hermes/state/last_memory_prefetch.json after each prefetch (doctor reads it).
+        "prefetch_snapshot": True,
+        # Max chars of merged injection preview stored in the snapshot (0 = omit preview).
+        "prefetch_snapshot_preview_chars": 400,
+        # If > 0, prepend a short excerpt of the previous user/assistant turn (English label)
+        # before provider recall inside <memory-context>; counts toward prefetch_char_limit.
+        "episodic_trace_chars": 0,
         # External memory provider plugin (empty = built-in only).
         # Set to a provider name to activate: "openviking", "mem0",
         # "hindsight", "holographic", "retaindb", "byterover".
@@ -814,7 +827,7 @@ DEFAULT_CONFIG = {
         "force_ipv4": False,
     },
     # Config schema version - bump this when adding new required fields
-    "_config_version": 20,
+    "_config_version": 22,
 }
 
 # =============================================================================

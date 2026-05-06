@@ -5131,7 +5131,7 @@ class GatewayRunner:
                                     session_id=session_entry.session_id,
                                 )
                                 try:
-                                    _hyg_agent._print_fn = lambda *a, **kw: None
+                                    _hyg_agent._print_fn = lambda *_, **__: None
 
                                     loop = asyncio.get_running_loop()
                                     _compressed, _ = await loop.run_in_executor(
@@ -7887,7 +7887,7 @@ class GatewayRunner:
                 session_id=session_entry.session_id,
             )
             try:
-                tmp_agent._print_fn = lambda *a, **kw: None
+                tmp_agent._print_fn = lambda *_, **__: None
 
                 compressor = tmp_agent.context_compressor
                 if not compressor.has_content_to_compress(msgs):
@@ -12400,6 +12400,31 @@ class GatewayRunner:
                     event_message_id=next_message_id,
                     channel_prompt=next_channel_prompt,
                 )
+
+            # If streaming already delivered the response, mark it so the
+            # caller's send() is skipped (avoiding duplicate messages).
+            # Never suppress when the agent failed — the error message is new
+            # content the user must see. Never suppress when the final
+            # response is "(empty)" — the stream consumer may have sent only
+            # interim text alongside tool calls (#10xxx).
+            _sc = stream_consumer_holder[0]
+            if isinstance(result, dict) and not result.get("failed"):
+                _final = result.get("final_response") or ""
+                _is_empty_sentinel = not _final or _final == "(empty)"
+                _streamed = bool(
+                    _sc and getattr(_sc, "final_response_sent", False)
+                )
+                _previewed = bool(result.get("response_previewed"))
+                if not _is_empty_sentinel and (_streamed or _previewed):
+                    logger.info(
+                        "Suppressing normal final send for session %s: final delivery "
+                        "already confirmed (streamed=%s previewed=%s).",
+                        session_key or "?",
+                        _streamed,
+                        _previewed,
+                    )
+                    result["already_sent"] = True
+
             return result
         finally:
             # Stop progress sender, interrupt monitor, and notification task
@@ -12440,40 +12465,6 @@ class GatewayRunner:
                         await task
                     except asyncio.CancelledError:
                         pass
-
-        # If streaming already delivered the response, mark it so the
-        # caller's send() is skipped (avoiding duplicate messages).
-        # BUT: never suppress delivery when the agent failed — the error
-        # message is new content the user hasn't seen, and it must reach
-        # them even if streaming had sent earlier partial output.
-        #
-        # Also never suppress when the final response is "(empty)" — this
-        # means the model failed to produce content after tool calls (common
-        # with mimo-v2-pro, GLM-5, etc.).  The stream consumer may have
-        # sent intermediate text ("Let me search for that…") alongside the
-        # tool call, setting already_sent=True, but that text is NOT the
-        # final answer.  Suppressing delivery here leaves the user staring
-        # at silence.  (#10xxx — "agent stops after web search")
-        _sc = stream_consumer_holder[0]
-        if isinstance(response, dict) and not response.get("failed"):
-            _final = response.get("final_response") or ""
-            _is_empty_sentinel = not _final or _final == "(empty)"
-            _streamed = bool(
-                _sc and getattr(_sc, "final_response_sent", False)
-            )
-            # response_previewed means the interim_assistant_callback already
-            # sent the final text via the adapter (non-streaming path).
-            _previewed = bool(response.get("response_previewed"))
-            if not _is_empty_sentinel and (_streamed or _previewed):
-                logger.info(
-                    "Suppressing normal final send for session %s: final delivery already confirmed (streamed=%s previewed=%s).",
-                    session_key or "?",
-                    _streamed,
-                    _previewed,
-                )
-                response["already_sent"] = True
-        
-        return response
 
 
 def _start_cron_ticker(stop_event: threading.Event, adapters=None, loop=None, interval: int = 60):

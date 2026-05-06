@@ -443,37 +443,37 @@ class SlackAdapter(BasePlatformAdapter):
 
             # Register message event handler
             @self._app.event("message")
-            async def handle_message_event(event, say):
+            async def handle_message_event(event, _say):
                 await self._handle_slack_message(event)
 
             # Acknowledge app_mention events to prevent Bolt 404 errors.
             # The "message" handler above already processes @mentions in
             # channels, so this is intentionally a no-op to avoid duplicates.
             @self._app.event("app_mention")
-            async def handle_app_mention(event, say):
+            async def handle_app_mention(event, _say):
                 pass
 
             # File lifecycle events can arrive around snippet uploads even when
             # the actual user message is what we care about. Ack them so Slack
             # doesn't log noisy 404 "unhandled request" warnings.
             @self._app.event("file_shared")
-            async def handle_file_shared(event, say):
+            async def handle_file_shared(event, _say):
                 pass
 
             @self._app.event("file_created")
-            async def handle_file_created(event, say):
+            async def handle_file_created(event, _say):
                 pass
 
             @self._app.event("file_change")
-            async def handle_file_change(event, say):
+            async def handle_file_change(event, _say):
                 pass
 
             @self._app.event("assistant_thread_started")
-            async def handle_assistant_thread_started(event, say):
+            async def handle_assistant_thread_started(event, _say):
                 await self._handle_assistant_thread_lifecycle_event(event)
 
             @self._app.event("assistant_thread_context_changed")
-            async def handle_assistant_thread_context_changed(event, say):
+            async def handle_assistant_thread_context_changed(event, _say):
                 await self._handle_assistant_thread_lifecycle_event(event)
 
             # Register slash command handler(s)
@@ -633,6 +633,7 @@ class SlackAdapter(BasePlatformAdapter):
         finalize: bool = False,
     ) -> SendResult:
         """Edit a previously sent Slack message."""
+        _ = finalize  # API parity with base / stream_consumer; Slack has no lifecycle bit.
         if not self._app:
             return SendResult(success=False, error="Not connected")
         try:

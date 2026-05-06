@@ -189,9 +189,9 @@ def _sanitize_node(node: Any, path: str) -> Any:
 
     out: dict = {}
     for key, value in node.items():
-        # type: [X, "null"] → type: X (the backend's tool-call parser only
-        # accepts singular string types; nullable is lost but the call still
-        # succeeds, and the model can still pass null on its own.)
+        # JSON Schema union as list, e.g. [X, "null"] — collapse to singular
+        # string type X for backends that only accept a single type string;
+        # nullable is reflected via a sibling ``nullable`` flag when possible.
         if key == "type" and isinstance(value, list):
             non_null = [t for t in value if t != "null"]
             if len(non_null) == 1 and isinstance(non_null[0], str):

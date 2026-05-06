@@ -472,7 +472,7 @@ class YCBenchEvalEnv(HermesAgentBaseEnv):
     async def collect_trajectories(self, item):
         return None, []
 
-    async def score(self, rollout_group_data):
+    async def score(self, _rollout_group_data):
         return None
 
     # =========================================================================

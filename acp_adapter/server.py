@@ -221,6 +221,7 @@ class HermesACPAgent(acp.Agent):
         client_info: Implementation | None = None,
         **kwargs: Any,
     ) -> InitializeResponse:
+        _ = client_capabilities
         resolved_protocol_version = (
             protocol_version if isinstance(protocol_version, int) else acp.PROTOCOL_VERSION
         )
@@ -257,6 +258,7 @@ class HermesACPAgent(acp.Agent):
         )
 
     async def authenticate(self, method_id: str, **kwargs: Any) -> AuthenticateResponse | None:
+        _ = method_id
         if has_provider():
             return AuthenticateResponse()
         return None

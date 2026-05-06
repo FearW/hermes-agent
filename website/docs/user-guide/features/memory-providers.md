@@ -301,6 +301,7 @@ The setup wizard installs dependencies automatically and only installs what's ne
 | `retain_async` | `true` | Process retain asynchronously on the server |
 | `tags` | — | Tags applied when storing memories |
 | `recall_tags` | — | Tags to filter on recall |
+| `recall_fusion` | `single` | `dual` — two `arecall` passes (precise + broad budgets), merged with dedupe; see plugin README |
 
 See [plugin README](https://github.com/NousResearch/hermes-agent/blob/main/plugins/memory/hindsight/README.md) for the full configuration reference.
 

@@ -4433,6 +4433,7 @@ def resolve_minimax_oauth_runtime_credentials(
     *, min_token_ttl_seconds: int = MINIMAX_OAUTH_REFRESH_SKEW_SECONDS,
 ) -> Dict[str, Any]:
     """Return {provider, api_key, base_url, source} for minimax-oauth."""
+    _ = min_token_ttl_seconds
     state = get_provider_auth_state("minimax-oauth")
     if not state or not state.get("access_token"):
         raise AuthError(

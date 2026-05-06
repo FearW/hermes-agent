@@ -205,7 +205,21 @@ memory:
   user_profile_enabled: true
   memory_char_limit: 2200   # ~800 tokens
   user_char_limit: 1375     # ~500 tokens
+  # External provider prefetch (injected into the current user message at API time, not persisted):
+  prefetch_char_limit: 6000   # cap merged provider prefetch size
+  prefetch_debug: false       # DEBUG logs per provider sizes (English)
+  prefetch_snapshot: true     # write ~/.hermes/state/last_memory_prefetch.json
+  prefetch_snapshot_preview_chars: 400
+  episodic_trace_chars: 0     # if > 0, prepend previous turn excerpt (English label); counts toward prefetch_char_limit
 ```
+
+After a session with an external provider, inspect what was injected with:
+
+```bash
+hermes memory doctor
+```
+
+Use `hermes memory doctor --no-prefetch-snapshot` to hide the prefetch section.
 
 ## External Memory Providers
 

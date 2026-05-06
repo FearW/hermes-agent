@@ -444,7 +444,7 @@ class AudioRecorder:
 
         sd, np = _import_audio()
 
-        def _callback(indata, frames, time_info, status):  # noqa: ARG001
+        def _callback(indata, frames, _time_info, status):  # noqa: ARG001
             if status:
                 logger.debug("sounddevice status: %s", status)
             # When not recording the stream is idle — discard audio.

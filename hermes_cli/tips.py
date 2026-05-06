@@ -343,6 +343,7 @@ def get_random_tip(exclude_recent: int = 0) -> str:
         exclude_recent: not used currently; reserved for future
             deduplication across sessions.
     """
+    _ = exclude_recent
     return random.choice(TIPS)
 
 

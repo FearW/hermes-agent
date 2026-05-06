@@ -1,6 +1,6 @@
 """Tests for the Hindsight memory provider plugin.
 
-Tests cover config loading, tool handlers (tags, max_tokens, types),
+Tests cover config loading, tool handlers (tags, max_tokens, types, dual recall),
 prefetch (auto_recall, preamble, query truncation), sync_turn (auto_retain,
 turn counting, tags), and schema completeness.
 """
@@ -263,6 +263,53 @@ class TestToolHandlers:
         p.handle_tool_call("hindsight_recall", {"query": "test"})
         call_kwargs = p._client.arecall.call_args.kwargs
         assert call_kwargs["types"] == ["world", "experience"]
+
+    def test_recall_dual_fusion_two_calls_and_dedupes(self, provider_with_config):
+        budgets_seen: list[str] = []
+
+        def _dual_arecall(**kwargs):
+            budgets_seen.append(str(kwargs.get("budget", "")))
+            b = kwargs.get("budget")
+            if b == "low":
+                return SimpleNamespace(
+                    results=[
+                        SimpleNamespace(text="Same line"),
+                        SimpleNamespace(text="Precise only"),
+                    ]
+                )
+            return SimpleNamespace(
+                results=[
+                    SimpleNamespace(text="Same line"),
+                    SimpleNamespace(text="Broad only"),
+                ]
+            )
+
+        p = provider_with_config(
+            recall_fusion="dual",
+            recall_fusion_precise_budget="low",
+            recall_fusion_broad_budget="high",
+        )
+        p._client.arecall = AsyncMock(side_effect=_dual_arecall)
+        result = json.loads(p.handle_tool_call("hindsight_recall", {"query": "test"}))
+        text = result["result"]
+        assert text.count("Same line") == 1
+        assert "Precise only" in text
+        assert "Broad only" in text
+        assert budgets_seen.count("low") == 1 and budgets_seen.count("high") == 1
+
+    def test_recall_dual_splits_max_tokens(self, provider_with_config):
+        captured: list[dict] = []
+
+        def _capture(**kwargs):
+            captured.append(dict(kwargs))
+            return SimpleNamespace(results=[])
+
+        p = provider_with_config(recall_fusion="dual", recall_max_tokens=1000)
+        p._client.arecall = AsyncMock(side_effect=_capture)
+        p.handle_tool_call("hindsight_recall", {"query": "x"})
+        assert len(captured) == 2
+        assert captured[0]["max_tokens"] == 500
+        assert captured[1]["max_tokens"] == 500
 
     def test_recall_no_results(self, provider):
         provider._client.arecall.return_value = SimpleNamespace(results=[])

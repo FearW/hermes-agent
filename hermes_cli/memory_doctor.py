@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agent.memory_manager import load_last_prefetch_snapshot
 from hermes_constants import display_hermes_home, get_hermes_home
 from tools.memory_tool import ENTRY_DELIMITER, _compact_memory_entries
 
@@ -151,11 +152,62 @@ def _print_store(store: StoreHealth) -> None:
         )
 
 
+def _print_prefetch_snapshot(home: Path) -> None:
+    """Show last API-time memory injection stats (English field names in JSON file)."""
+    data = load_last_prefetch_snapshot(home)
+    print("\n上次记忆注入（本轮预取 → 模型用户消息，非持久化）")
+    if not data:
+        print(
+            "  （尚无快照：需已配置外部 memory provider 并完成至少一轮带预取的对话；"
+            "也可检查 memory.prefetch_snapshot 是否为 true）"
+        )
+        return
+    print(f"  时间(UTC): {data.get('timestamp_utc', '?')}")
+    if data.get("session_id"):
+        print(f"  session_id: {data.get('session_id')}")
+    if data.get("user_turn") is not None:
+        print(f"  user_turn: {data.get('user_turn')}")
+    print(f"  query_chars: {data.get('query_chars', '?')}")
+    mc = data.get("max_chars")
+    print(f"  prefetch_char_limit: {mc if mc is not None else 'unlimited'}")
+    if data.get("truncated_by_provider_budget"):
+        print(
+            f"  截断: 是（provider 合并后超限 raw={data.get('raw_merged_chars')} "
+            f"→ final_provider={data.get('provider_merged_chars')}）"
+        )
+    else:
+        print("  截断(provider 预算): 否")
+    prov = data.get("providers") or []
+    if prov:
+        parts = [f"{p.get('name')}:{p.get('chars')}" for p in prov if isinstance(p, dict)]
+        print(f"  各 provider 原始长度: {', '.join(parts)}")
+    else:
+        print("  各 provider 原始长度: （无预取文本）")
+    if int(data.get("episodic_excerpt_chars") or 0) > 0:
+        print(f"  episodic 摘录字符: {data.get('episodic_excerpt_chars')}")
+        if data.get("provider_trimmed_after_episodic"):
+            print("  合并 episodic 后裁剪了 provider 预取: 是")
+    print(f"  最终注入字符数: {data.get('final_injection_chars', '?')}")
+    preview = data.get("injection_preview") or ""
+    if preview:
+        plines = preview.splitlines()
+        print("  注入预览（前缀）:")
+        for line in plines[:12]:
+            print(f"    {line}")
+        if len(plines) > 12:
+            print("    …")
+    print(
+        "  图检索/统计: 使用已启用 provider 的工具（如 hindsight_recall）；"
+        "运维级可视化属可选能力。"
+    )
+
+
 def run_memory_doctor(args) -> None:
     health = analyze_memory_health()
     memory: StoreHealth = health["memory"]
     user: StoreHealth = health["user"]
     l4: L4Health = health["l4"]
+    home = get_hermes_home()
 
     print("\nMemory Health")
     print(f"Home: {display_hermes_home()}")
@@ -189,4 +241,7 @@ def run_memory_doctor(args) -> None:
         print("\nRecommendation: run `hermes memory doctor --compact` to apply safe compaction.")
     else:
         print("\nRecommendation: no action needed.")
+
+    if not getattr(args, "no_prefetch_snapshot", False):
+        _print_prefetch_snapshot(home)
     print()

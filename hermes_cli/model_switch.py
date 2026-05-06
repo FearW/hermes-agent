@@ -294,7 +294,7 @@ def get_authenticated_provider_slugs(
 
 def _resolve_alias_fallback(
     raw_input: str,
-    authenticated_providers: list[str] = (),
+    _authenticated_providers: list[str] = (),
 ) -> Optional[tuple[str, str, str]]:
     """Compatibility helper for old callers; provider remains CPA-only."""
     return resolve_alias(raw_input, "cliproxyapi")
