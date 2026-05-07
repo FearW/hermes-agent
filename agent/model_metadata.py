@@ -359,6 +359,7 @@ def is_local_endpoint(base_url: str) -> bool:
         parsed = urlparse(url)
         host = parsed.hostname or ""
     except Exception:
+        logger.debug("is_local_endpoint failed", exc_info=True)
         return False
     if host in _LOCAL_HOSTS:
         return True
@@ -415,7 +416,7 @@ def detect_local_server_type(base_url: str, api_key: str = "") -> Optional[str]:
                 if r.status_code == 200:
                     return "lm-studio"
             except Exception:
-                pass
+                logger.debug("detect_local_server_type lm-studio probe failed", exc_info=True)
             # Ollama exposes /api/tags and responds with {"models": [...]}
             # LM Studio returns {"error": "Unexpected endpoint"} with status 200
             # on this path, so we must verify the response contains "models".
@@ -427,9 +428,9 @@ def detect_local_server_type(base_url: str, api_key: str = "") -> Optional[str]:
                         if "models" in data:
                             return "ollama"
                     except Exception:
-                        pass
+                        logger.debug("detect_local_server_type ollama json parse failed", exc_info=True)
             except Exception:
-                pass
+                logger.debug("detect_local_server_type ollama probe failed", exc_info=True)
             # llama.cpp exposes /v1/props (older builds used /props without the /v1 prefix)
             try:
                 r = client.get(f"{server_url}/v1/props")
@@ -438,7 +439,7 @@ def detect_local_server_type(base_url: str, api_key: str = "") -> Optional[str]:
                 if r.status_code == 200 and "default_generation_settings" in r.text:
                     return "llamacpp"
             except Exception:
-                pass
+                logger.debug("detect_local_server_type llamacpp probe failed", exc_info=True)
             # vLLM: /version
             try:
                 r = client.get(f"{server_url}/version")
@@ -447,9 +448,9 @@ def detect_local_server_type(base_url: str, api_key: str = "") -> Optional[str]:
                     if "version" in data:
                         return "vllm"
             except Exception:
-                pass
+                logger.debug("detect_local_server_type vllm probe failed", exc_info=True)
     except Exception:
-        pass
+        logger.debug("detect_local_server_type failed", exc_info=True)
 
     return None
 
@@ -645,6 +646,7 @@ def fetch_endpoint_model_metadata(
                 _endpoint_model_metadata_cache_time[normalized] = time.time()
                 return cache
         except Exception as exc:
+            logger.debug("fetch_endpoint_model_metadata openrouter fetch failed", exc_info=True)
             last_error = exc
 
     for candidate in candidates:
@@ -693,12 +695,13 @@ def fetch_endpoint_model_metadata(
                         if n_ctx and model_alias and model_alias in cache:
                             cache[model_alias]["context_length"] = n_ctx
                 except Exception:
-                    pass
+                    logger.debug("fetch_endpoint_model_metadata llamacpp props parse failed", exc_info=True)
 
             _endpoint_model_metadata_cache[normalized] = cache
             _endpoint_model_metadata_cache_time[normalized] = time.time()
             return cache
         except Exception as exc:
+            logger.debug("fetch_endpoint_model_metadata candidate fetch failed", exc_info=True)
             last_error = exc
 
     if last_error:
@@ -913,6 +916,7 @@ def query_ollama_num_ctx(model: str, base_url: str, api_key: str = "") -> Option
     try:
         server_type = detect_local_server_type(base_url, api_key=api_key)
     except Exception:
+        logger.debug("query_ollama_num_ctx server type detection failed", exc_info=True)
         return None
     if server_type != "ollama":
         return None
@@ -944,7 +948,7 @@ def query_ollama_num_ctx(model: str, base_url: str, api_key: str = "") -> Option
                 if "context_length" in key and isinstance(value, (int, float)):
                     return int(value)
     except Exception:
-        pass
+        logger.debug("query_ollama_num_ctx failed", exc_info=True)
     return None
 
 
@@ -966,6 +970,7 @@ def _query_local_context_length(model: str, base_url: str, api_key: str = "") ->
     try:
         server_type = detect_local_server_type(base_url, api_key=api_key)
     except Exception:
+        logger.debug("_query_local_context_length server type detection failed", exc_info=True)
         server_type = None
 
     try:
@@ -1040,7 +1045,7 @@ def _query_local_context_length(model: str, base_url: str, api_key: str = "") ->
                         if ctx and isinstance(ctx, (int, float)):
                             return int(ctx)
     except Exception:
-        pass
+        logger.debug("_query_local_context_length failed", exc_info=True)
 
     return None
 
@@ -1271,7 +1276,7 @@ def get_model_context_length(
             if cp_ctx:
                 return cp_ctx
         except Exception:
-            pass  # fall through to probing
+            logger.debug("get_model_context_length custom provider lookup failed", exc_info=True)
 
     # Normalise provider-prefixed model names (e.g. "local:model-name" →
     # "model-name") so cache lookups and server queries use the bare ID that
@@ -1379,7 +1384,7 @@ def get_model_context_length(
             if ctx:
                 return ctx
         except Exception:
-            pass  # Fall through to models.dev
+            logger.debug("get_model_context_length copilot lookup failed", exc_info=True)
 
     if effective_provider == "nous":
         ctx = _resolve_nous_context_length(model)

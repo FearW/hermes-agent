@@ -296,7 +296,7 @@ def _codex_cloudflare_headers(access_token: str) -> Dict[str, str]:
         if isinstance(acct_id, str) and acct_id:
             headers["ChatGPT-Account-ID"] = acct_id
     except Exception:
-        pass
+        logger.debug("_codex_cloudflare_headers failed", exc_info=True)
     return headers
 
 
@@ -987,7 +987,7 @@ def _read_codex_access_token() -> Optional[str]:
                 logger.debug("Codex access token expired (exp=%s), skipping", exp)
                 return None
         except Exception:
-            pass  # Non-JWT token or decode error — use as-is
+            logger.debug("_read_codex_access_token JWT decode failed", exc_info=True)
 
         return access_token.strip()
     except Exception as exc:
@@ -1132,7 +1132,7 @@ def _try_nous(vision: bool = False) -> Tuple[Optional[OpenAI], Optional[str]]:
             )
             return None, None
     except Exception:
-        pass
+        logger.debug("_try_nous rate guard check failed", exc_info=True)
 
     nous = _read_nous_auth()
     runtime = _resolve_nous_runtime_api(force_refresh=False)
@@ -1201,7 +1201,7 @@ def _read_main_model() -> str:
             if isinstance(default, str) and default.strip():
                 return default.strip()
     except Exception:
-        pass
+        logger.debug("_read_main_model failed", exc_info=True)
     return ""
 
 
@@ -1220,7 +1220,7 @@ def _read_main_provider() -> str:
             if isinstance(provider, str) and provider.strip():
                 return provider.strip().lower()
     except Exception:
-        pass
+        logger.debug("_read_main_provider failed", exc_info=True)
     return ""
 
 
@@ -1239,6 +1239,7 @@ def _get_named_aux_custom_provider(name: str) -> Optional[Dict[str, Any]]:
             if raw in {entry_name, provider_key}:
                 return dict(entry)
     except Exception:
+        logger.debug("_get_named_aux_custom_provider failed", exc_info=True)
         return None
     return None
 
@@ -1462,7 +1463,7 @@ def _try_anthropic() -> Tuple[Optional[Any], Optional[str]]:
                 if cfg_base_url:
                     base_url = cfg_base_url
     except Exception:
-        pass
+        logger.debug("_try_anthropic config read failed", exc_info=True)
 
     from agent.anthropic_adapter import _is_oauth_token
     is_oauth = _is_oauth_token(token)
@@ -1543,7 +1544,7 @@ def _evict_cached_clients(provider: str) -> None:
                     if callable(close_fn):
                         close_fn()
                 except Exception:
-                    pass
+                    logger.debug("_evict_cached_clients close failed", exc_info=True)
             _client_cache.pop(key, None)
 
 
@@ -2535,14 +2536,14 @@ def _store_cached_client(cache_key: tuple, client: Any, default_model: Optional[
                 if callable(close_fn):
                     close_fn()
             except Exception:
-                pass
+                logger.debug("_store_cached_client old entry close failed", exc_info=True)
         _client_cache[cache_key] = (client, default_model, bound_loop)
         while len(_client_cache) > _CLIENT_CACHE_MAX_SIZE:
             _old_key, (_old_client, _old_model, _old_loop) = _client_cache.popitem(last=False)
             try:
                 _old_client.close()
             except Exception:
-                pass
+                logger.debug("_store_cached_client evicted entry close failed", exc_info=True)
 
 
 def _refresh_nous_auxiliary_client(
@@ -2639,7 +2640,7 @@ def _force_close_async_httpx(client: Any) -> None:
         if inner is not None and not getattr(inner, "is_closed", True):
             inner._state = ClientState.CLOSED
     except Exception:
-        pass
+        logger.debug("_force_close_async_httpx failed", exc_info=True)
 
 
 def shutdown_cached_clients() -> None:
@@ -2665,7 +2666,7 @@ def shutdown_cached_clients() -> None:
                 if close_fn and not inspect.iscoroutinefunction(close_fn):
                     close_fn()
             except Exception:
-                pass
+                logger.debug("shutdown_cached_clients close failed", exc_info=True)
         _client_cache.clear()
 
 
@@ -3206,6 +3207,7 @@ def call_llm(
                 return _validate_llm_response(
                     client.chat.completions.create(**retry_kwargs), task)
             except Exception as retry_err:
+                logger.debug("call_llm temperature retry failed", exc_info=True)
                 retry_err_str = str(retry_err)
                 # If retry still fails, fall through to the max_tokens /
                 # payment / auth chains below using the temperature-stripped
@@ -3234,6 +3236,7 @@ def call_llm(
                 return _validate_llm_response(
                     client.chat.completions.create(**kwargs), task)
             except Exception as retry_err:
+                logger.debug("call_llm max_tokens retry failed", exc_info=True)
                 # If the max_tokens retry also hits a payment or connection
                 # error, fall through to the fallback chain below.
                 if not (_is_payment_error(retry_err) or _is_connection_error(retry_err)):
@@ -3446,6 +3449,7 @@ async def async_call_llm(
                 return _validate_llm_response(
                     await client.chat.completions.create(**retry_kwargs), task)
             except Exception as retry_err:
+                logger.debug("call_llm_async temperature retry failed", exc_info=True)
                 retry_err_str = str(retry_err)
                 if not (
                     _is_payment_error(retry_err)
@@ -3470,6 +3474,7 @@ async def async_call_llm(
                 return _validate_llm_response(
                     await client.chat.completions.create(**kwargs), task)
             except Exception as retry_err:
+                logger.debug("call_llm_async max_tokens retry failed", exc_info=True)
                 # If the max_tokens retry also hits a payment or connection
                 # error, fall through to the fallback chain below.
                 if not (_is_payment_error(retry_err) or _is_connection_error(retry_err)):

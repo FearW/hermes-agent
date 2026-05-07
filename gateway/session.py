@@ -35,6 +35,7 @@ def _sanitize_extra_content(extra_content: Any) -> Optional[Dict[str, Any]]:
     try:
         json.dumps(extra_content, ensure_ascii=False)
     except Exception:
+        logger.debug("_sanitize_extra_content failed", exc_info=True)
         return None
     return extra_content
 
@@ -70,6 +71,7 @@ def _normalize_tool_calls(tool_calls: Any) -> Optional[List[Dict[str, Any]]]:
             try:
                 json.loads(arguments)
             except Exception:
+                logger.debug("json.loads failed for tool call arguments", exc_info=True)
                 try:
                     decoder = json.JSONDecoder()
                     idx = 0
@@ -87,6 +89,7 @@ def _normalize_tool_calls(tool_calls: Any) -> Optional[List[Dict[str, Any]]]:
                         idx = next_idx
                     arguments = json.dumps(merged, ensure_ascii=False) if parsed_any and merged else "{}"
                 except Exception:
+                    logger.debug("Failed to parse tool call arguments", exc_info=True)
                     arguments = "{}"
 
         normalized_tool_call = {
@@ -305,6 +308,7 @@ def _discord_tools_loaded() -> bool:
         enabled = _get_platform_tools(cfg, "discord", include_default_mcp_servers=False)
         return "discord" in enabled or "discord_admin" in enabled
     except Exception:
+        logger.debug("_discord_tools_loaded check failed", exc_info=True)
         return False
 
 
@@ -337,7 +341,7 @@ def build_session_context_prompt(
             if entry and entry.pii_safe:
                 _is_pii_safe = True
         except Exception:
-            pass
+            logger.debug("Failed to check platform_registry for pii_safe", exc_info=True)
     redact_pii = redact_pii and _is_pii_safe
     lines = [
         "## Current Session Context",
@@ -874,6 +878,7 @@ class SessionStore:
                 try:
                     config_mtime_ns = int(config_path.stat().st_mtime_ns)
                 except Exception:
+                    logger.debug("Failed to read config mtime for model signature", exc_info=True)
                     config_mtime_ns = None
                 if (
                     self._model_signature_cache is not None
@@ -893,6 +898,7 @@ class SessionStore:
             elif self._model_signature_cache is not None and self._model_signature_mtime_ns is None:
                 return self._model_signature_cache
         except Exception:
+            logger.debug("Failed to build model signature", exc_info=True)
             payload = {}
             config_mtime_ns = None
         raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
@@ -998,7 +1004,7 @@ class SessionStore:
             try:
                 return self._db.session_count() > 1
             except Exception:
-                pass  # fall through to heuristic
+                logger.debug("session_count failed in has_any_sessions", exc_info=True)
         # Fallback: check if sessions.json was loaded with existing data.
         # This covers the rare case where the DB is unavailable.
         with self._lock:

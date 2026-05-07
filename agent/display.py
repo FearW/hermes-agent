@@ -68,7 +68,7 @@ def _diff_ansi() -> dict[str, str]:
             or_, og, ob = int(ok_h[1:3], 16), int(ok_h[3:5], 16), int(ok_h[5:7], 16)
             plus = f"\033[38;2;255;255;255;48;2;{max(or_//4,10)};{max(og//2,20)};{max(ob//4,10)}m"
     except Exception:
-        pass
+        logger.debug("_diff_ansi failed", exc_info=True)
 
     _diff_colors_cached = {
         "dim": dim, "file": file_c, "hunk": hunk,
@@ -127,6 +127,7 @@ def _get_skin():
         from hermes_cli.skin_engine import get_active_skin
         return get_active_skin()
     except Exception:
+        logger.debug("_get_skin failed", exc_info=True)
         return None
 
 
@@ -159,7 +160,7 @@ def get_tool_emoji(tool_name: str, default: str = "⚡") -> str:
         if emoji:
             return emoji
     except Exception:
-        pass
+        logger.debug("get_tool_emoji failed", exc_info=True)
     # 3. Hardcoded fallback
     return default
 
@@ -305,6 +306,7 @@ def _display_diff_path(path: Path) -> str:
     try:
         return str(path.resolve().relative_to(Path.cwd().resolve()))
     except Exception:
+        logger.debug("_display_diff_path failed", exc_info=True)
         return str(path)
 
 
@@ -446,6 +448,7 @@ def _emit_inline_diff(diff_text: str, print_fn) -> bool:
             print_fn(line)
         return True
     except Exception:
+        logger.debug("_emit_inline_diff failed", exc_info=True)
         return False
 
 
@@ -654,7 +657,7 @@ class HermesSpinner:
             try:
                 self._print_fn(text)
             except Exception:
-                pass
+                logger.debug("_write print_fn failed", exc_info=True)
             return
         try:
             self._out.write(text + end)

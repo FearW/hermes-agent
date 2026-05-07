@@ -14,6 +14,7 @@ concurrently under distinct configurations).
 import hashlib
 import ctypes
 import json
+import logging
 import os
 import signal
 import subprocess
@@ -22,6 +23,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from hermes_constants import get_hermes_home
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 _GATEWAY_KIND = "hermes-gateway"
 _RUNTIME_STATUS_FILE = "gateway_state.json"
@@ -130,6 +133,7 @@ def _pid_is_alive(pid: int) -> bool:
             finally:
                 kernel32.CloseHandle(handle)
         except Exception:
+            logger.debug("_pid_is_alive failed for pid %s", pid, exc_info=True)
             return False
 
     try:
@@ -308,6 +312,7 @@ def write_pid_file() -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(_build_pid_record(), handle)
     except Exception:
+        logger.debug("Failed to write PID file", exc_info=True)
         try:
             pid_path.unlink(missing_ok=True)
         except OSError:
@@ -370,6 +375,7 @@ def acquire_gateway_runtime_lock() -> bool:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(record, handle)
     except Exception:
+        logger.debug("Failed to write runtime lock file", exc_info=True)
         try:
             lock_path.unlink(missing_ok=True)
         except OSError:
@@ -497,7 +503,7 @@ def remove_pid_file() -> None:
     try:
         _get_pid_path().unlink(missing_ok=True)
     except Exception:
-        pass
+        logger.debug("Failed to remove PID file", exc_info=True)
 
 
 def acquire_scoped_lock(scope: str, identity: str, metadata: Optional[dict[str, Any]] = None) -> tuple[bool, Optional[dict[str, Any]]]:
@@ -577,6 +583,7 @@ def acquire_scoped_lock(scope: str, identity: str, metadata: Optional[dict[str, 
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(record, handle)
     except Exception:
+        logger.debug("Failed to write scoped lock file", exc_info=True)
         try:
             lock_path.unlink(missing_ok=True)
         except OSError:

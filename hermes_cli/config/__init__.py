@@ -244,11 +244,7 @@ def get_container_exec_info() -> Optional[dict]:
 # =============================================================================
 
 # Re-export from hermes_constants — canonical definition lives there.
-from hermes_constants import get_hermes_home, get_config_path as _get_config_path  # noqa: F811,E402
-
-
-def get_config_path() -> Path:
-    return _get_config_path()
+from hermes_constants import get_hermes_home, get_config_path  # noqa: F811,E402
 
 
 def get_env_path() -> Path:

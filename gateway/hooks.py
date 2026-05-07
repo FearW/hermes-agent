@@ -21,11 +21,14 @@ Errors in hooks are caught and logged but never block the main pipeline.
 
 import asyncio
 import importlib.util
+import logging
 from typing import Any, Callable, Dict, List, Optional
 
 import yaml
 
 from hermes_constants import get_hermes_home
+
+logger = logging.getLogger(__name__)
 
 
 HOOKS_DIR = get_hermes_home() / "hooks"
@@ -64,7 +67,7 @@ class HookRegistry:
                 "path": "(builtin)",
             })
         except Exception as e:
-            print(f"[hooks] Could not load built-in boot-md hook: {e}", flush=True)
+            logger.warning("Could not load built-in boot-md hook: %s", e)
         try:
             from gateway.builtin_hooks.workflow_autodraft import handle as workflow_autodraft_handle
 
@@ -76,7 +79,7 @@ class HookRegistry:
                 "path": "(builtin)",
             })
         except Exception as e:
-            print(f"[hooks] Could not load built-in workflow-autodraft hook: {e}", flush=True)
+            logger.warning("Could not load built-in workflow-autodraft hook: %s", e)
         try:
             from gateway.builtin_hooks.l4_autoarchive import handle as l4_autoarchive_handle
 
@@ -88,7 +91,7 @@ class HookRegistry:
                 "path": "(builtin)",
             })
         except Exception as e:
-            print(f"[hooks] Could not load built-in l4-autoarchive hook: {e}", flush=True)
+            logger.warning("Could not load built-in l4-autoarchive hook: %s", e)
 
     def discover_and_load(self) -> None:
         """
@@ -118,13 +121,13 @@ class HookRegistry:
             try:
                 manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
                 if not manifest or not isinstance(manifest, dict):
-                    print(f"[hooks] Skipping {hook_dir.name}: invalid HOOK.yaml", flush=True)
+                    logger.warning("Skipping %s: invalid HOOK.yaml", hook_dir.name)
                     continue
 
                 hook_name = manifest.get("name", hook_dir.name)
                 events = manifest.get("events", [])
                 if not events:
-                    print(f"[hooks] Skipping {hook_name}: no events declared", flush=True)
+                    logger.warning("Skipping %s: no events declared", hook_name)
                     continue
 
                 # Dynamically load the handler module
@@ -132,7 +135,7 @@ class HookRegistry:
                     f"hermes_hook_{hook_name}", handler_path
                 )
                 if spec is None or spec.loader is None:
-                    print(f"[hooks] Skipping {hook_name}: could not load handler.py", flush=True)
+                    logger.warning("Skipping %s: could not load handler.py", hook_name)
                     continue
 
                 module = importlib.util.module_from_spec(spec)
@@ -140,7 +143,7 @@ class HookRegistry:
 
                 handle_fn = getattr(module, "handle", None)
                 if handle_fn is None:
-                    print(f"[hooks] Skipping {hook_name}: no 'handle' function found", flush=True)
+                    logger.warning("Skipping %s: no 'handle' function found", hook_name)
                     continue
 
                 # Register the handler for each declared event
@@ -154,10 +157,10 @@ class HookRegistry:
                     "path": str(hook_dir),
                 })
 
-                print(f"[hooks] Loaded hook '{hook_name}' for events: {events}", flush=True)
+                logger.info("Loaded hook '%s' for events: %s", hook_name, events)
 
             except Exception as e:
-                print(f"[hooks] Error loading hook {hook_dir.name}: {e}", flush=True)
+                logger.error("Error loading hook %s: %s", hook_dir.name, e)
 
     async def emit(self, event_type: str, context: Optional[Dict[str, Any]] = None) -> None:
         """
@@ -191,7 +194,7 @@ class HookRegistry:
                 if asyncio.iscoroutine(result):
                     await result
             except Exception as e:
-                print(f"[hooks] Error in handler for '{event_type}': {e}", flush=True)
+                logger.error("Error in handler for '%s': %s", event_type, e)
 
     async def emit_collect(
         self,

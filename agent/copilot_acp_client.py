@@ -24,6 +24,9 @@ from typing import Any
 from agent.file_safety import get_read_block_error, is_write_denied
 from agent.redact import redact_sensitive_text
 
+import logging
+logger = logging.getLogger(__name__)
+
 ACP_MARKER_BASE_URL = "acp://copilot"
 _DEFAULT_TIMEOUT_SECONDS = 900.0
 
@@ -56,7 +59,7 @@ def _resolve_home_dir() -> str:
         if profile_home:
             return profile_home
     except Exception:
-        pass
+        logger.debug("_resolve_home_dir failed", exc_info=True)
 
     home = os.environ.get("HOME", "").strip()
     if home:
@@ -73,7 +76,7 @@ def _resolve_home_dir() -> str:
         if resolved:
             return resolved
     except Exception:
-        pass
+        logger.debug("_resolve_home_dir pwd lookup failed", exc_info=True)
 
     # Last resort: /tmp (writable on any POSIX system). Avoids crashing the
     # subprocess with no HOME; callers can set HERMES_HOME explicitly if they
@@ -220,6 +223,7 @@ def _extract_tool_calls_from_text(text: str) -> tuple[list[SimpleNamespace], str
         try:
             obj = json.loads(raw_json)
         except Exception:
+            logger.debug("_try_add_tool_call json parse failed", exc_info=True)
             return
         if not isinstance(obj, dict):
             return
@@ -348,10 +352,11 @@ class CopilotACPClient:
             proc.terminate()
             proc.wait(timeout=2)
         except Exception:
+            logger.debug("close terminate failed", exc_info=True)
             try:
                 proc.kill()
             except Exception:
-                pass
+                logger.debug("close kill failed", exc_info=True)
 
     def _create_chat_completion(
         self,
@@ -449,6 +454,7 @@ class CopilotACPClient:
                 try:
                     inbox.put(json.loads(line))
                 except Exception:
+                    logger.debug("_stdout_reader json parse failed", exc_info=True)
                     inbox.put({"raw": line.rstrip("\n")})
 
         def _stderr_reader() -> None:
@@ -617,6 +623,7 @@ class CopilotACPClient:
                     },
                 }
             except Exception as exc:
+                logger.debug("_handle_server_message fs/read failed", exc_info=True)
                 response = _jsonrpc_error(message_id, -32602, str(exc))
         elif method == "fs/write_text_file":
             try:
@@ -633,6 +640,7 @@ class CopilotACPClient:
                     "result": None,
                 }
             except Exception as exc:
+                logger.debug("_handle_server_message fs/write failed", exc_info=True)
                 response = _jsonrpc_error(message_id, -32602, str(exc))
         else:
             response = _jsonrpc_error(

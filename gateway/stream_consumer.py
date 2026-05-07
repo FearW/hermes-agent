@@ -386,7 +386,7 @@ class GatewayStreamConsumer:
                     await self._send_or_edit(self._accumulated)
                     self._final_response_sent = True
                 except Exception:
-                    pass
+                    logger.debug("Failed to send final edit on cancellation", exc_info=True)
             elif self._already_sent:
                 self._final_response_sent = True
         except Exception as e:
@@ -573,7 +573,7 @@ class GatewayStreamConsumer:
             if getattr(result, "success", False):
                 self._last_sent_text = prefix
         except Exception:
-            pass  # best-effort — don't let this block the fallback path
+            logger.debug("Failed to strip cursor in _try_strip_cursor", exc_info=True)
 
     async def _send_commentary(self, text: str) -> bool:
         """Send a completed interim assistant commentary message."""
@@ -600,7 +600,7 @@ class GatewayStreamConsumer:
         try:
             self._on_new_message()
         except Exception:
-            pass
+            logger.debug("_fire_on_new_message callback failed", exc_info=True)
 
     def _should_send_fresh_final(self) -> bool:
         """Return True when final delivery should use a fresh message."""
@@ -619,7 +619,7 @@ class GatewayStreamConsumer:
         try:
             await delete_fn(self.chat_id, message_id)
         except Exception:
-            pass
+            logger.debug("Failed to delete preview message", exc_info=True)
 
     async def _send_or_edit(self, text: str, *, finalize: bool = False) -> bool:
         """Send or edit the streaming message.
