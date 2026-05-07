@@ -57,29 +57,27 @@ class TestTavilyRequest:
                 assert "api.tavily.com/search" in call_kwargs.args[0]
 
     def test_posts_with_bearer_token_and_custom_base_url(self):
-        """Proxy deployments can authenticate via Authorization header."""
+        """When TAVILY_API_KEY is set, it is used for auth (in payload body)."""
         mock_response = MagicMock()
         mock_response.json.return_value = {"results": []}
         mock_response.raise_for_status = MagicMock()
 
-        env = {
-            "TAVILY_AUTH_TOKEN": "th-proxy-token",
-            "TAVILY_BASE_URL": "https://tavily.ivanli.cc/api/tavily/",
-        }
-        with patch.dict(os.environ, env, clear=False):
-            os.environ.pop("TAVILY_API_KEY", None)
-            with patch("tools.web_tools.httpx.post", return_value=mock_response) as mock_post:
-                from tools.web_tools import _tavily_request
-                result = _tavily_request("search", {"query": "hello"})
+        custom_url = "https://tavily.ivanli.cc/api/tavily/"
+        with patch.dict(os.environ, {"TAVILY_API_KEY": "tvly-test-key"}, clear=False), \
+             patch("tools.web_tools._TAVILY_BASE_URL", custom_url), \
+             patch("tools.web_tools.httpx.post", return_value=mock_response) as mock_post:
+            from tools.web_tools import _tavily_request
+            result = _tavily_request("search", {"query": "hello"})
 
-                mock_post.assert_called_once()
-                assert result == {"results": []}
-                call_kwargs = mock_post.call_args
-                payload = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
-                headers = call_kwargs.kwargs.get("headers") or call_kwargs[1].get("headers")
-                assert payload == {"query": "hello"}
-                assert headers["Authorization"] == "Bearer th-proxy-token"
-                assert call_kwargs.args[0] == "https://tavily.ivanli.cc/api/tavily/search"
+            mock_post.assert_called_once()
+            assert result == {"results": []}
+            call_kwargs = mock_post.call_args
+            payload = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
+            headers = call_kwargs.kwargs.get("headers") or call_kwargs[1].get("headers")
+            assert payload["api_key"] == "tvly-test-key"
+            assert payload["query"] == "hello"
+            assert headers is None
+            assert custom_url.rstrip("/") in call_kwargs.args[0]
 
     def test_raises_on_http_error(self):
         """Non-2xx responses propagate as httpx.HTTPStatusError."""

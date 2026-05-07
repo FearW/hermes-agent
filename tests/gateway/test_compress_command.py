@@ -173,12 +173,12 @@ async def test_compress_command_appends_warning_when_summary_generation_fails():
     assert "Compressed:" in result
     # ...but a clearly-marked warning must be appended.
     assert "⚠️" in result
-    assert "Summary generation failed" in result
+    assert "摘要生成失败" in result
     # Underlying error must surface so users can fix their config.
     assert "404 model not found" in result
     # Dropped count must be visible — silently losing N messages is the bug.
     assert "7" in result
-    assert "historical message(s) were removed" in result
+    assert "条历史消息被删除" in result
     agent_instance.shutdown_memory_provider.assert_called_once()
     agent_instance.close.assert_called_once()
 
@@ -240,6 +240,6 @@ async def test_compress_command_surfaces_aux_model_failure_even_when_recovered()
     assert "404" in result
     assert "auxiliary.compression.model" in result
     # The user's context is explicitly called out as intact
-    assert "intact" in result
+    assert "完整" in result
     agent_instance.shutdown_memory_provider.assert_called_once()
     agent_instance.close.assert_called_once()

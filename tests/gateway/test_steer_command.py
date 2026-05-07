@@ -104,7 +104,7 @@ async def test_steer_calls_agent_steer_and_does_not_interrupt():
 
     # The handler replied with a confirmation
     assert result is not None
-    assert "steer" in result.lower() or "queued" in result.lower()
+    assert "引导" in result or "排队" in result
     # The agent's steer() was called with the payload (prefix stripped)
     running_agent.steer.assert_called_once_with("also check auth.log")
     # Critically: interrupt was NOT called
@@ -125,7 +125,7 @@ async def test_steer_without_payload_returns_usage():
     result = await runner._handle_message(_make_event("/steer"))
 
     assert result is not None
-    assert "Usage" in result or "usage" in result
+    assert "用法" in result
     running_agent.steer.assert_not_called()
     running_agent.interrupt.assert_not_called()
 
@@ -143,7 +143,7 @@ async def test_steer_with_pending_sentinel_falls_back_to_queue():
     result = await runner._handle_message(_make_event("/steer wait up"))
 
     assert result is not None
-    assert "queued" in result.lower() or "starting" in result.lower()
+    assert "排队" in result or "starting" in result.lower()
     # The fallback put the text into the adapter's pending queue.
     assert sk in adapter._pending_messages
     assert adapter._pending_messages[sk].text == "wait up"
@@ -165,7 +165,7 @@ async def test_steer_agent_without_steer_method_falls_back():
 
     assert result is not None
     # Must mention queueing since steer wasn't available
-    assert "queued" in result.lower()
+    assert "排队" in result
     assert sk in adapter._pending_messages
     assert adapter._pending_messages[sk].text == "fallback"
 
@@ -184,7 +184,7 @@ async def test_steer_rejected_payload_returns_rejection_message():
     result = await runner._handle_message(_make_event("/steer hello"))
 
     assert result is not None
-    assert "rejected" in result.lower() or "empty" in result.lower()
+    assert "拒绝" in result or "为空" in result
 
 
 if __name__ == "__main__":  # pragma: no cover

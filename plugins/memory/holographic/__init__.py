@@ -94,8 +94,8 @@ FACT_FEEDBACK_SCHEMA = {
 # ---------------------------------------------------------------------------
 
 def _load_plugin_config() -> dict:
-    from hermes_constants import get_hermes_home
-    config_path = get_hermes_home() / "config.yaml"
+    from hermes_constants import get_config_path
+    config_path = get_config_path()
     if not config_path.exists():
         return {}
     try:

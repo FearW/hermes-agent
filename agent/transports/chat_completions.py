@@ -10,6 +10,7 @@ reasoning configuration, temperature handling, and extra_body assembly.
 """
 
 import copy
+import logging
 from typing import Any, Dict, List, Optional
 
 from agent.lmstudio_reasoning import resolve_lmstudio_effort
@@ -17,6 +18,8 @@ from agent.moonshot_schema import is_moonshot_model, sanitize_moonshot_tools
 from agent.prompt_builder import DEVELOPER_ROLE_MODELS
 from agent.transports.base import ProviderTransport
 from agent.transports.types import NormalizedResponse, ToolCall, Usage
+
+logger = logging.getLogger(__name__)
 
 
 def _build_gemini_thinking_config(model: str, reasoning_config: dict | None) -> dict | None:
@@ -444,6 +447,7 @@ class ChatCompletionsTransport(ProviderTransport):
                         try:
                             extra = extra.model_dump()
                         except Exception:
+                            logger.debug("extra_content model_dump failed", exc_info=True)
                             pass
                     tc_provider_data["extra_content"] = extra
                 tool_calls.append(ToolCall(

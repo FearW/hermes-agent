@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
-from hermes_constants import get_hermes_home
+from hermes_constants import get_config_path, get_hermes_home
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ _cached_policy_time: float = 0.0
 
 
 def _get_default_config_path() -> Path:
-    return get_hermes_home() / "config.yaml"
+    return get_config_path()
 
 
 class WebsitePolicyError(Exception):

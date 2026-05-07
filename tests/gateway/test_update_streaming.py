@@ -229,7 +229,7 @@ class TestUpdateCommandGatewayFlag:
         cmd_string = call_args[-1] if isinstance(call_args, list) else str(call_args)
         assert "--gateway" in cmd_string
         assert "PYTHONUNBUFFERED" in cmd_string
-        assert "stream progress" in result
+        assert "推送进度" in result
 
 
 # ---------------------------------------------------------------------------
@@ -276,7 +276,7 @@ class TestWatchUpdateProgress:
         # Should have sent at least the output and a success message
         assert mock_adapter.send.call_count >= 1
         all_sent = " ".join(str(c) for c in mock_adapter.send.call_args_list)
-        assert "update finished" in all_sent.lower()
+        assert "已完成" in all_sent
 
     @pytest.mark.asyncio
     async def test_detects_and_forwards_prompt(self, tmp_path):
@@ -375,7 +375,7 @@ class TestWatchUpdateProgress:
             )
 
         all_sent = " ".join(str(c) for c in mock_adapter.send.call_args_list)
-        assert "failed" in all_sent.lower()
+        assert "失败" in all_sent
 
     @pytest.mark.asyncio
     async def test_falls_back_when_adapter_unavailable(self, tmp_path):

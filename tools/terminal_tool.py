@@ -432,7 +432,6 @@ def _prompt_for_sudo_password(timeout_seconds: int = 45) -> str:
     so the prompt integrates with prompt_toolkit's UI.  Otherwise reads
     directly from /dev/tty with echo disabled.
     """
-    import sys
     
     # Use the registered callback when available (prompt_toolkit-compatible)
     _sudo_cb = _get_sudo_password_callback()
@@ -496,16 +495,16 @@ def _prompt_for_sudo_password(timeout_seconds: int = 45) -> str:
         os.environ["HERMES_SPINNER_PAUSE"] = "1"
         time.sleep(0.2)
         
-        print()
-        print("┌" + "─" * 58 + "┐")
-        print("│  🔐 SUDO PASSWORD REQUIRED" + " " * 30 + "│")
-        print("├" + "─" * 58 + "┤")
-        print("│  Enter password below (input is hidden), or:            │")
-        print("│    • Press Enter to skip (command fails gracefully)     │")
-        print(f"│    • Wait {timeout_seconds}s to auto-skip" + " " * 27 + "│")
-        print("└" + "─" * 58 + "┘")
-        print()
-        print("  Password (hidden): ", end="", flush=True)
+        logger.info("")
+        logger.info("┌" + "─" * 58 + "┐")
+        logger.info("│  🔐 SUDO PASSWORD REQUIRED" + " " * 30 + "│")
+        logger.info("├" + "─" * 58 + "┤")
+        logger.info("│  Enter password below (input is hidden), or:            │")
+        logger.info("│    • Press Enter to skip (command fails gracefully)     │")
+        logger.info("│    • Wait %ds to auto-skip" + " " * 27 + "│", timeout_seconds)
+        logger.info("└" + "─" * 58 + "┘")
+        logger.info("")
+        logger.info("  Password (hidden): ")
         
         password_thread = threading.Thread(target=read_password_thread, daemon=True)
         password_thread.start()
@@ -513,30 +512,26 @@ def _prompt_for_sudo_password(timeout_seconds: int = 45) -> str:
         
         if result["done"]:
             password = result["password"] or ""
-            print()  # newline after hidden input
+            logger.info("")
             if password:
-                print("  ✓ Password received (cached for this session)")
+                logger.info("  ✓ Password received (cached for this session)")
             else:
-                print("  ⏭ Skipped - continuing without sudo")
-            print()
-            sys.stdout.flush()
+                logger.info("  ⏭ Skipped - continuing without sudo")
+            logger.info("")
             return password
         else:
-            print("\n  ⏱ Timeout - continuing without sudo")
-            print("    (Press Enter to dismiss)")
-            print()
-            sys.stdout.flush()
+            logger.warning("  ⏱ Timeout - continuing without sudo")
+            logger.info("    (Press Enter to dismiss)")
+            logger.info("")
             return ""
             
     except (EOFError, KeyboardInterrupt):
-        print()
-        print("  ⏭ Cancelled - continuing without sudo")
-        print()
-        sys.stdout.flush()
+        logger.info("")
+        logger.info("  ⏭ Cancelled - continuing without sudo")
+        logger.info("")
         return ""
     except Exception as e:
-        print(f"\n  [sudo prompt error: {e}] - continuing without sudo\n")
-        sys.stdout.flush()
+        logger.error("  [sudo prompt error: %s] - continuing without sudo", e)
         return ""
     finally:
         if "HERMES_SPINNER_PAUSE" in os.environ:

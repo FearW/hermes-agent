@@ -23,11 +23,11 @@ from typing import Any, Dict, Optional
 
 import yaml
 
-from hermes_constants import get_hermes_home
+from hermes_constants import get_config_path
 
 logger = logging.getLogger(__name__)
 
-CONFIG_PATH = get_hermes_home() / "config.yaml"
+CONFIG_PATH = get_config_path()
 
 COMMAND_PREFIXES = ("/model", "/模型")
 

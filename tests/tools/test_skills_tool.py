@@ -13,7 +13,6 @@ from tools.skills_tool import (
     _parse_frontmatter,
     _parse_tags,
     _get_category_from_path,
-    _estimate_tokens,
     _find_all_skills,
     skill_matches_platform,
     skills_list,
@@ -195,6 +194,7 @@ class TestGetCategoryFromPath:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip("function removed")
 class TestEstimateTokens:
     def test_estimate(self):
         assert _estimate_tokens("1234") == 1

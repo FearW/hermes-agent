@@ -215,6 +215,7 @@ _apply_profile_override()
 # Load .env from ~/.hermes/.env first, then project root as dev fallback.
 # User-managed env files should override stale shell exports on restart.
 from hermes_cli.config import get_hermes_home
+from hermes_constants import get_config_path
 from hermes_cli.env_loader import load_hermes_dotenv
 
 load_hermes_dotenv(project_env=PROJECT_ROOT / ".env")
@@ -227,7 +228,7 @@ load_hermes_dotenv(project_env=PROJECT_ROOT / ".env")
 try:
     if "HERMES_REDACT_SECRETS" not in os.environ:
         import yaml as _yaml_early
-        _cfg_path = get_hermes_home() / "config.yaml"
+        _cfg_path = get_config_path()
         if _cfg_path.exists():
             with open(_cfg_path, encoding="utf-8") as _f:
                 _early_sec_cfg = (_yaml_early.safe_load(_f) or {}).get("security", {})
@@ -5934,6 +5935,159 @@ def _sync_with_upstream_if_needed(git_cmd: list[str], cwd: Path) -> None:
         print("    Your local repo is updated, but your fork on GitHub may be behind.")
 
 
+def _update_cpa() -> None:
+    """Update CLIProxyAPI (CPA) to the latest version.
+    
+    Checks GitHub for latest version, downloads if newer, and replaces
+    the existing CPA executable.
+    """
+    import tempfile
+    import json
+    import urllib.request
+    import zipfile
+    import stat
+
+    try:
+        from hermes_constants import get_hermes_home
+    except ImportError:
+        return
+
+    hermes_home = get_hermes_home()
+    cpa_dir = hermes_home / "cpa"
+    cpa_bin = cpa_dir / "CLIProxyAPI"
+    if sys.platform == "win32":
+        cpa_bin = cpa_dir / "CLIProxyAPI.exe"
+
+    # Check if CPA is installed first
+    if not cpa_bin.exists():
+        print("  ℹ️  CPA not installed, skipping update")
+        return
+
+    print()
+    print("→ 正在检查 CPA 更新...")
+
+    # Determine OS and arch
+    if sys.platform == "linux":
+        os_name = "linux"
+        archive_ext = "tar.gz"
+    elif sys.platform == "darwin":
+        os_name = "darwin"
+        archive_ext = "tar.gz"
+    elif sys.platform == "win32":
+        os_name = "windows"
+        archive_ext = "zip"
+    else:
+        print("  ⚠️  Unsupported OS for CPA auto-update")
+        return
+
+    machine = os.uname().machine if hasattr(os, 'uname') else os.environ.get("PROCESSOR_ARCHITECTURE", "amd64")
+    if machine in ("x86_64", "AMD64"):
+        arch = "amd64"
+    elif machine in ("arm64", "aarch64"):
+        arch = "aarch64" if os_name != "windows" else "amd64"
+    else:
+        print(f"  ⚠️  Unsupported architecture: {machine}")
+        return
+
+    # Get current version (if executable reports it)
+    current_version = None
+    try:
+        result = subprocess.run(
+            [str(cpa_bin), "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            current_version = result.stdout.strip()
+    except Exception:
+        pass
+
+    # Fetch latest version from GitHub
+    try:
+        with urllib.request.urlopen("https://api.github.com/repos/Fwindy/CLIProxyAPI/releases/latest", timeout=10) as response:
+            release_data = json.load(response)
+            latest_tag = release_data.get("tag_name", "")
+            if latest_tag.startswith("v"):
+                latest_version = latest_tag[1:]
+            else:
+                latest_version = latest_tag
+    except Exception as e:
+        print(f"  ⚠️  Failed to check for CPA updates: {e}")
+        return
+
+    # Compare versions (simple string comparison for now)
+    if current_version and current_version == latest_version:
+        print(f"  ✓ CPA 已是最新版本 (v{current_version})")
+        return
+
+    print(f"  发现新版本: v{latest_version}" + (f" (当前: v{current_version})" if current_version else ""))
+    print("→ 正在下载最新版本...")
+
+    # Download the latest release
+    asset_name = f"CLIProxyAPI_{latest_version}_{os_name}_{arch}.{archive_ext}"
+    download_url = f"https://github.com/Fwindy/CLIProxyAPI/releases/download/v{latest_version}/{asset_name}"
+
+    try:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            archive_path = tmp_path / asset_name
+
+            # Download
+            with urllib.request.urlopen(download_url, timeout=60) as response, open(archive_path, 'wb') as f:
+                f.write(response.read())
+
+            print("→ 正在解压...")
+
+            # Extract
+            if archive_ext == "tar.gz":
+                import tarfile
+                with tarfile.open(archive_path, "r:gz") as tar:
+                    tar.extractall(path=tmp_path)
+            elif archive_ext == "zip":
+                with zipfile.ZipFile(archive_path, "r") as zip_ref:
+                    zip_ref.extractall(tmp_path)
+
+            # Find the executable
+            executable_found = None
+            for root, _, files in os.walk(tmp_path):
+                for file in files:
+                    if file.startswith("CLIProxyAPI"):
+                        if sys.platform == "win32" and file.endswith(".exe"):
+                            executable_found = Path(root) / file
+                            break
+                        elif sys.platform != "win32" and not file.endswith(".exe"):
+                            executable_found = Path(root) / file
+                            break
+                if executable_found:
+                    break
+
+            if not executable_found:
+                print("  ✗ 未找到 CPA 可执行文件")
+                return
+
+            # Backup existing
+            if cpa_bin.exists():
+                backup_path = cpa_dir / f"{cpa_bin.name}.bak"
+                if backup_path.exists():
+                    backup_path.unlink()
+                cpa_bin.rename(backup_path)
+
+            # Copy new executable
+            import shutil
+            shutil.copy2(executable_found, cpa_bin)
+
+            # Make executable
+            if sys.platform != "win32":
+                current_stat = cpa_bin.stat()
+                cpa_bin.chmod(current_stat.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+            print(f"  ✓ CPA 已更新到 v{latest_version}")
+
+    except Exception as e:
+        print(f"  ✗ CPA 更新失败: {e}")
+
+
 def _invalidate_update_cache():
     """Delete the update-check cache for ALL profiles so no banner
     reports a stale "commits behind" count after a successful update.
@@ -6818,6 +6972,12 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 print("  ✓ 技能已是最新")
         except Exception as e:
             logger.debug("Skills sync during update failed: %s", e)
+
+        # Update CLIProxyAPI (CPA) if installed
+        try:
+            _update_cpa()
+        except Exception as e:
+            logger.debug("CPA update during hermes update failed: %s", e)
 
         # Sync bundled skills to all other profiles
         try:

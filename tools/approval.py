@@ -12,7 +12,6 @@ import contextvars
 import logging
 import os
 import re
-import sys
 import threading
 import time
 import unicodedata
@@ -612,16 +611,15 @@ def prompt_dangerous_approval(command: str, description: str,
     os.environ["HERMES_SPINNER_PAUSE"] = "1"
     try:
         while True:
-            print()
-            print(f"  ⚠️  DANGEROUS COMMAND: {description}")
-            print(f"      {command}")
-            print()
+            logger.info("")
+            logger.warning("  ⚠️  DANGEROUS COMMAND: %s", description)
+            logger.info("      %s", command)
+            logger.info("")
             if allow_permanent:
-                print("      [o]nce  |  [s]ession  |  [a]lways  |  [d]eny")
+                logger.info("      [o]nce  |  [s]ession  |  [a]lways  |  [d]eny")
             else:
-                print("      [o]nce  |  [s]ession  |  [d]eny")
-            print()
-            sys.stdout.flush()
+                logger.info("      [o]nce  |  [s]ession  |  [d]eny")
+            logger.info("")
 
             result = {"choice": ""}
 
@@ -637,34 +635,33 @@ def prompt_dangerous_approval(command: str, description: str,
             thread.join(timeout=timeout_seconds)
 
             if thread.is_alive():
-                print("\n      ⏱ Timeout - denying command")
+                logger.warning("      ⏱ Timeout - denying command")
                 return "deny"
 
             choice = result["choice"]
             if choice in ('o', 'once'):
-                print("      ✓ Allowed once")
+                logger.info("      ✓ Allowed once")
                 return "once"
             elif choice in ('s', 'session'):
-                print("      ✓ Allowed for this session")
+                logger.info("      ✓ Allowed for this session")
                 return "session"
             elif choice in ('a', 'always'):
                 if not allow_permanent:
-                    print("      ✓ Allowed for this session")
+                    logger.info("      ✓ Allowed for this session")
                     return "session"
-                print("      ✓ Added to permanent allowlist")
+                logger.info("      ✓ Added to permanent allowlist")
                 return "always"
             else:
-                print("      ✗ Denied")
+                logger.warning("      ✗ Denied")
                 return "deny"
 
     except (EOFError, KeyboardInterrupt):
-        print("\n      ✗ Cancelled")
+        logger.warning("      ✗ Cancelled")
         return "deny"
     finally:
         if "HERMES_SPINNER_PAUSE" in os.environ:
             del os.environ["HERMES_SPINNER_PAUSE"]
-        print()
-        sys.stdout.flush()
+        logger.info("")
 
 
 def _normalize_approval_mode(mode) -> str:

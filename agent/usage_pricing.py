@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -7,6 +8,8 @@ from typing import Any, Dict, Literal, Optional
 
 from agent.model_metadata import fetch_endpoint_model_metadata, fetch_model_metadata
 from utils import base_url_host_matches
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_PRICING = {"input": 0.0, "output": 0.0}
 
@@ -387,6 +390,7 @@ def _to_decimal(value: Any) -> Optional[Decimal]:
     try:
         return Decimal(str(value))
     except Exception:
+        logger.debug("decimal conversion failed", exc_info=True)
         return None
 
 

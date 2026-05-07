@@ -54,32 +54,7 @@ from pathlib import Path
 from hermes_constants import get_hermes_home
 
 
-_OPENAI_CLS_CACHE: Optional[type] = None
-
-
-def _load_openai_cls() -> type:
-    """Import and cache ``openai.OpenAI``."""
-    global _OPENAI_CLS_CACHE
-    if _OPENAI_CLS_CACHE is None:
-        from openai import OpenAI as _cls
-        _OPENAI_CLS_CACHE = _cls
-    return _OPENAI_CLS_CACHE
-
-
-class _OpenAIProxy:
-    """Module-level proxy that looks like ``openai.OpenAI`` but imports lazily."""
-
-    __slots__ = ()
-
-    def __call__(self, *args, **kwargs):
-        return _load_openai_cls()(*args, **kwargs)
-
-    def __instancecheck__(self, obj):
-        return isinstance(obj, _load_openai_cls())
-
-    def __repr__(self):
-        return "<lazy openai.OpenAI proxy>"
-
+from agent.client_factory import _OpenAIProxy, _load_openai_cls  # noqa: E402 — shared lazy proxy
 
 OpenAI = _OpenAIProxy()
 
@@ -929,6 +904,7 @@ class AIAgent:
         "have been dropped to keep the conversation alive. See issue #15236.]"
     )
     _CONTEXT_PRESSURE_COOLDOWN = 300.0
+    _context_pressure_last_warned: Dict[str, tuple[float, float]] = {}
 
     @property
     def base_url(self) -> str:
@@ -2173,7 +2149,6 @@ class AIAgent:
         )
         self._user_turn_count = 0
         self._context_pressure_warned_at = 0.0
-        self._context_pressure_last_warned: Dict[str, tuple[float, float]] = {}
 
         # Cumulative token usage for the session
         self.session_prompt_tokens = 0

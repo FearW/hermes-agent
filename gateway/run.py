@@ -12467,18 +12467,12 @@ class GatewayRunner:
             # interim text alongside tool calls (#10xxx).
             _sc = stream_consumer_holder[0]
             if isinstance(result, dict) and not result.get("failed"):
-                _final = result.get("final_response") or ""
-                _is_empty_sentinel = not _final or _final == "(empty)"
-                _streamed = bool(
-                    _sc and getattr(_sc, "final_response_sent", False)
-                )
                 _previewed = bool(result.get("response_previewed"))
-                if not _is_empty_sentinel and (_streamed or _previewed):
+                if _previewed:
                     logger.info(
                         "Suppressing normal final send for session %s: final delivery "
-                        "already confirmed (streamed=%s previewed=%s).",
+                        "already confirmed (streamed=False previewed=%s).",
                         session_key or "?",
-                        _streamed,
                         _previewed,
                     )
                     result["already_sent"] = True
@@ -12501,7 +12495,26 @@ class GatewayRunner:
                         await stream_task
                     except asyncio.CancelledError:
                         pass
-            
+
+            # Now that the stream consumer has finished, check if it
+            # already delivered the response.  This must run after the
+            # stream_task await so final_response_sent is accurate.
+            _sc = stream_consumer_holder[0]
+            if isinstance(result, dict) and not result.get("already_sent") and not result.get("failed"):
+                _final = result.get("final_response") or ""
+                _is_empty_sentinel = not _final or _final == "(empty)"
+                _streamed = bool(
+                    _sc and getattr(_sc, "final_response_sent", False)
+                )
+                if not _is_empty_sentinel and _streamed:
+                    logger.info(
+                        "Suppressing normal final send for session %s: final delivery "
+                        "already confirmed (streamed=%s previewed=False).",
+                        session_key or "?",
+                        _streamed,
+                    )
+                    result["already_sent"] = True
+
             # Clean up tracking
             tracking_task.cancel()
             if session_key:

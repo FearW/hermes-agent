@@ -272,7 +272,7 @@ class TestFormatDirectoryForDisplay:
     def test_empty_directory(self, tmp_path):
         with patch("gateway.channel_directory.DIRECTORY_PATH", tmp_path / "nope.json"):
             result = format_directory_for_display()
-        assert "No messaging platforms" in result
+        assert "当前没有已连接的消息平台" in result
 
     def test_telegram_display(self, tmp_path):
         cache_file = _write_directory(tmp_path, {
@@ -301,8 +301,8 @@ class TestFormatDirectoryForDisplay:
         with patch("gateway.channel_directory.DIRECTORY_PATH", cache_file):
             result = format_directory_for_display()
 
-        assert "Discord (Server1):" in result
-        assert "Discord (Server2):" in result
+        assert "Discord（Server1）：" in result
+        assert "Discord（Server2）：" in result
         assert "discord:#general" in result
 
 

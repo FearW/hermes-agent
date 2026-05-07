@@ -25,13 +25,24 @@ def _resolve_home_dir() -> Path:
         return Path.cwd()
 
 
+_hermes_home_cache: dict = {}
+
+
 def get_hermes_home() -> Path:
     """Return the Hermes home directory (default: ~/.hermes).
 
     Reads HERMES_HOME env var, falls back to ~/.hermes.
     This is the single source of truth — all other copies should import this.
     """
-    return Path(os.getenv("HERMES_HOME", _resolve_home_dir() / ".hermes"))
+    env_val = os.getenv("HERMES_HOME", "")
+    cached_env = _hermes_home_cache.get("_env")
+    if cached_env == env_val and "path" in _hermes_home_cache:
+        return _hermes_home_cache["path"]
+    result = Path(env_val) if env_val else _resolve_home_dir() / ".hermes"
+    _hermes_home_cache.clear()
+    _hermes_home_cache["_env"] = env_val
+    _hermes_home_cache["path"] = result
+    return result
 
 
 def get_default_hermes_root() -> Path:
@@ -240,13 +251,29 @@ def is_container() -> bool:
 # ─── Well-Known Paths ─────────────────────────────────────────────────────────
 
 
+_config_path_cache: dict = {}
+
+
 def get_config_path() -> Path:
     """Return the path to ``config.yaml`` under HERMES_HOME.
 
     Replaces the ``get_hermes_home() / "config.yaml"`` pattern repeated
     in 7+ files (skill_utils.py, hermes_logging.py, hermes_time.py, etc.).
     """
-    return get_hermes_home() / "config.yaml"
+    home = get_hermes_home()
+    cached_home = _config_path_cache.get("home")
+    if cached_home == home and "path" in _config_path_cache:
+        return _config_path_cache["path"]
+    result = home / "config.yaml"
+    _config_path_cache.clear()
+    _config_path_cache["home"] = home
+    _config_path_cache["path"] = result
+    return result
+
+
+def clear_hermes_home_cache():
+    _hermes_home_cache.clear()
+    _config_path_cache.clear()
 
 
 def get_skills_dir() -> Path:

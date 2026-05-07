@@ -889,7 +889,7 @@ install_deps() {
 install_cpa() {
     log_info "Installing CLIProxyAPI (CPA)..."
     mkdir -p "$HERMES_HOME/cpa"
-    local os arch asset archive url bin
+    local os arch asset archive url bin version
     case "$(uname -s)" in
         Linux*) os="linux"; archive="tar.gz" ;;
         Darwin*) os="darwin"; archive="tar.gz" ;;
@@ -905,8 +905,19 @@ install_cpa() {
         log_success "CPA already installed: $bin"
         return 0
     fi
-    asset="CLIProxyAPI_6.9.49_${os}_${arch}.${archive}"
-    url="https://github.com/Fwindy/CLIProxyAPI/releases/download/v6.9.49/$asset"
+    
+    # Auto-detect latest version from GitHub API
+    log_info "Fetching latest CLIProxyAPI version..."
+    version="$(curl -fsSL "https://api.github.com/repos/Fwindy/CLIProxyAPI/releases/latest" | grep -o '"tag_name": *"v[^"]*"' | sed 's/"tag_name": *"v\([^"]*\)"/\1/')"
+    if [ -z "$version" ]; then
+        log_warn "Failed to fetch latest version, falling back to v6.9.49"
+        version="6.9.49"
+    else
+        log_success "Found latest version: v$version"
+    fi
+    
+    asset="CLIProxyAPI_${version}_${os}_${arch}.${archive}"
+    url="https://github.com/Fwindy/CLIProxyAPI/releases/download/v${version}/$asset"
     local tmp_dir="$HERMES_HOME/cpa/.download"
     rm -rf "$tmp_dir" && mkdir -p "$tmp_dir"
     if curl -fsSL "$url" -o "$tmp_dir/$asset"; then
@@ -919,7 +930,7 @@ install_cpa() {
         if [ -n "$found" ]; then
             cp "$found" "$bin"
             chmod +x "$bin"
-            log_success "CPA installed: $bin"
+            log_success "CPA installed: $bin (v$version)"
             log_info "Run CPA: $bin --config $HERMES_HOME/cpa/config.yaml"
         else
             log_warn "CPA archive downloaded but executable was not found. Check: $tmp_dir"
