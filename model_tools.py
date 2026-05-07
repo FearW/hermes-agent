@@ -24,6 +24,7 @@ import json
 import asyncio
 import logging
 import threading
+import time
 from typing import Dict, Any, List, Optional, Tuple
 
 from tools.registry import registry
@@ -577,6 +578,13 @@ def handle_function_call(
         except Exception:
             pass  # file_tools may not be loaded yet
 
+    _analytics_start = time.monotonic()
+    _analytics_toolset = ""
+    try:
+        _analytics_toolset = registry.get_toolset_for_tool(function_name) or ""
+    except Exception:
+        pass
+
     try:
         if function_name in _AGENT_LOOP_TOOLS:
             return json.dumps({"error": f"{function_name} must be handled by the agent loop"})
@@ -596,8 +604,6 @@ def handle_function_call(
                 pass
 
         if function_name == "execute_code":
-            # Prefer the caller-provided list so subagents can't overwrite
-            # the parent's tool set via the process-global.
             sandbox_enabled = enabled_tools if enabled_tools is not None else _last_resolved_tool_names
             result = registry.dispatch(
                 function_name, function_args,
@@ -625,11 +631,39 @@ def handle_function_call(
         except Exception:
             pass
 
+        try:
+            from agent.tool_analytics import record_invocation
+            _dur_ms = (time.monotonic() - _analytics_start) * 1000
+            record_invocation(
+                function_name,
+                toolset=_analytics_toolset,
+                success=True,
+                duration_ms=_dur_ms,
+                session_id=session_id or "",
+            )
+        except Exception:
+            pass
+
         return result
 
     except Exception as e:
         error_msg = f"Error executing {function_name}: {str(e)}"
         logger.error(error_msg)
+
+        try:
+            from agent.tool_analytics import record_invocation
+            _dur_ms = (time.monotonic() - _analytics_start) * 1000
+            record_invocation(
+                function_name,
+                toolset=_analytics_toolset,
+                success=False,
+                duration_ms=_dur_ms,
+                session_id=session_id or "",
+                error_type=type(e).__name__,
+            )
+        except Exception:
+            pass
+
         return json.dumps({"error": error_msg}, ensure_ascii=False)
 
 

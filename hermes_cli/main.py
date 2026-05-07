@@ -4985,6 +4985,13 @@ def cmd_backup(args):
         run_backup(args)
 
 
+def cmd_analytics(args):
+    """Tool-usage analytics dashboard."""
+    from hermes_cli.analytics_cmd import cmd_analytics as _cmd
+
+    _cmd(args)
+
+
 def cmd_import(args):
     """Restore a Hermes backup from a zip file."""
     from hermes_cli.backup import run_import
@@ -8726,6 +8733,63 @@ Examples:
         "-l", "--label", help="Label for the snapshot (only used with --quick)"
     )
     backup_parser.set_defaults(func=cmd_backup)
+
+    # =========================================================================
+    # analytics command
+    # =========================================================================
+    from hermes_cli.analytics_cmd import cmd_analytics as _cmd_analytics
+
+    analytics_parser = subparsers.add_parser(
+        "analytics",
+        help="Tool-usage analytics dashboard",
+        description="View tool call statistics: success rates, latency, error breakdowns, and trends.",
+    )
+    analytics_sub = analytics_parser.add_subparsers(dest="analytics_command")
+
+    analytics_summary = analytics_sub.add_parser(
+        "summary", help="Per-tool call count, success rate, and latency (default)")
+    analytics_summary.add_argument(
+        "-p", "--period", choices=["hour", "day", "week", "month", "all"],
+        default="day", help="Time window (default: day)")
+    analytics_summary.add_argument(
+        "-t", "--tool", dest="tool_name", help="Filter to a specific tool")
+    analytics_summary.add_argument(
+        "-n", "--limit", type=int, default=20, help="Max tools to show (default: 20)")
+    analytics_summary.add_argument(
+        "-f", "--format", choices=["table", "json"], default="table",
+        help="Output format (default: table)")
+
+    analytics_timeline = analytics_sub.add_parser(
+        "timeline", help="Call volume over time")
+    analytics_timeline.add_argument(
+        "-p", "--period", choices=["hour", "day", "week", "month", "all"],
+        default="day", help="Time window (default: day)")
+    analytics_timeline.add_argument(
+        "-b", "--bucket", choices=["hour", "day", "week"], default="hour",
+        help="Time bucket size (default: hour)")
+    analytics_timeline.add_argument(
+        "-t", "--tool", dest="tool_name", help="Filter to a specific tool")
+    analytics_timeline.add_argument(
+        "-f", "--format", choices=["table", "json"], default="table",
+        help="Output format (default: table)")
+
+    analytics_errors = analytics_sub.add_parser(
+        "errors", help="Top failing tools and error types")
+    analytics_errors.add_argument(
+        "-p", "--period", choices=["hour", "day", "week", "month", "all"],
+        default="day", help="Time window (default: day)")
+    analytics_errors.add_argument(
+        "-n", "--limit", type=int, default=10, help="Max entries (default: 10)")
+    analytics_errors.add_argument(
+        "-f", "--format", choices=["table", "json"], default="table",
+        help="Output format (default: table)")
+
+    analytics_purge = analytics_sub.add_parser(
+        "purge", help="Delete analytics data older than N days")
+    analytics_purge.add_argument(
+        "--max-days", type=int, default=90, help="Delete records older than this (default: 90)")
+
+    analytics_parser.set_defaults(func=_cmd_analytics)
 
     # =========================================================================
     # import command
