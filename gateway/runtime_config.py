@@ -53,7 +53,7 @@ def load_prefill_messages() -> List[Dict[str, Any]]:
                     cfg = _y.safe_load(_f) or {}
                 file_path = cfg.get("prefill_messages_file", "")
         except Exception:
-            pass
+            logger.debug("Failed to load prefill messages config", exc_info=True)
     if not file_path:
         return []
     path = Path(file_path).expanduser()
@@ -88,7 +88,7 @@ def load_ephemeral_system_prompt() -> str:
                 cfg = _y.safe_load(_f) or {}
             return (cfg.get("agent", {}).get("system_prompt", "") or "").strip()
     except Exception:
-        pass
+        logger.debug("Failed to load ephemeral system prompt", exc_info=True)
     return ""
 
 
@@ -104,7 +104,7 @@ def load_reasoning_config() -> dict | None:
                 cfg = _y.safe_load(_f) or {}
             effort = str(cfg.get("agent", {}).get("reasoning_effort", "") or "").strip()
     except Exception:
-        pass
+        logger.debug("Failed to load reasoning config", exc_info=True)
     result = parse_reasoning_effort(effort)
     if effort and effort.strip() and result is None:
         logger.warning("Unknown reasoning_effort '%s', using default (medium)", effort)
@@ -123,7 +123,7 @@ def load_service_tier() -> str | None:
                 cfg = _y.safe_load(_f) or {}
             raw = str(cfg.get("agent", {}).get("service_tier", "") or "").strip()
     except Exception:
-        pass
+        logger.debug("Failed to load service tier", exc_info=True)
 
     value = raw.lower()
     if not value or value in {"normal", "default", "standard", "off", "none"}:
@@ -145,7 +145,7 @@ def load_show_reasoning() -> bool:
                 cfg = _y.safe_load(_f) or {}
             return bool(cfg.get("display", {}).get("show_reasoning", False))
     except Exception:
-        pass
+        logger.debug("Failed to load show_reasoning", exc_info=True)
     return False
 
 
@@ -162,7 +162,7 @@ def load_busy_input_mode() -> str:
                     cfg = _y.safe_load(_f) or {}
                 mode = str(cfg.get("display", {}).get("busy_input_mode", "") or "").strip().lower()
         except Exception:
-            pass
+            logger.debug("Failed to load busy_input_mode", exc_info=True)
     return "queue" if mode == "queue" else "interrupt"
 
 
@@ -179,7 +179,7 @@ def load_restart_drain_timeout() -> float:
                     cfg = _y.safe_load(_f) or {}
                 raw = str(cfg.get("agent", {}).get("restart_drain_timeout", "") or "").strip()
         except Exception:
-            pass
+            logger.debug("Failed to load restart_drain_timeout", exc_info=True)
     value = parse_restart_drain_timeout(raw)
     if raw and value == DEFAULT_GATEWAY_RESTART_DRAIN_TIMEOUT:
         try:
@@ -210,7 +210,7 @@ def load_background_notifications_mode() -> str:
                 elif raw not in (None, ""):
                     mode = str(raw)
         except Exception:
-            pass
+            logger.debug("Failed to load background_notifications_mode", exc_info=True)
     mode = (mode or "all").strip().lower()
     valid = {"all", "result", "error", "off"}
     if mode not in valid:
@@ -233,7 +233,7 @@ def load_provider_routing() -> dict:
                 cfg = _y.safe_load(_f) or {}
             return cfg.get("provider_routing", {}) or {}
     except Exception:
-        pass
+        logger.debug("Failed to load provider_routing", exc_info=True)
     return {}
 
 
@@ -250,7 +250,7 @@ def load_fallback_model() -> list | dict | None:
             if fb:
                 return fb
     except Exception:
-        pass
+        logger.debug("Failed to load fallback_model", exc_info=True)
     return None
 
 
@@ -265,5 +265,5 @@ def load_smart_model_routing() -> dict:
                 cfg = _y.safe_load(_f) or {}
             return cfg.get("smart_model_routing", {}) or {}
     except Exception:
-        pass
+        logger.debug("Failed to load smart_model_routing", exc_info=True)
     return {}

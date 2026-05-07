@@ -215,10 +215,10 @@ def sync_skills(quiet: bool = False) -> dict:
                     copied.append(skill_name)
                     manifest[skill_name] = bundled_hash
                     if not quiet:
-                        print(f"  + {skill_name}")
+                        logger.info("  + %s", skill_name)
             except (OSError, IOError) as e:
                 if not quiet:
-                    print(f"  ! Failed to copy {skill_name}: {e}")
+                        logger.warning("  ! Failed to copy %s: %s", skill_name, e)
                 # Do NOT add to manifest — next sync should retry
 
         elif dest.exists():
@@ -241,7 +241,7 @@ def sync_skills(quiet: bool = False) -> dict:
                 # User modified this skill — don't overwrite their changes
                 user_modified.append(skill_name)
                 if not quiet:
-                    print(f"  ~ {skill_name} (user-modified, skipping)")
+                    logger.info("  ~ %s (user-modified, skipping)", skill_name)
                 continue
 
             # User copy matches origin — check if bundled has a newer version
@@ -255,7 +255,7 @@ def sync_skills(quiet: bool = False) -> dict:
                         manifest[skill_name] = bundled_hash
                         updated.append(skill_name)
                         if not quiet:
-                            print(f"  ↑ {skill_name} (updated)")
+                            logger.info("  ↑ %s (updated)", skill_name)
                         # Remove backup after successful copy
                         shutil.rmtree(backup, ignore_errors=True)
                     except (OSError, IOError):
@@ -265,7 +265,7 @@ def sync_skills(quiet: bool = False) -> dict:
                         raise
                 except (OSError, IOError) as e:
                     if not quiet:
-                        print(f"  ! Failed to update {skill_name}: {e}")
+                        logger.warning("  ! Failed to update %s: %s", skill_name, e)
             else:
                 skipped += 1  # bundled unchanged, user unchanged
 

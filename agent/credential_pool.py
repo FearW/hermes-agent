@@ -302,6 +302,7 @@ def _iter_custom_providers(config: Optional[dict] = None):
 
             custom_providers = get_compatible_custom_providers(config)
         except Exception:
+            logger.debug("_iter_custom_providers failed", exc_info=True)
             return
     if not custom_providers:
         return
@@ -1354,6 +1355,7 @@ def _seed_from_singletons(provider: str, entries: List[PooledCredential]) -> Tup
                     if raw:
                         expires_at_ms = int(_dt.fromisoformat(raw).timestamp() * 1000)
                 except Exception:
+                    logger.debug("_seed_from_singletons expires_at parse failed", exc_info=True)
                     expires_at_ms = None
                 base_url = str(state.get("inference_base_url", "") or "").rstrip("/")
                 changed |= _seed_source_if_allowed(
@@ -1565,7 +1567,7 @@ def _seed_custom_pool(pool_key: str, entries: List[PooledCredential]) -> Tuple[b
                         is_suppressed,
                     )
     except Exception:
-        pass
+        logger.debug("_seed_custom_pool failed", exc_info=True)
 
     return changed, active_sources
 

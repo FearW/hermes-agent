@@ -145,6 +145,7 @@ class SessionStoreIdleProbe(IdleProbe):
         try:
             entries = list(store.list_sessions())
         except Exception:
+            logger.debug("_latest_activity failed", exc_info=True)
             return None
 
         latest: datetime.datetime | None = None
@@ -214,6 +215,7 @@ def record_skipped_run(
             existing = json.loads(state_path.read_text(encoding="utf-8"))
             state = existing if isinstance(existing, dict) else {}
         except Exception:
+            logger.debug("record_skipped_run state load failed", exc_info=True)
             state = {}
     else:
         state = {}
@@ -294,6 +296,7 @@ def _retention_action(session_store: Any, older_than_days: int) -> ActionResult:
             older_than_days=older_than_days
         )
     except Exception as exc:
+        logger.debug("_retention_action failed", exc_info=True)
         return {"changed": 0, "error": str(exc)}
     return {"changed": int(pruned or 0), "pruned": int(pruned or 0)}
 
@@ -316,6 +319,7 @@ def _l4_periodic_archive_action(
     try:
         entries = list(session_store.list_sessions())
     except Exception as exc:
+        logger.debug("_l4_periodic_archive_action list_sessions failed", exc_info=True)
         return {"changed": 0, "error": str(exc)}
 
     for entry in entries:
@@ -331,6 +335,7 @@ def _l4_periodic_archive_action(
         try:
             messages = session_store.load_transcript(sid)
         except Exception:
+            logger.debug("_l4_periodic_archive_action load_transcript failed", exc_info=True)
             continue
         if not messages or len(messages) < 5:
             continue
@@ -344,6 +349,7 @@ def _l4_periodic_archive_action(
             conn.commit()
             archived_count += 1
         except Exception:
+            logger.debug("_l4_periodic_archive_action insert failed", exc_info=True)
             continue
         finally:
             conn.close()
@@ -522,6 +528,7 @@ class BackgroundScheduler:
             data = json.loads(self._state_path.read_text(encoding="utf-8"))
             return data if isinstance(data, dict) else {}
         except Exception:
+            logger.debug("_read_state failed", exc_info=True)
             return {}
 
     def _write_state(self, result: dict[str, Any] | None = None) -> None:
@@ -700,6 +707,7 @@ class BackgroundScheduler:
                             try:
                                 idle_seconds = idle_probe.seconds_since_activity()
                             except Exception:
+                                logger.debug("idle_seconds probe failed", exc_info=True)
                                 idle_seconds = float("inf")
                         if idle_seconds < task.idle_required_s:
                             rt = self._runtime[task.name]

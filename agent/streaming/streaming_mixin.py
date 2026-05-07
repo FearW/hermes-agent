@@ -103,6 +103,8 @@ class StreamingAPICallMixin:
 
             except Exception as e:
 
+                logger.debug("_interruptible_api_call failed", exc_info=True)
+
                 result["error"] = e
 
             finally:
@@ -167,7 +169,7 @@ class StreamingAPICallMixin:
 
                 except Exception:
 
-                    pass
+                    logger.debug("_interruptible_api_call close on interrupt failed", exc_info=True)
 
                 raise InterruptedError("Agent interrupted during API call")
 
@@ -313,7 +315,7 @@ class StreamingAPICallMixin:
 
             except Exception:
 
-                pass
+                logger.debug("_fire_stream_delta callback failed", exc_info=True)
 
         if delivered:
 
@@ -335,7 +337,7 @@ class StreamingAPICallMixin:
 
             except Exception:
 
-                pass
+                logger.debug("_fire_reasoning_delta callback failed", exc_info=True)
 
 
 
@@ -365,7 +367,7 @@ class StreamingAPICallMixin:
 
             except Exception:
 
-                pass
+                logger.debug("_fire_tool_gen_started callback failed", exc_info=True)
 
 
 
@@ -475,7 +477,7 @@ class StreamingAPICallMixin:
 
                 except Exception:
 
-                    pass
+                    logger.debug("on_first_delta callback failed", exc_info=True)
 
 
 
@@ -713,7 +715,7 @@ class StreamingAPICallMixin:
 
                             except Exception:
 
-                                pass
+                                logger.debug("stream_delta_callback failed", exc_info=True)
 
 
 
@@ -1269,7 +1271,7 @@ class StreamingAPICallMixin:
 
                                 except Exception:
 
-                                    pass
+                                    logger.debug("_replace_primary_openai_client failed on retry", exc_info=True)
 
                                 continue
 
@@ -1348,6 +1350,8 @@ class StreamingAPICallMixin:
                             )
 
                         except Exception as fallback_err:
+
+                            logger.debug("fallback non-streaming call failed", exc_info=True)
 
                             result["error"] = fallback_err
 
@@ -1491,7 +1495,7 @@ class StreamingAPICallMixin:
 
                 except Exception:
 
-                    pass
+                    logger.debug("stale_stream_kill close failed", exc_info=True)
 
                 # Rebuild the primary client too — its connection pool
 
@@ -1507,7 +1511,7 @@ class StreamingAPICallMixin:
 
                 except Exception:
 
-                    pass
+                    logger.debug("stale_stream_pool_cleanup failed", exc_info=True)
 
                 # Reset the timer so we don't kill repeatedly while
 
@@ -1551,7 +1555,7 @@ class StreamingAPICallMixin:
 
                 except Exception:
 
-                    pass
+                    logger.debug("_interruptible_streaming_api_call close on interrupt failed", exc_info=True)
 
                 raise InterruptedError("Agent interrupted during streaming API call")
 

@@ -56,12 +56,14 @@ def _load_skill_payload(skill_identifier: str, task_id: str | None = None) -> tu
             try:
                 normalized = str(identifier_path.resolve().relative_to(SKILLS_DIR.resolve()))
             except Exception:
+                logger.debug("_load_skill_payload path normalization failed", exc_info=True)
                 normalized = raw_identifier
         else:
             normalized = raw_identifier.lstrip("/")
 
         loaded_skill = json.loads(skill_view(normalized, task_id=task_id))
     except Exception:
+        logger.debug("_load_skill_payload failed", exc_info=True)
         return None
 
     if not loaded_skill.get("success"):
@@ -74,6 +76,7 @@ def _load_skill_payload(skill_identifier: str, task_id: str | None = None) -> tu
         try:
             skill_dir = SKILLS_DIR / Path(skill_path).parent
         except Exception:
+            logger.debug("_load_skill_payload skill_dir resolution failed", exc_info=True)
             skill_dir = None
 
     return loaded_skill, skill_dir, skill_name
@@ -115,7 +118,7 @@ def _inject_skill_config(loaded_skill: dict[str, Any], parts: list[str]) -> None
         lines.append("]")
         parts.extend(lines)
     except Exception:
-        pass  # Non-critical — skill still loads without config injection
+        logger.debug("_inject_skill_config failed", exc_info=True)
 
 
 def _build_skill_message(
@@ -256,9 +259,10 @@ def scan_skill_commands() -> Dict[str, Dict[str, Any]]:
                         "skill_dir": str(skill_md.parent),
                     }
                 except Exception:
+                    logger.debug("scan_skill_commands skill parse failed", exc_info=True)
                     continue
     except Exception:
-        pass
+        logger.debug("scan_skill_commands failed", exc_info=True)
     return _skill_commands
 
 
