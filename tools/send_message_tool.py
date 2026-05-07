@@ -156,6 +156,7 @@ def _handle_list():
         from gateway.channel_directory import format_directory_for_display
         return json.dumps({"targets": format_directory_for_display()})
     except Exception as e:
+        logger.debug("_handle_list failed", exc_info=True)
         return json.dumps(_error(f"Failed to load channel directory: {e}"))
 
 
@@ -190,6 +191,7 @@ def _handle_send(args):
                     f"Use send_message(action='list') to see available targets."
                 })
         except Exception:
+            logger.debug("_handle_send failed", exc_info=True)
             return json.dumps({
                 "error": f"Could not resolve '{target_ref}' on {platform_name}. "
                 f"Try using a numeric channel ID instead."
@@ -203,6 +205,7 @@ def _handle_send(args):
         from gateway.config import load_gateway_config, Platform
         config = load_gateway_config()
     except Exception as e:
+        logger.debug("_handle_send failed", exc_info=True)
         return json.dumps(_error(f"Failed to load gateway config: {e}"))
 
     # Accept any platform name — built-in names resolve to their enum
@@ -294,12 +297,13 @@ def _handle_send(args):
                 ):
                     result["mirrored"] = True
             except Exception:
-                pass
+                logger.debug("_handle_send failed", exc_info=True)
 
         if isinstance(result, dict) and "error" in result:
             result["error"] = _sanitize_error_text(result["error"])
         return json.dumps(result)
     except Exception as e:
+        logger.debug("_handle_send failed", exc_info=True)
         return json.dumps(_error(f"Send failed: {e}"))
 
 
@@ -428,6 +432,7 @@ async def _send_via_adapter(platform, pconfig, chat_id, chunk):
                     return {"success": True, "message_id": result.message_id}
                 return {"error": f"Adapter send failed: {result.error}"}
     except Exception as e:
+        logger.debug("_send_via_adapter failed", exc_info=True)
         return {"error": f"Plugin platform send failed: {e}"}
     return {"error": f"No live adapter for platform '{platform.value}'. Is the gateway running with this platform connected?"}
 
@@ -484,7 +489,7 @@ async def _send_to_platform(platform, pconfig, chat_id, message, thread_id=None,
             if entry and entry.max_message_length > 0:
                 _MAX_LENGTHS[platform] = entry.max_message_length
         except Exception:
-            pass
+            logger.debug("_send_to_platform failed", exc_info=True)
 
     # Smart-chunk the message to fit within platform limits.
     # For short messages or platforms without a known limit this is a no-op.
@@ -671,6 +676,7 @@ async def _send_telegram(token, chat_id, message, media_files=None, thread_id=No
                 _adapter = TelegramAdapter.__new__(TelegramAdapter)
                 formatted = _adapter.format_message(message)
             except Exception:
+                logger.debug("_send_telegram failed", exc_info=True)
                 # Fallback: send as-is if formatting unavailable
                 formatted = message
             send_parse_mode = ParseMode.MARKDOWN_V2
@@ -707,6 +713,7 @@ async def _send_telegram(token, chat_id, message, media_files=None, thread_id=No
                             from gateway.platforms.telegram import _strip_mdv2
                             plain = _strip_mdv2(formatted)
                         except Exception:
+                            logger.debug("_send_telegram failed", exc_info=True)
                             plain = message
                     else:
                         plain = message
@@ -771,6 +778,7 @@ async def _send_telegram(token, chat_id, message, media_files=None, thread_id=No
     except ImportError:
         return {"error": "python-telegram-bot not installed. Run: pip install python-telegram-bot"}
     except Exception as e:
+        logger.debug("_send_telegram failed", exc_info=True)
         return _error(f"Telegram send failed: {e}")
 
 
@@ -844,7 +852,7 @@ async def _send_discord(token, chat_id, message, thread_id=None, media_files=Non
                 from gateway.channel_directory import lookup_channel_type
                 _channel_type = lookup_channel_type("discord", chat_id)
             except Exception:
-                pass
+                logger.debug("_send_discord failed", exc_info=True)
 
             if _channel_type == "forum":
                 is_forum = True
@@ -914,6 +922,7 @@ async def _send_discord(token, chat_id, message, thread_id=None, media_files=Non
                                     return _error(f"Discord forum thread creation error ({resp.status}): {body}")
                                 data = await resp.json()
                         except Exception as e:
+                            logger.debug("_send_discord failed", exc_info=True)
                             return _error(_sanitize_error_text(f"Discord forum thread upload failed: {e}"))
                     else:
                         # No media — simple JSON POST creates the thread with
@@ -992,6 +1001,7 @@ async def _send_discord(token, chat_id, message, thread_id=None, media_files=Non
             result["warnings"] = warnings
         return result
     except Exception as e:
+        logger.debug("_send_discord failed", exc_info=True)
         return _error(f"Discord send failed: {e}")
 
 
@@ -1015,6 +1025,7 @@ async def _send_slack(token, chat_id, message):
                     return {"success": True, "platform": "slack", "chat_id": chat_id, "message_id": data.get("ts")}
                 return _error(f"Slack API error: {data.get('error', 'unknown')}")
     except Exception as e:
+        logger.debug("_send_slack failed", exc_info=True)
         return _error(f"Slack send failed: {e}")
 
 
@@ -1043,6 +1054,7 @@ async def _send_whatsapp(extra, chat_id, message):
                 body = await resp.text()
                 return _error(f"WhatsApp bridge error ({resp.status}): {body}")
     except Exception as e:
+        logger.debug("_send_whatsapp failed", exc_info=True)
         return _error(f"WhatsApp send failed: {e}")
 
 
@@ -1100,6 +1112,7 @@ async def _send_signal(extra, chat_id, message, media_files=None):
                 result["warnings"] = [f"Some media files were skipped (not found on disk)"]
             return result
     except Exception as e:
+        logger.debug("_send_signal failed", exc_info=True)
         return _error(f"Signal send failed: {e}")
 
 
@@ -1134,6 +1147,7 @@ async def _send_email(extra, chat_id, message):
         server.quit()
         return {"success": True, "platform": "email", "chat_id": chat_id}
     except Exception as e:
+        logger.debug("_send_email failed", exc_info=True)
         return _error(f"Email send failed: {e}")
 
 
@@ -1190,6 +1204,7 @@ async def _send_sms(auth_token, chat_id, message):
                 msg_sid = body.get("sid", "")
                 return {"success": True, "platform": "sms", "chat_id": chat_id, "message_id": msg_sid}
     except Exception as e:
+        logger.debug("_send_sms failed", exc_info=True)
         return _error(f"SMS send failed: {e}")
 
 
@@ -1214,6 +1229,7 @@ async def _send_mattermost(token, extra, chat_id, message):
                 data = await resp.json()
         return {"success": True, "platform": "mattermost", "chat_id": chat_id, "message_id": data.get("id")}
     except Exception as e:
+        logger.debug("_send_mattermost failed", exc_info=True)
         return _error(f"Mattermost send failed: {e}")
 
 
@@ -1258,6 +1274,7 @@ async def _send_matrix(token, extra, chat_id, message):
                 data = await resp.json()
         return {"success": True, "platform": "matrix", "chat_id": chat_id, "message_id": data.get("event_id")}
     except Exception as e:
+        logger.debug("_send_matrix failed", exc_info=True)
         return _error(f"Matrix send failed: {e}")
 
 
@@ -1313,12 +1330,13 @@ async def _send_matrix_via_adapter(pconfig, chat_id, message, media_files=None, 
             "message_id": last_result.message_id,
         }
     except Exception as e:
+        logger.debug("_send_matrix_via_adapter failed", exc_info=True)
         return _error(f"Matrix send failed: {e}")
     finally:
         try:
             await adapter.disconnect()
         except Exception:
-            pass
+            logger.debug("_send_matrix_via_adapter failed", exc_info=True)
 
 
 async def _send_homeassistant(token, extra, chat_id, message):
@@ -1341,6 +1359,7 @@ async def _send_homeassistant(token, extra, chat_id, message):
                     return _error(f"Home Assistant API error ({resp.status}): {body}")
         return {"success": True, "platform": "homeassistant", "chat_id": chat_id}
     except Exception as e:
+        logger.debug("_send_homeassistant failed", exc_info=True)
         return _error(f"Home Assistant send failed: {e}")
 
 
@@ -1372,6 +1391,7 @@ async def _send_dingtalk(extra, chat_id, message):
                 return _error(f"DingTalk API error: {data.get('errmsg', 'unknown')}")
         return {"success": True, "platform": "dingtalk", "chat_id": chat_id}
     except Exception as e:
+        logger.debug("_send_dingtalk failed", exc_info=True)
         return _error(f"DingTalk send failed: {e}")
 
 
@@ -1399,6 +1419,7 @@ async def _send_wecom(extra, chat_id, message):
         finally:
             await adapter.disconnect()
     except Exception as e:
+        logger.debug("_send_wecom failed", exc_info=True)
         return _error(f"WeCom send failed: {e}")
 
 
@@ -1420,6 +1441,7 @@ async def _send_weixin(pconfig, chat_id, message, media_files=None):
             media_files=media_files,
         )
     except Exception as e:
+        logger.debug("_send_weixin failed", exc_info=True)
         return _error(f"Weixin send failed: {e}")
 
 
@@ -1447,6 +1469,7 @@ async def _send_bluebubbles(extra, chat_id, message):
         finally:
             await adapter.disconnect()
     except Exception as e:
+        logger.debug("_send_bluebubbles failed", exc_info=True)
         return _error(f"BlueBubbles send failed: {e}")
 
 
@@ -1504,6 +1527,7 @@ async def _send_feishu(pconfig, chat_id, message, media_files=None, thread_id=No
             "message_id": last_result.message_id,
         }
     except Exception as e:
+        logger.debug("_send_feishu failed", exc_info=True)
         return _error(f"Feishu send failed: {e}")
 
 
@@ -1517,6 +1541,7 @@ def _check_send_message():
         from gateway.status import is_gateway_running
         return is_gateway_running()
     except Exception:
+        logger.debug("_check_send_message failed", exc_info=True)
         return False
 
 
@@ -1569,6 +1594,7 @@ async def _send_qqbot(pconfig, chat_id, message):
             else:
                 return _error(f"QQBot send failed: {resp.status_code} {resp.text}")
     except Exception as e:
+        logger.debug("_send_qqbot failed", exc_info=True)
         return _error(f"QQBot send failed: {e}")
 
 
@@ -1598,6 +1624,7 @@ async def _send_yuanbao(chat_id, message, media_files=None):
     try:
         return await send_yuanbao_direct(adapter, chat_id, message, media_files=media_files)
     except Exception as e:
+        logger.debug("_send_yuanbao failed", exc_info=True)
         return _error(f"Yuanbao send failed: {e}")
 
 

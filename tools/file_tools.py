@@ -47,7 +47,7 @@ def _get_max_read_chars() -> int:
             _max_read_chars_cached = int(val)
             return _max_read_chars_cached
     except Exception:
-        pass
+        logger.debug("_get_max_read_chars failed", exc_info=True)
     _max_read_chars_cached = _DEFAULT_MAX_READ_CHARS
     return _max_read_chars_cached
 
@@ -444,6 +444,7 @@ def read_file_tool(path: str, offset: int = 1, limit: int = 500, task_id: str = 
 
         return json.dumps(result_dict, ensure_ascii=False)
     except Exception as e:
+        logger.debug("read_file_tool failed", exc_info=True)
         return tool_error(str(e))
 
 
@@ -646,6 +647,7 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
             result_json += "\n\n[Hint: old_string not found. Use read_file to verify the current content, or search_files to locate the text.]"
         return result_json
     except Exception as e:
+        logger.debug("patch_tool failed", exc_info=True)
         return tool_error(str(e))
 
 
@@ -714,6 +716,7 @@ def search_tool(pattern: str, target: str = "content", path: str = ".",
             result_json += f"\n\n[Hint: Results truncated. Use offset={next_offset} to see more, or narrow with a more specific pattern or file_glob.]"
         return result_json
     except Exception as e:
+        logger.debug("search_tool failed", exc_info=True)
         return tool_error(str(e))
 
 

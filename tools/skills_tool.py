@@ -389,6 +389,7 @@ def _gateway_setup_hint() -> str:
 
         return GATEWAY_SECRET_CAPTURE_UNSUPPORTED_MESSAGE
     except Exception:
+        logger.debug("_gateway_setup_hint failed", exc_info=True)
         return "Secure secret entry is not available. Load this skill in the local CLI to be prompted, or add the key to ~/.hermes/.env manually."
 
 
@@ -435,7 +436,7 @@ def _get_category_from_path(skill_path: Path) -> Optional[str]:
         from agent.skill_utils import get_external_skills_dirs
         dirs_to_check.extend(get_external_skills_dirs())
     except Exception:
-        pass
+        logger.debug("_get_category_from_path failed", exc_info=True)
     for skills_dir in dirs_to_check:
         try:
             rel_path = skill_path.relative_to(skills_dir)
@@ -502,6 +503,7 @@ def _is_skill_disabled(name: str, platform: str = None) -> bool:
                 return name in platform_disabled
         return name in skills_cfg.get("disabled", [])
     except Exception:
+        logger.debug("_is_skill_disabled failed", exc_info=True)
         return False
 
 
@@ -648,7 +650,7 @@ def skills_categories(verbose: bool = False, task_id: str = None) -> str:
             from agent.skill_utils import get_external_skills_dirs
             all_dirs.extend(d for d in get_external_skills_dirs() if d.exists())
         except Exception:
-            pass
+            logger.debug("skills_categories failed", exc_info=True)
         if not all_dirs:
             return json.dumps(
                 {
@@ -671,6 +673,7 @@ def skills_categories(verbose: bool = False, task_id: str = None) -> str:
                         skill_md.read_text(encoding="utf-8")[:4000]
                     )
                 except Exception:
+                    logger.debug("skills_categories failed", exc_info=True)
                     frontmatter = {}
 
                 if not skill_matches_platform(frontmatter):
@@ -702,6 +705,7 @@ def skills_categories(verbose: bool = False, task_id: str = None) -> str:
         )
 
     except Exception as e:
+        logger.debug("skills_categories failed", exc_info=True)
         return tool_error(str(e), success=False)
 
 
@@ -770,6 +774,7 @@ def skills_list(category: str = None, task_id: str = None) -> str:
         )
 
     except Exception as e:
+        logger.debug("skills_list failed", exc_info=True)
         return tool_error(str(e), success=False)
 
 
@@ -855,6 +860,7 @@ def skill_view(name: str, file_path: str = None, task_id: str = None) -> str:
         try:
             content = skill_md.read_text(encoding="utf-8")
         except Exception as e:
+            logger.debug("skill_view failed", exc_info=True)
             return json.dumps(
                 {
                     "success": False,
@@ -870,7 +876,7 @@ def skill_view(name: str, file_path: str = None, task_id: str = None) -> str:
         try:
             _trusted_dirs.extend(d.resolve() for d in all_dirs[1:])
         except Exception:
-            pass
+            logger.debug("skill_view failed", exc_info=True)
         for _td in _trusted_dirs:
             try:
                 skill_md.resolve().relative_to(_td)
@@ -907,6 +913,7 @@ def skill_view(name: str, file_path: str = None, task_id: str = None) -> str:
         try:
             parsed_frontmatter, _ = _parse_frontmatter(content)
         except Exception:
+            logger.debug("skill_view failed", exc_info=True)
             parsed_frontmatter = {}
 
         if not skill_matches_platform(parsed_frontmatter):
@@ -1234,6 +1241,7 @@ def skill_view(name: str, file_path: str = None, task_id: str = None) -> str:
         return json.dumps(result, ensure_ascii=False)
 
     except Exception as e:
+        logger.debug("skill_view failed", exc_info=True)
         return tool_error(str(e), success=False)
 
 

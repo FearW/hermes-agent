@@ -994,6 +994,7 @@ def execute_code(
         try:
             from tools.env_passthrough import is_env_passthrough as _is_passthrough
         except Exception:
+            logger.debug("execute_code failed", exc_info=True)
             _is_passthrough = lambda _: False  # noqa: E731
         child_env = {}
         for k, v in os.environ.items():
@@ -1257,6 +1258,7 @@ def _load_config() -> dict:
         from cli import CLI_CONFIG
         return CLI_CONFIG.get("code_execution", {})
     except Exception:
+        logger.debug("_load_config failed", exc_info=True)
         return {}
 
 

@@ -30,9 +30,12 @@ Usage:
 
 import difflib
 import re
+import logging
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Any
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 
 class OperationType(Enum):
@@ -394,6 +397,7 @@ def apply_v4a_operations(operations: List[PatchOperation],
                     errors.append(f"Failed to update {op.file_path}: {result[1]}")
 
         except Exception as e:
+            logger.debug("apply_v4a_operations failed", exc_info=True)
             errors.append(f"Error processing {op.file_path}: {str(e)}")
 
     # Run lint on all modified/created files

@@ -98,7 +98,7 @@ def _load_json_store(path: Path) -> dict:
         try:
             return json.loads(path.read_text())
         except Exception:
-            pass
+            logger.debug("_load_json_store failed", exc_info=True)
     return {}
 
 
@@ -174,6 +174,8 @@ class _ThreadedProcessHandle:
                 except OSError:
                     pass
             except Exception as exc:
+                logger.debug("_worker failed", exc_info=True)
+                logger.debug("__init__ failed", exc_info=True)
                 self._error = exc
                 self._returncode = 1
             finally:
@@ -202,7 +204,7 @@ class _ThreadedProcessHandle:
             try:
                 self._cancel_fn()
             except Exception:
-                pass
+                logger.debug("kill failed", exc_info=True)
 
     def wait(self, timeout: float | None = None) -> int:
         self._done.wait(timeout=timeout)
@@ -437,7 +439,7 @@ class BaseEnvironment(ABC):
                         _elapsed = int(_now - (deadline - timeout))
                         _cb(f"terminal command running ({_elapsed}s elapsed)")
                     except Exception:
-                        pass
+                        logger.debug("_wait_for_process failed", exc_info=True)
             time.sleep(0.2)
 
         drain_thread.join(timeout=5)
@@ -445,7 +447,7 @@ class BaseEnvironment(ABC):
         try:
             proc.stdout.close()
         except Exception:
-            pass
+            logger.debug("_wait_for_process failed", exc_info=True)
 
         return {"output": "".join(output_chunks), "returncode": proc.returncode}
 
@@ -569,7 +571,7 @@ class BaseEnvironment(ABC):
         try:
             self.cleanup()
         except Exception:
-            pass
+            logger.debug("__del__ failed", exc_info=True)
 
     def _prepare_command(self, command: str) -> tuple[str, str | None]:
         """Transform sudo commands if SUDO_PASSWORD is available."""

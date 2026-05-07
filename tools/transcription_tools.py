@@ -116,6 +116,7 @@ def _load_stt_config() -> dict:
         from hermes_cli.config import load_config
         return load_config().get("stt", {})
     except Exception:
+        logger.debug("_load_stt_config failed", exc_info=True)
         return {}
 
 
@@ -747,6 +748,7 @@ def _transcribe_xai(file_path: str, model_name: str) -> Dict[str, Any]:
                 err_body = response.json()
                 detail = err_body.get("error", {}).get("message", "") or response.text[:300]
             except Exception:
+                logger.debug("_transcribe_xai failed", exc_info=True)
                 detail = response.text[:300]
             return {
                 "success": False,

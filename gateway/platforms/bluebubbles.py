@@ -248,7 +248,7 @@ class BlueBubblesAdapter(BasePlatformAdapter):
             if isinstance(data, list):
                 return [wh for wh in data if wh.get("url") == url]
         except Exception:
-            pass
+            logger.debug("_find_registered_webhooks failed", exc_info=True)
         return []
 
     async def _register_webhook(self) -> bool:
@@ -368,7 +368,7 @@ class BlueBubblesAdapter(BasePlatformAdapter):
                         self._guid_cache[target] = guid
                         return guid
         except Exception:
-            pass
+            logger.debug("_resolve_chat_guid failed", exc_info=True)
         return None
 
     async def _create_chat_for_handle(
@@ -386,6 +386,7 @@ class BlueBubblesAdapter(BasePlatformAdapter):
             msg_id = data.get("guid") or data.get("messageGuid") or "ok"
             return SendResult(success=True, message_id=str(msg_id), raw_response=res)
         except Exception as exc:
+            logger.debug("_create_chat_for_handle failed", exc_info=True)
             return SendResult(success=False, error=str(exc))
 
     # ------------------------------------------------------------------
@@ -449,6 +450,7 @@ class BlueBubblesAdapter(BasePlatformAdapter):
                     success=True, message_id=str(msg_id), raw_response=res
                 )
             except Exception as exc:
+                logger.debug("send failed", exc_info=True)
                 return SendResult(success=False, error=str(exc))
         return last
 
@@ -508,6 +510,7 @@ class BlueBubblesAdapter(BasePlatformAdapter):
                 error=result.get("message", "Attachment upload failed"),
             )
         except Exception as e:
+            logger.debug("_send_attachment failed", exc_info=True)
             return SendResult(success=False, error=str(e))
 
     async def send_image(
@@ -524,6 +527,7 @@ class BlueBubblesAdapter(BasePlatformAdapter):
             local_path = await cache_image_from_url(image_url)
             return await self._send_attachment(chat_id, local_path, caption=caption)
         except Exception:
+            logger.debug("send_image failed", exc_info=True)
             return await super().send_image(chat_id, image_url, caption, reply_to)
 
     async def send_image_file(
@@ -598,7 +602,7 @@ class BlueBubblesAdapter(BasePlatformAdapter):
                     self._api_url(f"/api/v1/chat/{encoded}/typing"), timeout=5
                 )
         except Exception:
-            pass
+            logger.debug("send_typing failed", exc_info=True)
 
     async def stop_typing(self, chat_id: str) -> None:
         if not self._private_api_enabled or not self._helper_connected or not self.client:
@@ -611,7 +615,7 @@ class BlueBubblesAdapter(BasePlatformAdapter):
                     self._api_url(f"/api/v1/chat/{encoded}/typing"), timeout=5
                 )
         except Exception:
-            pass
+            logger.debug("stop_typing failed", exc_info=True)
 
     # ------------------------------------------------------------------
     # Read receipts
@@ -629,7 +633,7 @@ class BlueBubblesAdapter(BasePlatformAdapter):
                 )
                 return True
         except Exception:
-            pass
+            logger.debug("mark_read failed", exc_info=True)
         return False
 
     # ------------------------------------------------------------------
@@ -668,7 +672,7 @@ class BlueBubblesAdapter(BasePlatformAdapter):
                 if participants:
                     info["participants"] = participants
         except Exception:
-            pass
+            logger.debug("get_chat_info failed", exc_info=True)
         return info
 
     def format_message(self, content: str) -> str:
@@ -781,6 +785,7 @@ class BlueBubblesAdapter(BasePlatformAdapter):
             try:
                 payload = json.loads(body)
             except Exception:
+                logger.debug("_handle_webhook failed", exc_info=True)
                 from urllib.parse import parse_qs
 
                 form = parse_qs(body)

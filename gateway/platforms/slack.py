@@ -211,6 +211,7 @@ def _serialize_slack_blocks_for_agent(blocks: list, max_chars: int = 6000) -> st
     try:
         payload = json.dumps(_sanitize(blocks), ensure_ascii=False, indent=2)
     except Exception:
+        logger.debug("_serialize_slack_blocks_for_agent failed", exc_info=True)
         payload = repr(blocks)
 
     if len(payload) > max_chars:
@@ -349,6 +350,7 @@ class SlackAdapter(BasePlatformAdapter):
         try:
             import httpx
         except Exception:  # pragma: no cover
+            logger.debug("_describe_slack_download_failure failed", exc_info=True)
             httpx = None
 
         if httpx is not None and isinstance(exc, httpx.HTTPStatusError):
@@ -1834,6 +1836,7 @@ class SlackAdapter(BasePlatformAdapter):
                     team_id=team_id,
                 ) or None
             except Exception:  # pragma: no cover - defensive
+                logger.debug("_handle_slack_message failed", exc_info=True)
                 reply_to_text = None
 
         msg_event = MessageEvent(
@@ -2480,6 +2483,7 @@ class SlackAdapter(BasePlatformAdapter):
             session_store._ensure_loaded()
             return session_key in session_store._entries
         except Exception:
+            logger.debug("_has_active_session_for_thread failed", exc_info=True)
             return False
 
     async def _download_slack_file(self, url: str, ext: str, audio: bool = False, team_id: str = "") -> str:

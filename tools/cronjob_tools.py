@@ -167,7 +167,7 @@ def _resolve_model_override(model_obj: Optional[Dict[str, Any]]) -> tuple:
             if isinstance(model_cfg, dict):
                 provider_name = model_cfg.get("provider") or None
         except Exception:
-            pass  # Best-effort; provider stays None
+            logger.debug("_resolve_model_override failed", exc_info=True)
     return (provider_name, model_name)
 
 
@@ -430,6 +430,7 @@ def cronjob(
         return tool_error(f"Unknown cron action '{action}'", success=False)
 
     except Exception as e:
+        logger.debug("cronjob failed", exc_info=True)
         return tool_error(str(e), success=False)
 
 

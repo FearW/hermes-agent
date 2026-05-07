@@ -307,6 +307,7 @@ def _get_sudo_password_cache_scope() -> str:
 
         session_key = get_session_env("HERMES_SESSION_KEY", "")
     except Exception:
+        logger.debug("_get_sudo_password_cache_scope failed", exc_info=True)
         session_key = os.getenv("HERMES_SESSION_KEY", "")
     if session_key:
         return f"session:{session_key}"
@@ -439,6 +440,7 @@ def _prompt_for_sudo_password(timeout_seconds: int = 45) -> str:
         try:
             return _sudo_cb() or ""
         except Exception:
+            logger.debug("_prompt_for_sudo_password failed", exc_info=True)
             return ""
 
     result = {"password": None, "done": False}
@@ -476,6 +478,8 @@ def _prompt_for_sudo_password(timeout_seconds: int = 45) -> str:
         except (EOFError, KeyboardInterrupt, OSError):
             result["password"] = ""
         except Exception:
+            logger.debug("read_password_thread failed", exc_info=True)
+            logger.debug("_prompt_for_sudo_password failed", exc_info=True)
             result["password"] = ""
         finally:
             if tty_fd is not None and old_attrs is not None:
@@ -546,6 +550,7 @@ def _safe_command_preview(command: Any, limit: int = 200) -> str:
     try:
         return repr(command)[:limit]
     except Exception:
+        logger.debug("_safe_command_preview failed", exc_info=True)
         return f"<{type(command).__name__}>"
 
 def _looks_like_env_assignment(token: str) -> bool:
@@ -676,6 +681,7 @@ def _sudo_nopasswd_works() -> bool:
         )
         return probe.returncode == 0
     except Exception:
+        logger.debug("_sudo_nopasswd_works failed", exc_info=True)
         return False
 
 
@@ -1197,7 +1203,7 @@ def _create_environment(env_type: str, image: str, cwd: str, timeout: int,
                 if "ephemeral_disk" in inspect.signature(modal.Sandbox.create).parameters:
                     sandbox_kwargs["ephemeral_disk"] = disk
             except Exception:
-                pass
+                logger.debug("_create_environment failed", exc_info=True)
 
         modal_state = _get_modal_backend_state(cc.get("modal_mode"))
 
@@ -2025,6 +2031,7 @@ def terminal_tool(
 
                 return json.dumps(result_data, ensure_ascii=False)
             except Exception as e:
+                logger.debug("terminal_tool failed", exc_info=True)
                 return json.dumps({
                     "output": "",
                     "exit_code": -1,
@@ -2097,7 +2104,7 @@ def terminal_tool(
                         output = hook_result
                         break
             except Exception:
-                pass
+                logger.debug("terminal_tool failed", exc_info=True)
             
             # Truncate output if too long, keeping both head and tail
             from tools.tool_output_limits import get_max_bytes

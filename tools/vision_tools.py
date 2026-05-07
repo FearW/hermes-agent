@@ -65,7 +65,7 @@ def _resolve_download_timeout() -> float:
         if val is not None:
             return float(val)
     except Exception:
-        pass
+        logger.debug("_resolve_download_timeout failed", exc_info=True)
     return 30.0
 
 
@@ -660,7 +660,7 @@ async def vision_analyze_tool(
             if _vtemp is not None:
                 vision_temperature = float(_vtemp)
         except Exception:
-            pass
+            logger.debug("vision_analyze_tool failed", exc_info=True)
         call_kwargs = {
             "task": "vision",
             "messages": messages,
@@ -803,6 +803,7 @@ def check_vision_requirements() -> bool:
         _provider, client, _model = resolve_vision_provider_client()
         return client is not None
     except Exception:
+        logger.debug("check_vision_requirements failed", exc_info=True)
         return False
 
 

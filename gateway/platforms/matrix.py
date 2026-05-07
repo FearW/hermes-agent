@@ -492,7 +492,7 @@ class MatrixAdapter(BasePlatformAdapter):
                     "Matrix: deleted stale device %s from server", client.device_id
                 )
             except Exception:
-                pass
+                logger.debug("_verify_device_keys_on_server failed", exc_info=True)
             try:
                 await olm.share_keys()
             except Exception as exc:
@@ -854,7 +854,7 @@ class MatrixAdapter(BasePlatformAdapter):
             try:
                 await self._client.api.session.close()
             except Exception:
-                pass
+                logger.debug("disconnect failed", exc_info=True)
             self._client = None
 
         logger.info("Matrix: disconnected")
@@ -950,7 +950,7 @@ class MatrixAdapter(BasePlatformAdapter):
                 if name_evt and hasattr(name_evt, "name") and name_evt.name:
                     name = name_evt.name
             except Exception:
-                pass
+                logger.debug("get_chat_info failed", exc_info=True)
 
         return {"name": name, "type": chat_type}
 
@@ -966,7 +966,7 @@ class MatrixAdapter(BasePlatformAdapter):
             try:
                 await self._client.set_typing(RoomID(chat_id), timeout=30000)
             except Exception:
-                pass
+                logger.debug("send_typing failed", exc_info=True)
 
     async def stop_typing(self, chat_id: str) -> None:
         """Clear the typing indicator."""
@@ -974,7 +974,7 @@ class MatrixAdapter(BasePlatformAdapter):
             try:
                 await self._client.set_typing(RoomID(chat_id), timeout=0)
             except Exception:
-                pass
+                logger.debug("stop_typing failed", exc_info=True)
 
 
     async def edit_message(
@@ -1007,6 +1007,7 @@ class MatrixAdapter(BasePlatformAdapter):
             )
             return SendResult(success=True, message_id=str(event_id))
         except Exception as exc:
+            logger.debug("edit_message failed", exc_info=True)
             return SendResult(success=False, error=str(exc))
 
     async def send_image(
@@ -1205,6 +1206,7 @@ class MatrixAdapter(BasePlatformAdapter):
                 try:
                     room_encrypted = bool(await state_store.is_encrypted(RoomID(room_id)))
                 except Exception:
+                    logger.debug("_upload_and_send failed", exc_info=True)
                     room_encrypted = False
                 if room_encrypted:
                     try:
@@ -1265,6 +1267,7 @@ class MatrixAdapter(BasePlatformAdapter):
             )
             return SendResult(success=True, message_id=str(event_id))
         except Exception as exc:
+            logger.debug("_upload_and_send failed", exc_info=True)
             return SendResult(success=False, error=str(exc))
 
     async def _send_local_file(
@@ -2270,6 +2273,7 @@ class MatrixAdapter(BasePlatformAdapter):
             )
             return SendResult(success=True, message_id=str(event_id))
         except Exception as exc:
+            logger.debug("_send_simple_message failed", exc_info=True)
             return SendResult(success=False, error=str(exc))
 
     # ------------------------------------------------------------------
@@ -2290,7 +2294,7 @@ class MatrixAdapter(BasePlatformAdapter):
                 if members and len(members) == 2:
                     return True
             except Exception:
-                pass
+                logger.debug("_is_dm_room failed", exc_info=True)
         return False
 
     async def _refresh_dm_cache(self) -> None:
@@ -2468,7 +2472,7 @@ class MatrixAdapter(BasePlatformAdapter):
                 if member and getattr(member, "displayname", None):
                     return member.displayname
             except Exception:
-                pass
+                logger.debug("_get_display_name failed", exc_info=True)
         # Strip the @...:server format to just the localpart.
         if user_id.startswith("@") and ":" in user_id:
             return user_id[1:].split(":")[0]

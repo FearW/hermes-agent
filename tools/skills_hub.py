@@ -1354,6 +1354,7 @@ class SkillsShSource(SkillSource):
             try:
                 skills = self.github._list_skills_in_repo(repo, base_path)
             except Exception:
+                logger.debug("_discover_identifier failed", exc_info=True)
                 continue
             for meta in skills:
                 if self._matches_skill_tokens(meta, tokens):
@@ -1391,12 +1392,13 @@ class SkillsShSource(SkillSource):
                         try:
                             skills = self.github._list_skills_in_repo(repo, dir_name + "/")
                         except Exception:
+                            logger.debug("_discover_identifier failed", exc_info=True)
                             continue
                         for meta in skills:
                             if self._matches_skill_tokens(meta, tokens):
                                 return meta.identifier
         except Exception:
-            pass
+            logger.debug("_discover_identifier failed", exc_info=True)
 
         return None
 
@@ -2840,6 +2842,7 @@ def check_for_skill_updates(
             try:
                 bundle = src.fetch(identifier)
             except Exception:
+                logger.debug("check_for_skill_updates failed", exc_info=True)
                 bundle = None
             if bundle:
                 break
@@ -3188,7 +3191,7 @@ def parallel_search_sources(
                     if on_source_done:
                         on_source_done(sid, len(results))
                 except Exception:
-                    pass
+                    logger.debug("parallel_search_sources failed", exc_info=True)
         except TimeoutError:
             timed_out_ids = [
                 futures[f] for f in futures if not f.done()

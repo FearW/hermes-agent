@@ -80,6 +80,7 @@ def check_camofox_available() -> bool:
             _vnc_url_checked = True
         return resp.status_code == 200
     except Exception:
+        logger.debug("check_camofox_available failed", exc_info=True)
         return False
 
 
@@ -273,7 +274,7 @@ def camofox_navigate(url: str, task_id: Optional[str] = None) -> str:
             result["snapshot"] = snapshot_text
             result["element_count"] = snap_data.get("refsCount", 0)
         except Exception:
-            pass  # Navigation succeeded; snapshot is a bonus
+            logger.debug("camofox_navigate failed", exc_info=True)
 
         return json.dumps(result)
     except requests.HTTPError as e:
@@ -286,6 +287,7 @@ def camofox_navigate(url: str, task_id: Optional[str] = None) -> str:
                      "or: docker run -p 9377:9377 -e CAMOFOX_PORT=9377 jo-inc/camofox-browser",
         })
     except Exception as e:
+        logger.debug("camofox_navigate failed", exc_info=True)
         return tool_error(str(e), success=False)
 
 
@@ -324,6 +326,7 @@ def camofox_snapshot(full: bool = False, task_id: Optional[str] = None,
             "element_count": refs_count,
         })
     except Exception as e:
+        logger.debug("camofox_snapshot failed", exc_info=True)
         return tool_error(str(e), success=False)
 
 
@@ -347,6 +350,7 @@ def camofox_click(ref: str, task_id: Optional[str] = None) -> str:
             "url": data.get("url", ""),
         })
     except Exception as e:
+        logger.debug("camofox_click failed", exc_info=True)
         return tool_error(str(e), success=False)
 
 
@@ -369,6 +373,7 @@ def camofox_type(ref: str, text: str, task_id: Optional[str] = None) -> str:
             "element": clean_ref,
         })
     except Exception as e:
+        logger.debug("camofox_type failed", exc_info=True)
         return tool_error(str(e), success=False)
 
 
@@ -385,6 +390,7 @@ def camofox_scroll(direction: str, task_id: Optional[str] = None) -> str:
         )
         return json.dumps({"success": True, "scrolled": direction})
     except Exception as e:
+        logger.debug("camofox_scroll failed", exc_info=True)
         return tool_error(str(e), success=False)
 
 
@@ -401,6 +407,7 @@ def camofox_back(task_id: Optional[str] = None) -> str:
         )
         return json.dumps({"success": True, "url": data.get("url", "")})
     except Exception as e:
+        logger.debug("camofox_back failed", exc_info=True)
         return tool_error(str(e), success=False)
 
 
@@ -417,6 +424,7 @@ def camofox_press(key: str, task_id: Optional[str] = None) -> str:
         )
         return json.dumps({"success": True, "pressed": key})
     except Exception as e:
+        logger.debug("camofox_press failed", exc_info=True)
         return tool_error(str(e), success=False)
 
 
@@ -432,6 +440,7 @@ def camofox_close(task_id: Optional[str] = None) -> str:
         )
         return json.dumps({"success": True, "closed": True})
     except Exception as e:
+        logger.debug("camofox_close failed", exc_info=True)
         return json.dumps({"success": True, "closed": True, "warning": str(e)})
 
 
@@ -479,6 +488,7 @@ def camofox_get_images(task_id: Optional[str] = None) -> str:
             "count": len(images),
         })
     except Exception as e:
+        logger.debug("camofox_get_images failed", exc_info=True)
         return tool_error(str(e), success=False)
 
 
@@ -518,7 +528,7 @@ def camofox_vision(question: str, annotate: bool = False,
                 )
                 annotation_context = f"\n\nAccessibility tree (element refs for interaction):\n{snap_data.get('snapshot', '')[:3000]}"
             except Exception:
-                pass
+                logger.debug("camofox_vision failed", exc_info=True)
 
         # Redact secrets from annotation context before sending to vision LLM.
         # The screenshot image itself cannot be redacted, but at least the
@@ -539,6 +549,7 @@ def camofox_vision(question: str, annotate: bool = False,
             _cfg = load_config()
             _vision_timeout = int(_cfg.get("auxiliary", {}).get("vision", {}).get("timeout", 120))
         except Exception:
+            logger.debug("camofox_vision failed", exc_info=True)
             _vision_timeout = 120
 
         response = call_llm(
@@ -569,6 +580,7 @@ def camofox_vision(question: str, annotate: bool = False,
             "screenshot_path": screenshot_path,
         })
     except Exception as e:
+        logger.debug("camofox_vision failed", exc_info=True)
         return tool_error(str(e), success=False)
 
 

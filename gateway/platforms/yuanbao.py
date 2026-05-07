@@ -776,6 +776,7 @@ class SignManager:
                 try:
                     result_data: dict[str, Any] = response.json()
                 except Exception as exc:
+                    logger.debug("fetch failed", exc_info=True)
                     raise ValueError(f"Sign token response parse error: {exc}") from exc
 
                 code = result_data.get("code")
@@ -1086,6 +1087,7 @@ class DecodeMiddleware(InboundMiddleware):
                 try:
                     msg_content = json.loads(msg_content)
                 except Exception:
+                    logger.debug("convert_json_msg_body failed", exc_info=True)
                     msg_content = {"text": msg_content}
             result.append({"msg_type": msg_type, "msg_content": msg_content or {}})
         return result
@@ -1147,6 +1149,7 @@ class DecodeMiddleware(InboundMiddleware):
         try:
             conn_json = json.loads(data.decode("utf-8"))
         except Exception:
+            logger.debug("_decode_single failed", exc_info=True)
             conn_json = None
 
         if isinstance(conn_json, dict):
@@ -1157,6 +1160,7 @@ class DecodeMiddleware(InboundMiddleware):
             try:
                 push = decode_inbound_push(data)
             except Exception:
+                logger.debug("_decode_single failed", exc_info=True)
                 push = None
             if push:
                 return push, "protobuf"
@@ -1364,6 +1368,7 @@ class RecallGuardMiddleware(InboundMiddleware):
                     cls._build_source(adapter, group_code, from_account),
                 ).session_id
             except Exception:
+                logger.debug("_redact failed", exc_info=True)
                 return
             # Poll until the recalled content appears in transcript — the
             # interrupted turn hasn't finished writing yet when scheduled.
@@ -1372,6 +1377,7 @@ class RecallGuardMiddleware(InboundMiddleware):
                 try:
                     transcript = store.load_transcript(sid)
                 except Exception:
+                    logger.debug("_redact failed", exc_info=True)
                     continue
                 for entry in transcript:
                     if entry.get("role") == "user" and entry.get("content") == recalled_text:
@@ -2246,6 +2252,7 @@ class MediaResolveMiddleware(InboundMiddleware):
         try:
             parsed = urllib.parse.urlparse(url)
         except Exception:
+            logger.debug("_resolve_download_url failed", exc_info=True)
             return url
 
         query = urllib.parse.parse_qs(parsed.query)
@@ -2257,6 +2264,7 @@ class MediaResolveMiddleware(InboundMiddleware):
         try:
             return await MediaResolveMiddleware._fetch_resource_url(adapter, resource_id)
         except Exception:
+            logger.debug("_resolve_download_url failed", exc_info=True)
             return url
 
     @classmethod
@@ -2661,6 +2669,7 @@ class ConnectionManager:
             try:
                 return bool(open_attr())
             except Exception:
+                logger.debug("is_connected failed", exc_info=True)
                 return False
         return False
 
@@ -2696,7 +2705,7 @@ class ConnectionManager:
                     logger.debug("[%s] Already connected, skipping connect()", adapter.name)
                     return True
             except Exception:
-                pass
+                logger.debug("open failed", exc_info=True)
 
         # Acquire platform-scoped lock to prevent duplicate connections
         if not adapter._acquire_platform_lock(
@@ -2843,6 +2852,7 @@ class ConnectionManager:
                 try:
                     msg = decode_conn_msg(bytes(raw))
                 except Exception:
+                    logger.debug("_authenticate failed", exc_info=True)
                     continue
 
                 head = msg.get("head", {})
@@ -3027,6 +3037,7 @@ class ConnectionManager:
                         decoded = decode_inbound_push(data) if data else {"head": head}
                         fut.set_result(decoded)
                     except Exception as exc:
+                        logger.debug("_handle_frame failed", exc_info=True)
                         fut.set_exception(exc)
                 return
 
@@ -3068,14 +3079,14 @@ class ConnectionManager:
                 if from_account:
                     return f"{from_account}:{group_code}"
         except Exception:
-            pass
+            logger.debug("_extract_sender_key failed", exc_info=True)
         # Protobuf: try decode_inbound_push for sender info
         try:
             push = decode_inbound_push(raw_data)
             if push:
                 return f"{push.get('from_account', '')}:{push.get('group_code', '')}"
         except Exception:
-            pass
+            logger.debug("_extract_sender_key failed", exc_info=True)
         # Fallback: unique key (no aggregation)
         return f"__unknown_{id(raw_data)}"
 
@@ -3161,6 +3172,7 @@ class ConnectionManager:
         except asyncio.TimeoutError:
             raise
         except Exception:
+            logger.debug("send_biz_request failed", exc_info=True)
             raise
         finally:
             self._pending_acks.pop(req_id, None)
@@ -3266,7 +3278,7 @@ class ConnectionManager:
             try:
                 await ws.close()
             except Exception:
-                pass
+                logger.debug("_cleanup_ws failed", exc_info=True)
 
 class MediaSendHandler(ABC):
     """Abstract base class for media send strategies.
@@ -3769,6 +3781,7 @@ class HeartbeatManager:
         except asyncio.CancelledError:
             cancelled = True
         except Exception:
+            logger.debug("_worker failed", exc_info=True)
             cancelled = False
         else:
             cancelled = False
@@ -3777,7 +3790,7 @@ class HeartbeatManager:
                 try:
                     await self.send_heartbeat_once(chat_id, WS_HEARTBEAT_FINISH)
                 except Exception:
-                    pass
+                    logger.debug("_worker failed", exc_info=True)
             self._reply_heartbeat_tasks.pop(chat_id, None)
             self._reply_hb_last_active.pop(chat_id, None)
 
@@ -3794,7 +3807,7 @@ class HeartbeatManager:
             try:
                 await self.send_heartbeat_once(chat_id, WS_HEARTBEAT_FINISH)
             except Exception:
-                pass
+                logger.debug("stop failed", exc_info=True)
 
     async def close(self) -> None:
         """Cancel all reply heartbeat tasks."""
@@ -3948,7 +3961,7 @@ class MessageSender:
             try:
                 await self._on_send_finish(chat_id)
             except Exception:
-                pass
+                logger.debug("send_text failed", exc_info=True)
         return SendResult(success=True)
 
     async def send_media(
@@ -4197,6 +4210,7 @@ class MessageSender:
         except asyncio.TimeoutError:
             return {"success": False, "error": f"Request timeout after {DEFAULT_SEND_TIMEOUT}s"}
         except Exception as exc:
+            logger.debug("_dispatch_encoded failed", exc_info=True)
             return {"success": False, "error": str(exc)}
 
     # -- Media validation ---------------------------------------------------
@@ -4564,7 +4578,7 @@ class YuanbaoAdapter(BasePlatformAdapter):
         try:
             await self._outbound.start_typing(chat_id)
         except Exception:
-            pass
+            logger.debug("send_typing failed", exc_info=True)
 
     async def stop_typing(self, chat_id: str) -> None:
         """Stop the RUNNING heartbeat loop without sending FINISH immediately.
@@ -4575,7 +4589,7 @@ class YuanbaoAdapter(BasePlatformAdapter):
         try:
             await self._outbound.stop_typing(chat_id, send_finish=False)
         except Exception:
-            pass
+            logger.debug("stop_typing failed", exc_info=True)
 
     async def _process_message_background(self, event, session_key: str) -> None:
         """Wrap base class processing with a slow-response notifier."""

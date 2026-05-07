@@ -705,6 +705,7 @@ def _generate_gemini_tts(text: str, output_path: str, tts_config: Dict[str, Any]
             err = response.json().get("error", {})
             detail = err.get("message") or response.text[:300]
         except Exception:
+            logger.debug("_generate_gemini_tts failed", exc_info=True)
             detail = response.text[:300]
         raise RuntimeError(
             f"Gemini TTS API error (HTTP {response.status_code}): {detail}"
@@ -786,6 +787,7 @@ def _check_neutts_available() -> bool:
         import importlib.util
         return importlib.util.find_spec("neutts") is not None
     except Exception:
+        logger.debug("_check_neutts_available failed", exc_info=True)
         return False
 
 
@@ -795,6 +797,7 @@ def _check_kittentts_available() -> bool:
         import importlib.util
         return importlib.util.find_spec("kittentts") is not None
     except Exception:
+        logger.debug("_check_kittentts_available failed", exc_info=True)
         return False
 
 
@@ -1456,7 +1459,7 @@ def stream_tts_to_speaker(
                 output_stream.stop()
                 output_stream.close()
             except Exception:
-                pass
+                logger.debug("stream_tts_to_speaker failed", exc_info=True)
         tts_done_event.set()
 
 

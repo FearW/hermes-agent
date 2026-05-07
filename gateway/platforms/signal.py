@@ -401,7 +401,7 @@ class SignalAdapter(BasePlatformAdapter):
                 self._background_tasks.add(task)
                 task.add_done_callback(self._background_tasks.discard)
             except Exception:
-                pass
+                logger.debug("_force_reconnect failed", exc_info=True)
             self._sse_response = None
 
     # ------------------------------------------------------------------

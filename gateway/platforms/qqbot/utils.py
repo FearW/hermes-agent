@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+
 import platform
 import sys
 from typing import Any, Dict, List
 
 from .constants import QQBOT_VERSION
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -19,6 +23,7 @@ def _get_hermes_version() -> str:
         from importlib.metadata import version
         return version("hermes-agent")
     except Exception:
+        logger.debug("_get_hermes_version failed", exc_info=True)
         return "dev"
 
 

@@ -24,10 +24,13 @@ Usage:
 
 import re
 import hashlib
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -919,6 +922,7 @@ def _get_configured_model() -> str:
         config = load_config()
         return config.get("model", "")
     except Exception:
+        logger.debug("_get_configured_model failed", exc_info=True)
         return ""
 
 

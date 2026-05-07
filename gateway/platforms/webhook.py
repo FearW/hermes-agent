@@ -216,7 +216,7 @@ class WebhookAdapter(BasePlatformAdapter):
                 from gateway.platform_registry import platform_registry
                 _is_known_platform = platform_registry.is_registered(deliver_type)
             except Exception:
-                pass
+                logger.debug("send failed", exc_info=True)
         if self.gateway_runner and _is_known_platform:
             return await self._deliver_cross_platform(
                 deliver_type, content, delivery
@@ -349,6 +349,7 @@ class WebhookAdapter(BasePlatformAdapter):
                     urllib.parse.parse_qsl(raw_body.decode("utf-8"))
                 )
             except Exception:
+                logger.debug("_handle_webhook failed", exc_info=True)
                 return web.json_response(
                     {"error": "Cannot parse body"}, status=400
                 )

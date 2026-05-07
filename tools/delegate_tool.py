@@ -293,7 +293,7 @@ def _looks_like_error_output(content: str) -> bool:
                 if status in {"error", "failed", "failure", "timeout"}:
                     return True
         except Exception:
-            pass
+            logger.debug("_looks_like_error_output failed", exc_info=True)
 
     first = content.splitlines()[0].strip().lower() if content.splitlines() else ""
     return (
@@ -458,6 +458,7 @@ def _is_mcp_toolset_name(name: str) -> bool:
 
         target = registry.resolve_toolset_alias(str(name))
     except Exception:
+        logger.debug("_is_mcp_toolset_name failed", exc_info=True)
         target = None
     return bool(target and str(target).startswith("mcp-"))
 
@@ -627,6 +628,7 @@ def _resolve_workspace_hint(parent_agent) -> Optional[str]:
         try:
             text = os.path.abspath(os.path.expanduser(str(candidate)))
         except Exception:
+            logger.debug("_resolve_workspace_hint failed", exc_info=True)
             continue
         if os.path.isabs(text) and os.path.isdir(text):
             return text
@@ -1149,6 +1151,7 @@ def _dump_subagent_timeout_diagnostic(
         try:
             logs_dir.mkdir(parents=True, exist_ok=True)
         except Exception:
+            logger.debug("_dump_subagent_timeout_diagnostic failed", exc_info=True)
             return None
 
         subagent_id = getattr(child, "_subagent_id", None) or f"idx{task_index}"
@@ -1189,6 +1192,7 @@ def _dump_subagent_timeout_diagnostic(
                     pass
                 _w(f"  {attr}: {val!r}")
             except Exception:
+                logger.debug("_dump_subagent_timeout_diagnostic failed", exc_info=True)
                 _w(f"  {attr}: <unreadable>")
         _w("")
 
@@ -1201,7 +1205,7 @@ def _dump_subagent_timeout_diagnostic(
             try:
                 _w(f"  loaded tools:      {sorted(list(tool_names))}")
             except Exception:
-                pass
+                logger.debug("_dump_subagent_timeout_diagnostic failed", exc_info=True)
         _w("")
 
         _w("## Prompt / schema sizes")
@@ -1212,6 +1216,7 @@ def _dump_subagent_timeout_diagnostic(
             _w(f"  system_prompt_bytes: {len(sys_prompt.encode('utf-8')) if isinstance(sys_prompt, str) else 'n/a'}")
             _w(f"  system_prompt_chars: {len(sys_prompt) if isinstance(sys_prompt, str) else 'n/a'}")
         except Exception as exc:
+            logger.debug("_dump_subagent_timeout_diagnostic failed", exc_info=True)
             _w(f"  system_prompt: <error: {exc}>")
         try:
             tools_schema = getattr(child, "tools", None)
@@ -1220,6 +1225,7 @@ def _dump_subagent_timeout_diagnostic(
                 _w(f"  tool_schema_count: {len(tools_schema)}")
                 _w(f"  tool_schema_bytes: {len(_schema_json.encode('utf-8'))}")
         except Exception as exc:
+            logger.debug("_dump_subagent_timeout_diagnostic failed", exc_info=True)
             _w(f"  tool_schema: <error: {exc}>")
         _w("")
 
@@ -1229,6 +1235,7 @@ def _dump_subagent_timeout_diagnostic(
             for k, v in summary.items():
                 _w(f"  {k}: {v!r}")
         except Exception as exc:
+            logger.debug("_dump_subagent_timeout_diagnostic failed", exc_info=True)
             _w(f"  <get_activity_summary failed: {exc}>")
         _w("")
 
@@ -1317,7 +1324,7 @@ def _run_single_child(
                 try:
                     touch(f"delegate_task: subagent {task_index} started")
                 except Exception:
-                    pass
+                    logger.debug("_heartbeat_loop failed", exc_info=True)
         while not _heartbeat_stop.wait(_HEARTBEAT_INTERVAL):
             if parent_agent is None:
                 continue
@@ -1380,11 +1387,11 @@ def _run_single_child(
                             f"(iteration {child_iter}/{child_max})"
                         )
             except Exception:
-                pass
+                logger.debug("_heartbeat_loop failed", exc_info=True)
             try:
                 touch(desc)
             except Exception:
-                pass
+                logger.debug("_heartbeat_loop failed", exc_info=True)
 
     _heartbeat_thread = threading.Thread(target=_heartbeat_loop, daemon=True)
     _heartbeat_thread.start()
@@ -1471,7 +1478,7 @@ def _run_single_child(
                 elif hasattr(child, "_interrupt_requested"):
                     child._interrupt_requested = True
             except Exception:
-                pass
+                logger.debug("_run_single_child failed", exc_info=True)
 
             is_timeout = isinstance(_timeout_exc, (FuturesTimeoutError, TimeoutError))
             duration = round(time.monotonic() - child_start, 2)
@@ -1491,7 +1498,7 @@ def _run_single_child(
                 _summary = child.get_activity_summary()
                 child_api_calls = int(_summary.get("api_call_count", 0) or 0)
             except Exception:
-                pass
+                logger.debug("_run_single_child failed", exc_info=True)
             if is_timeout and child_api_calls == 0:
                 diagnostic_path = _dump_subagent_timeout_diagnostic(
                     child=child,
@@ -1522,7 +1529,7 @@ def _run_single_child(
                         summary="",
                     )
                 except Exception:
-                    pass
+                    logger.debug("_run_single_child failed", exc_info=True)
 
             if is_timeout:
                 if child_api_calls == 0:
@@ -1713,12 +1720,14 @@ def _run_single_child(
         try:
             _files_read = list(file_state.known_reads(child_task_id))[:40]
         except Exception:
+            logger.debug("_run_single_child failed", exc_info=True)
             _files_read = []
         try:
             _files_written_map = file_state.writes_since(
                 "", wall_start, []
             )  # all writes since wall_start
         except Exception:
+            logger.debug("_run_single_child failed", exc_info=True)
             _files_written_map = {}
         _files_written = sorted(
             {
@@ -2045,6 +2054,7 @@ def delegate_task(
                             try:
                                 entry = f.result()
                             except Exception as exc:
+                                logger.debug("delegate_task failed", exc_info=True)
                                 entry = {
                                     "task_index": idx,
                                     "status": "error",
@@ -2081,6 +2091,7 @@ def delegate_task(
                     try:
                         entry = future.result()
                     except Exception as exc:
+                        logger.debug("delegate_task failed", exc_info=True)
                         idx = futures[future]
                         entry = {
                             "task_index": idx,
@@ -2149,7 +2160,7 @@ def delegate_task(
                     ),
                 )
             except Exception:
-                pass
+                logger.debug("delegate_task failed", exc_info=True)
 
     # Fire subagent_stop hooks once per child, serialised on the parent thread.
     # This keeps Python-plugin and shell-hook callbacks off of the worker threads
@@ -2161,6 +2172,7 @@ def delegate_task(
     try:
         from hermes_cli.plugins import invoke_hook as _invoke_hook
     except Exception:
+        logger.debug("delegate_task failed", exc_info=True)
         _invoke_hook = None
     # Aggregate child spend here so the parent's footer/UI reflect the true
     # cost of a subagent-heavy turn.  Port of Kilo-Org/kilocode#9448.  Each
@@ -2324,6 +2336,7 @@ def _resolve_delegation_credentials(cfg: dict, parent_agent) -> dict:
 
         runtime = resolve_runtime_provider(requested=configured_provider)
     except Exception as exc:
+        logger.debug("_resolve_delegation_credentials failed", exc_info=True)
         raise ValueError(
             f"Cannot resolve delegation provider '{configured_provider}': {exc}. "
             f"Check that the provider is configured (API key set, valid provider name), "
@@ -2364,13 +2377,14 @@ def _load_config() -> dict:
         if cfg:
             return cfg
     except Exception:
-        pass
+        logger.debug("_load_config failed", exc_info=True)
     try:
         from hermes_cli.config import load_config
 
         full = load_config()
         return full.get("delegation", {})
     except Exception:
+        logger.debug("_load_config failed", exc_info=True)
         return {}
 
 

@@ -22,6 +22,9 @@ from typing import Any
 
 from tools.environments.base import BaseEnvironment
 from tools.interrupt import is_interrupted
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -91,6 +94,7 @@ class BaseModalExecutionEnvironment(BaseEnvironment):
         try:
             start = self._start_modal_exec(prepared)
         except Exception as exc:
+            logger.debug("execute failed", exc_info=True)
             return self._error_result(f"{self._unexpected_error_prefix}: {exc}")
 
         if start.immediate_result is not None:
@@ -110,12 +114,13 @@ class BaseModalExecutionEnvironment(BaseEnvironment):
                 try:
                     self._cancel_modal_exec(start.handle)
                 except Exception:
-                    pass
+                    logger.debug("execute failed", exc_info=True)
                 return self._result(self._interrupt_output, 130)
 
             try:
                 result = self._poll_modal_exec(start.handle)
             except Exception as exc:
+                logger.debug("execute failed", exc_info=True)
                 return self._error_result(f"{self._unexpected_error_prefix}: {exc}")
 
             if result is not None:
@@ -125,7 +130,7 @@ class BaseModalExecutionEnvironment(BaseEnvironment):
                 try:
                     self._cancel_modal_exec(start.handle)
                 except Exception:
-                    pass
+                    logger.debug("execute failed", exc_info=True)
                 return self._timeout_result_for_modal(prepared.timeout)
 
             time.sleep(self._poll_interval_seconds)

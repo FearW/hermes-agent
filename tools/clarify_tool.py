@@ -63,6 +63,7 @@ def clarify_tool(
     try:
         user_response = callback(question, choices)
     except Exception as exc:
+        logger.debug("clarify_tool failed", exc_info=True)
         return json.dumps(
             {"error": f"Failed to get user input: {exc}"},
             ensure_ascii=False,
@@ -127,6 +128,9 @@ CLARIFY_SCHEMA = {
 
 # --- Registry ---
 from tools.registry import registry, tool_error
+import logging
+
+logger = logging.getLogger(__name__)
 
 registry.register(
     name="clarify",

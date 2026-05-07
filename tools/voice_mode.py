@@ -82,6 +82,7 @@ def _termux_api_app_installed() -> bool:
         )
         return "package:com.termux.api" in (result.stdout or "")
     except Exception:
+        logger.debug("_termux_api_app_installed failed", exc_info=True)
         return False
 
 
@@ -139,6 +140,7 @@ def detect_audio_environment() -> dict:
                 else:
                     warnings.append("No audio input/output devices detected")
         except Exception:
+            logger.debug("detect_audio_environment failed", exc_info=True)
             # In WSL with PulseAudio, device queries can fail even though
             # recording/playback works fine. Don't block if PULSE_SERVER is set.
             if os.environ.get('PULSE_SERVER'):
@@ -308,6 +310,7 @@ class TermuxAudioRecorder:
             details = (e.stderr or e.stdout or str(e)).strip()
             raise RuntimeError(f"Termux microphone start failed: {details}") from e
         except Exception as e:
+            logger.debug("start failed", exc_info=True)
             raise RuntimeError(f"Termux microphone start failed: {e}") from e
 
         with self._lock:
@@ -359,7 +362,7 @@ class TermuxAudioRecorder:
         try:
             self._stop_termux_recording()
         except Exception:
-            pass
+            logger.debug("cancel failed", exc_info=True)
         if path and os.path.isfile(path):
             try:
                 os.unlink(path)
@@ -555,11 +558,12 @@ class AudioRecorder:
             )
             stream.start()
         except Exception as e:
+            logger.debug("_ensure_stream failed", exc_info=True)
             if stream is not None:
                 try:
                     stream.close()
                 except Exception:
-                    pass
+                    logger.debug("_ensure_stream failed", exc_info=True)
             raise RuntimeError(
                 f"Failed to open audio input stream: {e}. "
                 "Check that a microphone is connected and accessible."
@@ -626,7 +630,7 @@ class AudioRecorder:
                 stream.stop()
                 stream.close()
             except Exception:
-                pass
+                logger.debug("_do_close failed", exc_info=True)
 
         t = threading.Thread(target=_do_close, daemon=True)
         t.start()
@@ -835,13 +839,13 @@ def stop_playback() -> None:
             proc.terminate()
             logger.info("Audio playback interrupted")
         except Exception:
-            pass
+            logger.debug("stop_playback failed", exc_info=True)
     # Also stop sounddevice playback if active
     try:
         sd, _ = _import_audio()
         sd.stop()
     except Exception:
-        pass
+        logger.debug("stop_playback failed", exc_info=True)
 
 
 def play_audio_file(file_path: str) -> bool:

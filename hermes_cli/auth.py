@@ -41,8 +41,8 @@ from urllib.parse import parse_qs, urlencode, urlparse
 import httpx
 import yaml
 
-from hermes_cli.config import get_hermes_home, get_config_path, read_raw_config
-from hermes_constants import OPENROUTER_BASE_URL
+from hermes_cli.config import get_config_path, read_raw_config
+from hermes_constants import get_hermes_home, OPENROUTER_BASE_URL
 from utils import atomic_replace
 
 logger = logging.getLogger(__name__)

@@ -181,7 +181,7 @@ class VoiceReceiver:
         try:
             self._vc._connection.remove_socket_listener(self._on_packet)
         except Exception:
-            pass
+            logger.debug("stop failed", exc_info=True)
         with self._lock:
             self._buffers.clear()
             self._last_packet_time.clear()
@@ -352,6 +352,7 @@ class VoiceReceiver:
                         import davey
                         media_type = davey.MediaType.audio
                     except Exception:
+                        logger.debug("_on_packet failed", exc_info=True)
                         media_type = "audio"
                     decrypted = self._dave_session.decrypt(
                         user_id, media_type, decrypted
@@ -405,7 +406,7 @@ class VoiceReceiver:
                 logger.info("Auto-mapped ssrc=%d -> user=%d (sole allowed member)", ssrc, uid)
                 return uid
         except Exception:
-            pass
+            logger.debug("_infer_user_for_ssrc failed", exc_info=True)
         return 0
 
     def check_silence(self) -> list:
@@ -1414,6 +1415,7 @@ class DiscordAdapter(BasePlatformAdapter):
                     info = OggOpus(audio_path)
                     duration_secs = info.info.length
                 except Exception:
+                    logger.debug("send_voice failed", exc_info=True)
                     duration_secs = max(1.0, len(file_data) / 2000.0)
 
                 waveform_bytes = bytes([128] * 256)
@@ -1590,14 +1592,14 @@ class DiscordAdapter(BasePlatformAdapter):
             try:
                 self._on_voice_disconnect(str(text_ch_id))
             except Exception:
-                pass
+                logger.debug("_voice_timeout_handler failed", exc_info=True)
         if text_ch_id and self._client:
             ch = self._client.get_channel(text_ch_id)
             if ch:
                 try:
                     await ch.send("Left voice channel (inactivity timeout).")
                 except Exception:
-                    pass
+                    logger.debug("_voice_timeout_handler failed", exc_info=True)
 
     def is_in_voice_channel(self, guild_id: int) -> bool:
         """Check if the bot is connected to a voice channel in this guild."""
@@ -1700,7 +1702,7 @@ class DiscordAdapter(BasePlatformAdapter):
                         if vc and vc.is_connected():
                             vc._connection.send_packet(b'\xf8\xff\xfe')
                     except Exception:
-                        pass
+                        logger.debug("_voice_listen_loop failed", exc_info=True)
 
                 completed = receiver.check_silence()
                 for user_id, pcm_data in completed:
@@ -2175,7 +2177,7 @@ class DiscordAdapter(BasePlatformAdapter):
                 getattr(interaction, "guild_id", None),
             )
         except Exception:
-            pass  # logging must never block command dispatch
+            logger.debug("_run_simple_slash failed", exc_info=True)
 
         await interaction.response.defer(ephemeral=True)
         event = self._build_slash_event(interaction, command_text)
@@ -2377,7 +2379,7 @@ class DiscordAdapter(BasePlatformAdapter):
             try:
                 already_registered = {cmd.name for cmd in tree.get_commands()}
             except Exception:
-                pass
+                logger.debug("_register_slash_commands failed", exc_info=True)
 
             config_overrides = _resolve_config_gates()
 
@@ -2399,7 +2401,7 @@ class DiscordAdapter(BasePlatformAdapter):
                 except Exception:
                     # Silently skip commands that fail registration (e.g.
                     # name conflict with a subcommand group).
-                    pass
+                    logger.debug("_register_slash_commands failed", exc_info=True)
 
             logger.debug(
                 "Discord auto-registered %d commands from COMMAND_REGISTRY",
@@ -2431,7 +2433,7 @@ class DiscordAdapter(BasePlatformAdapter):
                 except Exception:
                     # Silently skip commands that fail registration (e.g.
                     # name conflict with a subcommand group).
-                    pass
+                    logger.debug("_register_slash_commands failed", exc_info=True)
         except Exception as e:
             logger.warning(
                 "Discord auto-register from plugin commands failed: %s", e
@@ -2468,7 +2470,7 @@ class DiscordAdapter(BasePlatformAdapter):
             try:
                 existing_names = {cmd.name for cmd in tree.get_commands()}
             except Exception:
-                pass
+                logger.debug("_register_skill_group failed", exc_info=True)
 
             # Reuse the existing collector for consistent filtering
             # (per-platform disabled, hub-excluded, name clamping), then
@@ -2751,6 +2753,7 @@ class DiscordAdapter(BasePlatformAdapter):
         try:
             return await self._client.fetch_channel(int(channel_id))
         except Exception:
+            logger.debug("_resolve_interaction_channel failed", exc_info=True)
             return None
 
     async def _create_thread(
@@ -2803,6 +2806,7 @@ class DiscordAdapter(BasePlatformAdapter):
                 "thread_name": getattr(thread, "name", None) or name,
             }
         except Exception as direct_error:
+            logger.debug("_create_thread failed", exc_info=True)
             try:
                 seed_content = starter_message or f"\U0001f9f5 Thread created by Hermes: **{name}**"
                 seed_msg = await parent_channel.send(seed_content)
@@ -2817,6 +2821,7 @@ class DiscordAdapter(BasePlatformAdapter):
                     "thread_name": getattr(thread, "name", None) or name,
                 }
             except Exception as fallback_error:
+                logger.debug("_create_thread failed", exc_info=True)
                 return {
                     "error": (
                         "Discord rejected direct thread creation and the fallback also failed. "
@@ -2912,6 +2917,7 @@ class DiscordAdapter(BasePlatformAdapter):
             return SendResult(success=True, message_id=str(msg.id))
 
         except Exception as e:
+            logger.debug("send_exec_approval failed", exc_info=True)
             return SendResult(success=False, error=str(e))
 
     async def send_slash_confirm(
@@ -2949,6 +2955,7 @@ class DiscordAdapter(BasePlatformAdapter):
             msg = await channel.send(embed=embed, view=view)
             return SendResult(success=True, message_id=str(msg.id))
         except Exception as e:
+            logger.debug("send_slash_confirm failed", exc_info=True)
             return SendResult(success=False, error=str(e))
 
     async def send_update_prompt(
@@ -2980,6 +2987,7 @@ class DiscordAdapter(BasePlatformAdapter):
             msg = await channel.send(embed=embed, view=view)
             return SendResult(success=True, message_id=str(msg.id))
         except Exception as e:
+            logger.debug("send_update_prompt failed", exc_info=True)
             return SendResult(success=False, error=str(e))
 
     async def send_model_picker(
@@ -3014,6 +3022,7 @@ class DiscordAdapter(BasePlatformAdapter):
                 from hermes_cli.providers import get_label
                 provider_label = get_label(current_provider)
             except Exception:
+                logger.debug("send_model_picker failed", exc_info=True)
                 provider_label = current_provider
 
             embed = discord.Embed(
@@ -4028,6 +4037,7 @@ if DISCORD_AVAILABLE:
                     self._selected_provider,
                 )
             except Exception as exc:
+                logger.debug("_on_model_selected failed", exc_info=True)
                 result_text = f"Error switching model: {exc}"
 
             await interaction.edit_original_response(
@@ -4052,6 +4062,7 @@ if DISCORD_AVAILABLE:
                 from hermes_cli.providers import get_label
                 provider_label = get_label(self.current_provider)
             except Exception:
+                logger.debug("_on_back failed", exc_info=True)
                 provider_label = self.current_provider
 
             await interaction.response.edit_message(

@@ -6,6 +6,8 @@ SDK so that WeCom can verify, encrypt, and decrypt callback payloads.
 
 from __future__ import annotations
 
+import logging
+
 import base64
 import hashlib
 import os
@@ -17,6 +19,8 @@ from xml.etree import ElementTree as ET
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+logger = logging.getLogger(__name__)
 
 
 class WeComCryptoError(Exception):
@@ -92,6 +96,7 @@ class WXBizMsgCrypt:
         try:
             cipher_text = base64.b64decode(encrypt)
         except Exception as exc:
+            logger.debug("decrypt failed", exc_info=True)
             raise DecryptError(f"invalid base64 payload: {exc}") from exc
         try:
             cipher = Cipher(algorithms.AES(self.key), modes.CBC(self.iv), backend=default_backend())
@@ -105,6 +110,7 @@ class WXBizMsgCrypt:
         except WeComCryptoError:
             raise
         except Exception as exc:
+            logger.debug("decrypt failed", exc_info=True)
             raise DecryptError(f"decrypt failed: {exc}") from exc
 
         if receive_id != self.receive_id:
@@ -134,6 +140,7 @@ class WXBizMsgCrypt:
             encrypted = encryptor.update(padded) + encryptor.finalize()
             return base64.b64encode(encrypted).decode("utf-8")
         except Exception as exc:
+            logger.debug("_encrypt_bytes failed", exc_info=True)
             raise EncryptError(f"encrypt failed: {exc}") from exc
 
     @staticmethod

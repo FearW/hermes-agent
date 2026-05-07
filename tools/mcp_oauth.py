@@ -350,6 +350,7 @@ async def _redirect_handler(authorization_url: str) -> None:
             else:
                 print("  (Could not open browser — please open the URL manually.)\n", file=sys.stderr)
         except Exception:
+            logger.debug("_redirect_handler failed", exc_info=True)
             print("  (Could not open browser — please open the URL manually.)\n", file=sys.stderr)
     else:
         print("  (Headless environment detected — open the URL manually.)\n", file=sys.stderr)

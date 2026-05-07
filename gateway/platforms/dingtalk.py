@@ -358,7 +358,7 @@ class DingTalkAdapter(BasePlatformAdapter):
                 try:
                     await asyncio.to_thread(self._stream_client.close)
                 except Exception:
-                    pass
+                    logger.debug("disconnect failed", exc_info=True)
 
             self._stream_task.cancel()
             try:
@@ -414,6 +414,7 @@ class DingTalkAdapter(BasePlatformAdapter):
                 try:
                     loaded = json.loads(raw)
                 except Exception:
+                    logger.debug("_compile_mention_patterns failed", exc_info=True)
                     loaded = [part.strip() for part in raw.splitlines() if part.strip()]
                     if not loaded:
                         loaded = [part.strip() for part in raw.split(",") if part.strip()]

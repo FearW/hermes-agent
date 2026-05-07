@@ -43,6 +43,7 @@ def _fire_approval_hook(hook_name: str, **kwargs) -> None:
     try:
         from hermes_cli.plugins import invoke_hook
     except Exception:
+        logger.debug("_fire_approval_hook failed", exc_info=True)
         # Plugin system not available in this execution context
         # (e.g. bare tool-only imports, minimal test environments).
         return
@@ -603,7 +604,7 @@ def prompt_dangerous_approval(command: str, description: str,
             )
             return "deny"
     except Exception:
-        # prompt_toolkit not installed, or detection failed -- fall through
+        logger.debug("prompt_dangerous_approval failed", exc_info=True)
         # to the legacy input() path (safe in non-TUI contexts: scripts,
         # tests, sshd, etc.).
         pass
@@ -714,6 +715,7 @@ def _get_cron_approval_mode() -> str:
             return "approve"
         return "deny"
     except Exception:
+        logger.debug("_get_cron_approval_mode failed", exc_info=True)
         return "deny"
 
 
@@ -1093,6 +1095,7 @@ def check_all_command_guards(command: str, env_type: str,
             try:
                 from tools.environments.base import touch_activity_if_due
             except Exception:  # pragma: no cover
+                logger.debug("check_all_command_guards failed", exc_info=True)
                 touch_activity_if_due = None
 
             _now = time.monotonic()

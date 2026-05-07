@@ -322,6 +322,7 @@ def _get_dialog_policy_config() -> Tuple[str, float]:
             timeout_s = DEFAULT_DIALOG_TIMEOUT_S
         return policy, timeout_s
     except Exception:
+        logger.debug("_get_dialog_policy_config failed", exc_info=True)
         return DEFAULT_DIALOG_POLICY, DEFAULT_DIALOG_TIMEOUT_S
 
 
@@ -1243,6 +1244,7 @@ def _get_session_info(task_id: Optional[str] = None) -> Dict[str, str]:
                 try:
                     session_info = _create_local_session(task_id)
                 except Exception as local_error:
+                    logger.debug("_get_session_info failed", exc_info=True)
                     raise RuntimeError(
                         f"Cloud provider {provider_name} failed ({e}) and local "
                         f"fallback also failed ({local_error})"
@@ -1647,6 +1649,7 @@ def _extract_relevant_content(
         # Redact any secrets the auxiliary LLM may have echoed back.
         return redact_sensitive_text(extracted)
     except Exception:
+        logger.debug("_extract_relevant_content failed", exc_info=True)
         return _truncate_snapshot(snapshot_text)
 
 
@@ -2226,6 +2229,7 @@ def _camofox_eval(expression: str, task_id: Optional[str] = None) -> str:
             "result_type": type(parsed).__name__,
         }, ensure_ascii=False, default=str)
     except Exception as e:
+        logger.debug("_camofox_eval failed", exc_info=True)
         error_msg = str(e)
         # Graceful degradation — server may not support eval
         if any(code in error_msg for code in ("404", "405", "501")):
@@ -2457,7 +2461,7 @@ def browser_vision(question: str, annotate: bool = False, task_id: Optional[str]
             if _vtemp is not None:
                 vision_temperature = float(_vtemp)
         except Exception:
-            pass
+            logger.debug("browser_vision failed", exc_info=True)
 
         call_kwargs = {
             "task": "vision",
@@ -2704,7 +2708,7 @@ def cleanup_all_browsers() -> None:
         from tools.browser_supervisor import SUPERVISOR_REGISTRY  # type: ignore[import-not-found]
         SUPERVISOR_REGISTRY.stop_all()
     except Exception:
-        pass
+        logger.debug("cleanup_all_browsers failed", exc_info=True)
 
     # Reset cached lookups so they are re-evaluated on next use.
     global _cached_agent_browser, _agent_browser_resolved

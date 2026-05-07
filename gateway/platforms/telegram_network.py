@@ -153,6 +153,7 @@ def _resolve_system_dns() -> set[str]:
         results = socket.getaddrinfo(_TELEGRAM_API_HOST, 443, socket.AF_INET)
         return {addr[4][0] for addr in results}
     except Exception:
+        logger.debug("_resolve_system_dns failed", exc_info=True)
         return set()
 
 

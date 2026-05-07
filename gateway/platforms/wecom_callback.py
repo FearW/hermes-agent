@@ -206,6 +206,7 @@ class WecomCallbackAdapter(BasePlatformAdapter):
                 raw_response=data,
             )
         except Exception as exc:
+            logger.debug("send failed", exc_info=True)
             return SendResult(success=False, error=str(exc))
 
     def _resolve_app_for_chat(self, chat_id: str) -> Dict[str, Any]:
@@ -241,6 +242,7 @@ class WecomCallbackAdapter(BasePlatformAdapter):
                 plain = crypt.verify_url(msg_signature, timestamp, nonce, echostr)
                 return web.Response(text=plain, content_type="text/plain")
             except Exception:
+                logger.debug("_handle_verify failed", exc_info=True)
                 continue
         return web.Response(status=403, text="signature verification failed")
 

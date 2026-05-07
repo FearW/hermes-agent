@@ -341,6 +341,7 @@ class QQAdapter(BasePlatformAdapter):
                 resp.raise_for_status()
                 data = resp.json()
             except Exception as exc:
+                logger.debug("_ensure_token failed", exc_info=True)
                 raise RuntimeError(f"Failed to get QQ Bot access token: {exc}") from exc
 
             token = data.get("access_token")
@@ -372,6 +373,7 @@ class QQAdapter(BasePlatformAdapter):
             resp.raise_for_status()
             data = resp.json()
         except Exception as exc:
+            logger.debug("_get_gateway_url failed", exc_info=True)
             raise RuntimeError(f"Failed to get QQ Bot gateway URL: {exc}") from exc
 
         url = data.get("url")
@@ -1764,6 +1766,7 @@ class QQAdapter(BasePlatformAdapter):
                 )
                 return cache_document_from_bytes(audio_data, f"qq_voice{ext}")
         except Exception:
+            logger.debug("_convert_audio_to_wav failed", exc_info=True)
             return cache_document_from_bytes(audio_data, f"qq_voice{ext}")
         finally:
             try:

@@ -1121,6 +1121,7 @@ def decode_query_group_info_rsp(data: bytes) -> Optional[dict]:
 
         return result
     except Exception:
+        logger.debug("decode_query_group_info_rsp failed", exc_info=True)
         return None
 
 
@@ -1206,4 +1207,5 @@ def decode_get_group_member_list_rsp(data: bytes) -> Optional[dict]:
             "is_complete": bool(_get_varint(fdict, 5)),
         }
     except Exception:
+        logger.debug("decode_get_group_member_list_rsp failed", exc_info=True)
         return None

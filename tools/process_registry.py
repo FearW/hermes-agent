@@ -551,6 +551,7 @@ class ProcessRegistry:
                     session.pid = int(line)
                     break
         except Exception as e:
+            logger.debug("spawn_via_env failed", exc_info=True)
             session.exited = True
             session.exit_code = -1
             session.output_buffer = f"Failed to start: {e}"
@@ -650,6 +651,7 @@ class ProcessRegistry:
                     return
 
             except Exception:
+                logger.debug("_env_poller_loop failed", exc_info=True)
                 # Environment might be gone (sandbox reaped, etc.)
                 session.exited = True
                 session.exit_code = -1
@@ -674,6 +676,7 @@ class ProcessRegistry:
                 except EOFError:
                     break
                 except Exception:
+                    logger.debug("_pty_reader_loop failed", exc_info=True)
                     break
         except Exception as e:
             logger.debug("PTY stdout reader ended: %s", e)
@@ -883,6 +886,7 @@ class ProcessRegistry:
                 try:
                     session._pty.terminate(force=True)
                 except Exception:
+                    logger.debug("kill_process failed", exc_info=True)
                     if session.pid:
                         os.kill(session.pid, signal.SIGTERM)
             elif session.process:
@@ -922,6 +926,7 @@ class ProcessRegistry:
             self._write_checkpoint()
             return {"status": "killed", "session_id": session.id}
         except Exception as e:
+            logger.debug("kill_process failed", exc_info=True)
             return {"status": "error", "error": str(e)}
 
     def write_stdin(self, session_id: str, data: str) -> dict:
@@ -939,6 +944,7 @@ class ProcessRegistry:
                 session._pty.write(pty_data)
                 return {"status": "ok", "bytes_written": len(data)}
             except Exception as e:
+                logger.debug("write_stdin failed", exc_info=True)
                 return {"status": "error", "error": str(e)}
 
         # Popen mode -- write through stdin pipe
@@ -949,6 +955,7 @@ class ProcessRegistry:
             session.process.stdin.flush()
             return {"status": "ok", "bytes_written": len(data)}
         except Exception as e:
+            logger.debug("write_stdin failed", exc_info=True)
             return {"status": "error", "error": str(e)}
 
     def submit_stdin(self, session_id: str, data: str = "") -> dict:
@@ -968,6 +975,7 @@ class ProcessRegistry:
                 session._pty.sendeof()
                 return {"status": "ok", "message": "EOF sent"}
             except Exception as e:
+                logger.debug("close_stdin failed", exc_info=True)
                 return {"status": "error", "error": str(e)}
 
         if not session.process or not session.process.stdin:
@@ -976,6 +984,7 @@ class ProcessRegistry:
             session.process.stdin.close()
             return {"status": "ok", "message": "stdin closed"}
         except Exception as e:
+            logger.debug("close_stdin failed", exc_info=True)
             return {"status": "error", "error": str(e)}
 
     def list_sessions(self, task_id: str = None) -> list:
@@ -1117,6 +1126,7 @@ class ProcessRegistry:
         try:
             entries = json.loads(CHECKPOINT_PATH.read_text(encoding="utf-8"))
         except Exception:
+            logger.debug("recover_from_checkpoint failed", exc_info=True)
             return 0
 
         recovered = 0

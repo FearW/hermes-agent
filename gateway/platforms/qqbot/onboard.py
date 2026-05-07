@@ -73,6 +73,7 @@ def _render_qr(url: str) -> bool:
         qr.print_ascii(invert=True)
         return True
     except Exception:
+        logger.debug("_render_qr failed", exc_info=True)
         return False
 
 
@@ -176,28 +177,26 @@ def qr_register(timeout_seconds: int = 600) -> Optional[dict]:
         url = build_connect_url(task_id)
 
         # ── Display QR code + URL ──
-        print()
         if _render_qr(url):
-            print(f"  Scan the QR code above, or open this URL directly:\n  {url}")
+            logger.info("Scan the QR code above, or open this URL directly:\n  %s", url)
         else:
-            print(f"  Open this URL in QQ on your phone:\n  {url}")
-            print("  Tip: pip install qrcode  to display a scannable QR code here")
-        print()
+            logger.info("Open this URL in QQ on your phone:\n  %s", url)
+            logger.info("Tip: pip install qrcode  to display a scannable QR code here")
 
         # ── Poll loop ──
         while time.monotonic() < deadline:
             try:
                 status, app_id, encrypted_secret, user_openid = _poll_bind_result(task_id)
             except Exception:
+                logger.debug("qr_register failed", exc_info=True)
                 time.sleep(ONBOARD_POLL_INTERVAL)
                 continue
 
             if status == BindStatus.COMPLETED:
                 client_secret = decrypt_secret(encrypted_secret, aes_key)
-                print()
-                print(f"  QR scan complete! (App ID: {app_id})")
+                logger.info("QR scan complete! (App ID: %s)", app_id)
                 if user_openid:
-                    print(f"  Scanner's OpenID: {user_openid}")
+                    logger.info("Scanner's OpenID: %s", user_openid)
                 return {
                     "app_id": app_id,
                     "client_secret": client_secret,
@@ -208,7 +207,7 @@ def qr_register(timeout_seconds: int = 600) -> Optional[dict]:
                 if refresh_count >= _MAX_REFRESHES:
                     logger.warning("[QQBot onboard] QR code expired %d times — giving up", _MAX_REFRESHES)
                     return None
-                print(f"\n  QR code expired, refreshing... ({refresh_count + 1}/{_MAX_REFRESHES})")
+                logger.warning("QR code expired, refreshing... (%s/%s)", refresh_count + 1, _MAX_REFRESHES)
                 break  # next for-loop iteration creates a new task
 
             time.sleep(ONBOARD_POLL_INTERVAL)

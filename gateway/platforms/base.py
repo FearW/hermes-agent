@@ -126,6 +126,7 @@ def _detect_macos_system_proxy() -> str | None:
             ["scutil", "--proxy"], timeout=3, text=True, stderr=subprocess.DEVNULL,
         )
     except Exception:
+        logger.debug("_detect_macos_system_proxy failed", exc_info=True)
         return None
 
     props: dict[str, str] = {}
@@ -409,6 +410,7 @@ def safe_url_for_log(url: str, max_len: int = 80) -> str:
     try:
         parsed = urlsplit(raw)
     except Exception:
+        logger.debug("safe_url_for_log failed", exc_info=True)
         return raw[:max_len]
 
     if parsed.scheme and parsed.netloc:
@@ -939,6 +941,7 @@ def coerce_plaintext_gateway_command(event: "MessageEvent") -> None:
                 event.text = "/restart"
                 return
     except Exception:
+        logger.debug("coerce_plaintext_gateway_command failed", exc_info=True)
         return
 
 
@@ -1223,7 +1226,7 @@ class BasePlatformAdapter(ABC):
             from gateway.status import write_runtime_status
             write_runtime_status(platform=self.platform.value, platform_state="connected", error_code=None, error_message=None)
         except Exception:
-            pass
+            logger.debug("_mark_connected failed", exc_info=True)
 
     def _mark_disconnected(self) -> None:
         self._running = False
@@ -1233,7 +1236,7 @@ class BasePlatformAdapter(ABC):
             from gateway.status import write_runtime_status
             write_runtime_status(platform=self.platform.value, platform_state="disconnected", error_code=None, error_message=None)
         except Exception:
-            pass
+            logger.debug("_mark_disconnected failed", exc_info=True)
 
     def _set_fatal_error(self, code: str, message: str, *, retryable: bool) -> None:
         self._running = False
@@ -1249,7 +1252,7 @@ class BasePlatformAdapter(ABC):
                 error_message=message,
             )
         except Exception:
-            pass
+            logger.debug("_set_fatal_error failed", exc_info=True)
 
     async def _notify_fatal_error(self) -> None:
         handler = self._fatal_error_handler
@@ -1839,7 +1842,7 @@ class BasePlatformAdapter(ABC):
                 try:
                     await self.stop_typing(chat_id)
                 except Exception:
-                    pass
+                    logger.debug("_keep_typing failed", exc_info=True)
             self._typing_paused.discard(chat_id)
 
     def pause_typing_for_chat(self, chat_id: str) -> None:
@@ -1863,7 +1866,7 @@ class BasePlatformAdapter(ABC):
         try:
             await self.stop_typing(chat_id)
         except Exception:
-            pass
+            logger.debug("interrupt_session_activity failed", exc_info=True)
 
     def register_post_delivery_callback(
         self,
@@ -2264,6 +2267,7 @@ class BasePlatformAdapter(ABC):
         except Exception:
             # On failure, restore the original guard if one still exists so
             # we don't leave the session in a half-reset state.
+            logger.debug("_dispatch_active_session_command failed", exc_info=True)
             if self._active_sessions.get(session_key) is command_guard:
                 if session_key in self._session_tasks and current_guard is not None:
                     self._active_sessions[session_key] = current_guard
@@ -2699,7 +2703,7 @@ class BasePlatformAdapter(ABC):
                     metadata=_thread_metadata,
                 )
             except Exception:
-                pass  # Last resort — don't let error reporting crash the handler
+                logger.debug("_process_message_background failed", exc_info=True)
         finally:
             # Fire any one-shot post-delivery callback registered for this
             # session (e.g. deferred background-review notifications).
@@ -2715,7 +2719,7 @@ class BasePlatformAdapter(ABC):
                 try:
                     _post_cb()
                 except Exception:
-                    pass
+                    logger.debug("_process_message_background failed", exc_info=True)
             # Stop typing indicator
             await _stop_typing_task()
             # Also cancel any platform-level persistent typing tasks (e.g. Discord)
@@ -2724,7 +2728,7 @@ class BasePlatformAdapter(ABC):
                 if hasattr(self, "stop_typing"):
                     await self.stop_typing(event.source.chat_id)
             except Exception:
-                pass
+                logger.debug("_process_message_background failed", exc_info=True)
             # Late-arrival drain: a message may have arrived during the
             # cleanup awaits above (typing_task cancel, stop_typing).  Such
             # messages passed the Level-1 guard (entry still live, Event

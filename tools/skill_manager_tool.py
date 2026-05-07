@@ -641,7 +641,7 @@ def skill_manage(
             from agent.prompt_builder import clear_skills_system_prompt_cache
             clear_skills_system_prompt_cache(clear_snapshot=True)
         except Exception:
-            pass
+            logger.debug("skill_manage failed", exc_info=True)
 
     return json.dumps(result, ensure_ascii=False)
 

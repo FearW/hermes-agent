@@ -102,7 +102,7 @@ class SSHEnvironment(BaseEnvironment):
                 logger.debug("SSH: remote home = %s", home)
                 return home
         except Exception:
-            pass
+            logger.debug("_detect_remote_home failed", exc_info=True)
         if self.user == "root":
             return "/root"
         return f"/home/{self.user}"
@@ -180,6 +180,7 @@ class SSHEnvironment(BaseEnvironment):
                     stderr=subprocess.PIPE,
                 )
             except Exception:
+                logger.debug("_ssh_bulk_upload failed", exc_info=True)
                 tar_proc.kill()
                 tar_proc.wait()
                 raise

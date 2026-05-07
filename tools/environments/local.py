@@ -6,8 +6,11 @@ import shutil
 import signal
 import subprocess
 import tempfile
+import logging
 
 from tools.environments.base import BaseEnvironment, _pipe_stdin
+
+logger = logging.getLogger(__name__)
 
 _IS_WINDOWS = platform.system() == "Windows"
 
@@ -112,6 +115,7 @@ def _sanitize_subprocess_env(base_env: dict | None, extra_env: dict | None = Non
     try:
         from tools.env_passthrough import is_env_passthrough as _is_passthrough
     except Exception:
+        logger.debug("_sanitize_subprocess_env failed", exc_info=True)
         _is_passthrough = lambda _: False  # noqa: E731
 
     sanitized: dict[str, str] = {}
@@ -188,6 +192,7 @@ def _make_run_env(env: dict) -> dict:
     try:
         from tools.env_passthrough import is_env_passthrough as _is_passthrough
     except Exception:
+        logger.debug("_make_run_env failed", exc_info=True)
         _is_passthrough = lambda _: False  # noqa: E731
 
     merged = dict(os.environ | env)
@@ -291,7 +296,7 @@ class LocalEnvironment(BaseEnvironment):
             try:
                 proc.kill()
             except Exception:
-                pass
+                logger.debug("_kill_process failed", exc_info=True)
 
     def _update_cwd(self, result: dict):
         """Read CWD from temp file (local-only, no round-trip needed)."""

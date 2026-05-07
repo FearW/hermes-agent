@@ -214,7 +214,7 @@ _apply_profile_override()
 
 # Load .env from ~/.hermes/.env first, then project root as dev fallback.
 # User-managed env files should override stale shell exports on restart.
-from hermes_cli.config import get_hermes_home
+from hermes_constants import get_hermes_home
 from hermes_constants import get_config_path
 from hermes_cli.env_loader import load_hermes_dotenv
 
@@ -293,7 +293,8 @@ def _relative_time(ts) -> str:
 
 def _has_any_provider_configured() -> bool:
     """Check if at least one inference provider is usable."""
-    from hermes_cli.config import get_env_path, get_hermes_home, load_config
+    from hermes_cli.config import get_env_path, load_config
+    from hermes_constants import get_hermes_home
     from hermes_cli.auth import get_auth_status
 
     # Determine whether Hermes itself has been explicitly configured (model
@@ -6359,7 +6360,7 @@ def _install_hangup_protection(gateway_mode: bool = False):
     try:
         # Late-bound import so tests can monkeypatch
         # hermes_cli.config.get_hermes_home to simulate setup failure.
-        from hermes_cli.config import get_hermes_home as _get_hermes_home
+        from hermes_constants import get_hermes_home as _get_hermes_home
 
         logs_dir = _get_hermes_home() / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)

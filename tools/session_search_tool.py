@@ -92,6 +92,7 @@ def _format_timestamp(ts: Union[int, float, str, None]) -> str:
         # Log specific errors for debugging while gracefully handling edge cases
         logging.debug("Failed to format timestamp %s: %s", ts, e, exc_info=True)
     except Exception as e:
+        logger.debug("_format_timestamp failed", exc_info=True)
         logging.debug(
             "Unexpected error formatting timestamp %s: %s", ts, e, exc_info=True
         )
@@ -224,6 +225,7 @@ async def _summarize_session(
             logging.warning("No auxiliary model available for session summarization")
             return None
         except Exception as e:
+            logger.debug("_summarize_session failed", exc_info=True)
             if _is_fast_fail_summary_error(e):
                 _log_session_search_event(
                     "summary_fast_fail",
@@ -276,6 +278,7 @@ def _list_recent_sessions(db, limit: int, current_session_id: str = None) -> str
                     sid = parent if parent else None
                 current_root = max(visited, key=len) if visited else current_session_id
             except Exception:
+                logger.debug("_list_recent_sessions failed", exc_info=True)
                 current_root = current_session_id
 
         results = []
@@ -311,6 +314,7 @@ def _list_recent_sessions(db, limit: int, current_session_id: str = None) -> str
             ensure_ascii=False,
         )
     except Exception as e:
+        logger.debug("_list_recent_sessions failed", exc_info=True)
         logging.error("Error listing recent sessions: %s", e, exc_info=True)
         return tool_error(f"Failed to list recent sessions: {e}", success=False)
 
@@ -406,6 +410,8 @@ def session_search(
                     else:
                         break
                 except Exception as e:
+                    logger.debug("_resolve_to_parent failed", exc_info=True)
+                    logger.debug("session_search failed", exc_info=True)
                     logging.debug(
                         "Error resolving parent for session %s: %s",
                         sid,
@@ -451,6 +457,7 @@ def session_search(
                 conversation_text = _truncate_around_matches(conversation_text, query)
                 tasks.append((session_id, match_info, conversation_text, session_meta))
             except Exception as e:
+                logger.debug("session_search failed", exc_info=True)
                 logging.warning(
                     "Failed to prepare session %s: %s",
                     session_id,
@@ -550,6 +557,7 @@ def session_search(
         )
 
     except Exception as e:
+        logger.debug("session_search failed", exc_info=True)
         logging.error("Session search failed: %s", e, exc_info=True)
         return tool_error(f"Search failed: {str(e)}", success=False)
 
@@ -600,6 +608,8 @@ SESSION_SEARCH_SCHEMA = {
 
 # --- Registry ---
 from tools.registry import registry, tool_error
+
+logger = logging.getLogger(__name__)
 
 registry.register(
     name="session_search",

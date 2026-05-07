@@ -423,6 +423,7 @@ async def _spawn_training_run(run_state: RunState, config_path: Path):
         asyncio.create_task(_monitor_training_run(run_state))
         
     except Exception as e:
+        logger.debug("_spawn_training_run failed", exc_info=True)
         run_state.status = "failed"
         run_state.error_message = str(e)
         _stop_training_run(run_state)
@@ -498,7 +499,7 @@ def _stop_training_run(run_state: RunState):
             try:
                 fh.close()
             except Exception:
-                pass
+                logger.debug("_stop_training_run failed", exc_info=True)
             setattr(run_state, attr, None)
 
 
@@ -896,6 +897,7 @@ async def rl_check_status(run_id: str) -> str:
                 "eval_percent_correct": wandb_run.summary.get("eval/percent_correct"),
             }
     except Exception as e:
+        logger.debug("rl_check_status failed", exc_info=True)
         result["wandb_error"] = str(e)
     
     return json.dumps(result, indent=2)
@@ -972,6 +974,7 @@ async def rl_get_results(run_id: str) -> str:
             result["final_metrics"] = dict(wandb_run.summary)
             result["history"] = [dict(row) for row in wandb_run.history(samples=10)]
     except Exception as e:
+        logger.debug("rl_get_results failed", exc_info=True)
         result["wandb_error"] = str(e)
     
     return json.dumps(result, indent=2)
@@ -1102,9 +1105,9 @@ async def rl_test_inference(
         model_id = model_info["id"]
         model_safe_name = model_id.replace("/", "_")
         
-        print(f"\n{'='*60}")
-        print(f"Testing with {model_info['name']} ({model_id})")
-        print(f"{'='*60}")
+        logger.info("%s", "=" * 60)
+        logger.info("Testing with %s (%s)", model_info["name"], model_id)
+        logger.info("%s", "=" * 60)
         
         # Output file for this test run
         output_file = test_output_dir / f"test_{_current_env}_{model_safe_name}.jsonl"
@@ -1143,10 +1146,10 @@ async def rl_test_inference(
         cmd_str = " ".join(str(c) for c in cmd)
         # Hide API key in printed output
         cmd_display = cmd_str.replace(api_key, "***API_KEY***")
-        print(f"Command: {cmd_display}")
-        print(f"Working dir: {TINKER_ATROPOS_ROOT}")
-        print(f"WandB run: {wandb_run_name}")
-        print(f"  {num_steps} steps × {group_size} completions = {total_rollouts_per_model} rollouts")
+        logger.info("Command: %s", cmd_display)
+        logger.info("Working dir: %s", TINKER_ATROPOS_ROOT)
+        logger.info("WandB run: %s", wandb_run_name)
+        logger.info("%s steps × %s completions = %s rollouts", num_steps, group_size, total_rollouts_per_model)
         
         model_results = {
             "model": model_id,
@@ -1184,7 +1187,7 @@ async def rl_test_inference(
                     lines_list.append(decoded)
                     # Print progress-related lines in real-time
                     if any(kw in decoded.lower() for kw in ['processing', 'group', 'step', 'progress', '%', 'completed']):
-                        print(f"  {prefix}{decoded}")
+                        logger.info("%s%s", prefix, decoded)
             
             # Read both streams concurrently with timeout
             try:
@@ -1217,23 +1220,23 @@ async def rl_test_inference(
                 f.write(f"STDERR:\n{'='*60}\n")
                 f.write(stderr_text or "(empty)\n")
             
-            print(f"  Log file: {log_file}")
+            logger.info("Log file: %s", log_file)
             
             if process.returncode != 0:
                 model_results["error"] = f"Process exited with code {process.returncode}"
                 model_results["stderr"] = stderr_text[-1000:]
                 model_results["stdout"] = stdout_text[-1000:]
                 model_results["log_file"] = str(log_file)
-                print(f"\n  ❌ Error: {model_results['error']}")
+                logger.error("Error: %s", model_results["error"])
                 # Print last few lines of stderr for debugging
                 if stderr_lines:
-                    print("  Last errors:")
+                    logger.error("Last errors:")
                     for line in stderr_lines[-5:]:
-                        print(f"    {line}")
+                        logger.error("  %s", line)
             else:
-                print("\n  ✅ Process completed successfully")
-                print(f"  Output file: {output_file}")
-                print(f"  File exists: {output_file.exists()}")
+                logger.info("Process completed successfully")
+                logger.info("Output file: %s", output_file)
+                logger.info("File exists: %s", output_file.exists())
                 
                 # Parse the output JSONL file
                 if output_file.exists():
@@ -1260,16 +1263,17 @@ async def rl_test_inference(
                             except json.JSONDecodeError:
                                 continue
                     
-                    print(f"  Completed {model_results['steps_tested']} steps")
+                    logger.info("Completed %s steps", model_results["steps_tested"])
                 else:
                     model_results["error"] = f"Output file not created: {output_file}"
                     
         except asyncio.TimeoutError:
             model_results["error"] = "Process timed out after 10 minutes"
-            print("  Timeout!")
+            logger.warning("Timeout!")
         except Exception as e:
+            logger.debug("rl_test_inference failed", exc_info=True)
             model_results["error"] = str(e)
-            print(f"  Error: {e}")
+            logger.error("Error: %s", e)
         
         # Calculate stats
         if model_results["total_completions"] > 0:
@@ -1289,8 +1293,8 @@ async def rl_test_inference(
             model_results["steps_with_correct"] = 0
             model_results["step_success_rate"] = 0
         
-        print(f"  Results: {model_results['correct_completions']}/{model_results['total_completions']} correct")
-        print(f"  Accuracy: {model_results['accuracy']:.1%}")
+        logger.info("Results: %s/%s correct", model_results["correct_completions"], model_results["total_completions"])
+        logger.info("Accuracy: %.1f%%", model_results["accuracy"] * 100)
         
         results["models_tested"].append(model_results)
     

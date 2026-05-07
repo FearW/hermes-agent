@@ -64,7 +64,7 @@ def _kill_port_process(port: int) -> None:
                     capture_output=True, timeout=5,
                 )
     except Exception:
-        pass
+        logger.debug("_kill_port_process failed", exc_info=True)
 
 
 def _terminate_bridge_process(proc, *, force: bool = False) -> None:
@@ -128,6 +128,7 @@ def check_whatsapp_requirements() -> bool:
         )
         return result.returncode == 0
     except Exception:
+        logger.debug("check_whatsapp_requirements failed", exc_info=True)
         return False
 
 
@@ -237,6 +238,7 @@ class WhatsAppAdapter(BasePlatformAdapter):
                 try:
                     patterns = json.loads(raw)
                 except Exception:
+                    logger.debug("_compile_mention_patterns failed", exc_info=True)
                     patterns = [part.strip() for part in raw.splitlines() if part.strip()]
                     if not patterns:
                         patterns = [part.strip() for part in raw.split(",") if part.strip()]
@@ -418,7 +420,8 @@ class WhatsAppAdapter(BasePlatformAdapter):
                             else:
                                 logger.info("Bridge found but not connected (status: %s), restarting", bridge_status)
             except Exception:
-                pass  # Bridge not running, start a new one
+                logger.debug("connect failed", exc_info=True)
+            
             
             # Kill any orphaned bridge from a previous gateway run
             _kill_port_process(self._bridge_port)
@@ -479,6 +482,7 @@ class WhatsAppAdapter(BasePlatformAdapter):
                                     logger.info("Bridge ready (status: connected)")
                                     break
                 except Exception:
+                    logger.debug("connect failed", exc_info=True)
                     continue
 
             if not http_ready:
@@ -510,6 +514,7 @@ class WhatsAppAdapter(BasePlatformAdapter):
                                         logger.info("Bridge ready (status: connected)")
                                         break
                     except Exception:
+                        logger.debug("connect failed", exc_info=True)
                         continue
                 else:
                     # Still not connected — warn but proceed (bridge may
@@ -543,7 +548,7 @@ class WhatsAppAdapter(BasePlatformAdapter):
             try:
                 self._bridge_log_fh.close()
             except Exception:
-                pass
+                logger.debug("_close_bridge_log failed", exc_info=True)
             self._bridge_log_fh = None
 
     async def _check_managed_bridge_exit(self) -> Optional[str]:
@@ -720,6 +725,7 @@ class WhatsAppAdapter(BasePlatformAdapter):
                 message_id=last_message_id,
             )
         except Exception as e:
+            logger.debug("send failed", exc_info=True)
             return SendResult(success=False, error=str(e))
 
     async def edit_message(
@@ -753,6 +759,7 @@ class WhatsAppAdapter(BasePlatformAdapter):
                     error = await resp.text()
                     return SendResult(success=False, error=error)
         except Exception as e:
+            logger.debug("edit_message failed", exc_info=True)
             return SendResult(success=False, error=str(e))
 
     async def _send_media_to_bridge(
@@ -802,6 +809,7 @@ class WhatsAppAdapter(BasePlatformAdapter):
                     return SendResult(success=False, error=error)
 
         except Exception as e:
+            logger.debug("_send_media_to_bridge failed", exc_info=True)
             return SendResult(success=False, error=str(e))
 
     async def send_image(
@@ -816,6 +824,7 @@ class WhatsAppAdapter(BasePlatformAdapter):
             local_path = await cache_image_from_url(image_url)
             return await self._send_media_to_bridge(chat_id, local_path, "image", caption)
         except Exception:
+            logger.debug("send_image failed", exc_info=True)
             return await super().send_image(chat_id, image_url, caption, reply_to)
 
     async def send_image_file(
@@ -882,7 +891,7 @@ class WhatsAppAdapter(BasePlatformAdapter):
                 timeout=aiohttp.ClientTimeout(total=5)
             )
         except Exception:
-            pass  # Ignore typing indicator failures
+            logger.debug("send_typing failed", exc_info=True)
     
     async def get_chat_info(self, chat_id: str) -> Dict[str, Any]:
         """Get information about a WhatsApp chat."""

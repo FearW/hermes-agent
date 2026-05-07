@@ -259,6 +259,7 @@ def load_weixin_account(hermes_home: str, account_id: str) -> Optional[Dict[str,
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
+        logger.debug("load_weixin_account failed", exc_info=True)
         return None
 
 
@@ -593,6 +594,7 @@ def _assert_weixin_cdn_url(url: str) -> None:
         scheme = parsed.scheme.lower()
         host = parsed.hostname or ""
     except Exception as exc:  # noqa: BLE001
+        logger.debug("_assert_weixin_cdn_url failed", exc_info=True)
         raise ValueError(f"Unparseable media URL: {url!r}") from exc
 
     if scheme not in ("http", "https"):
@@ -980,6 +982,7 @@ def _load_sync_buf(hermes_home: str, account_id: str) -> str:
     try:
         return json.loads(path.read_text(encoding="utf-8")).get("get_updates_buf", "")
     except Exception:
+        logger.debug("_load_sync_buf failed", exc_info=True)
         return ""
 
 
@@ -1091,7 +1094,7 @@ async def qr_login(
                         qr.make(fit=True)
                         qr.print_ascii(invert=True)
                     except Exception:
-                        pass
+                        logger.debug("qr_login failed", exc_info=True)
                 except Exception as exc:
                     logger.error("weixin: QR refresh failed: %s", exc)
                     return None

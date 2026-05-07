@@ -232,7 +232,7 @@ class ThreadParticipationTracker:
             try:
                 return set(json.loads(path.read_text(encoding="utf-8")))
             except Exception:
-                pass
+                logger.debug("_load failed", exc_info=True)
         return set()
 
     def _save(self) -> None:

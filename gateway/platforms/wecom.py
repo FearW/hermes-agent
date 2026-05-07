@@ -1540,7 +1540,7 @@ def qr_scan_for_bot_info(
     except ImportError:
         pass
     except Exception:
-        pass
+        logger.debug("qr_scan_for_bot_info failed", exc_info=True)
 
     page_url = f"{_QR_CODE_PAGE}{urllib.parse.quote(scode)}"
     if qr_rendered:

@@ -435,6 +435,7 @@ class HomeAssistantAdapter(BasePlatformAdapter):
         except asyncio.TimeoutError:
             return SendResult(success=False, error="Timeout sending notification to HA")
         except Exception as e:
+            logger.debug("send failed", exc_info=True)
             return SendResult(success=False, error=str(e))
 
     async def send_typing(self, chat_id: str, metadata=None) -> None:

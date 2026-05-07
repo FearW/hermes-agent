@@ -77,6 +77,7 @@ def _load_security_config() -> dict:
         from hermes_cli.config import load_config
         cfg = load_config().get("security", {}) or {}
     except Exception:
+        logger.debug("_load_security_config failed", exc_info=True)
         cfg = {}
 
     return {
@@ -311,6 +312,7 @@ def _install_tirith(*, log_failures: bool = True) -> tuple[str | None, str]:
             _download_file(f"{base_url}/{archive_name}", archive_path)
             _download_file(f"{base_url}/checksums.txt", checksums_path)
         except Exception as exc:
+            logger.debug("_install_tirith failed", exc_info=True)
             log("tirith download failed: %s", exc)
             return None, "download_failed"
 

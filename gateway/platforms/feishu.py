@@ -1280,7 +1280,7 @@ def _run_official_feishu_ws_client(ws_client: Any, adapter: Any) -> None:
     try:
         ws_client.start()
     except Exception:
-        pass
+        logger.debug("_run_official_feishu_ws_client failed", exc_info=True)
     finally:
         ws_client_module.websockets.connect = original_connect
         if original_configure is not None:
@@ -1293,11 +1293,11 @@ def _run_official_feishu_ws_client(ws_client: Any, adapter: Any) -> None:
         try:
             loop.stop()
         except Exception:
-            pass
+            logger.debug("_run_official_feishu_ws_client failed", exc_info=True)
         try:
             loop.close()
         except Exception:
-            pass
+            logger.debug("_run_official_feishu_ws_client failed", exc_info=True)
         adapter._ws_thread_loop = None
 
 
@@ -1614,7 +1614,7 @@ class FeishuAdapter(BasePlatformAdapter):
         try:
             setattr(self._ws_client, "_auto_reconnect", False)
         except Exception:
-            pass
+            logger.debug("_disable_websocket_auto_reconnect failed", exc_info=True)
         finally:
             self._ws_client = None
 
@@ -2084,6 +2084,7 @@ class FeishuAdapter(BasePlatformAdapter):
                     message = getattr(event, "message", None)
                     message_id = str(getattr(message, "message_id", "") or "unknown")
                 except Exception:
+                    logger.debug("_enqueue_pending_inbound_event failed", exc_info=True)
                     message_id = "unknown"
                 logger.error(
                     "[Feishu] Pending-inbound queue full (%d); dropped oldest event %s",
@@ -2466,7 +2467,7 @@ class FeishuAdapter(BasePlatformAdapter):
             try:
                 synthetic_text += f" {json.dumps(action_value, ensure_ascii=False)}"
             except Exception:
-                pass
+                logger.debug("_handle_card_action_event failed", exc_info=True)
 
         sender_id = SimpleNamespace(open_id=open_id, user_id=None, union_id=None)
         sender_profile = await self._resolve_sender_profile(sender_id)
@@ -2919,6 +2920,7 @@ class FeishuAdapter(BasePlatformAdapter):
             self._record_webhook_anomaly(remote_ip, "408")
             return web.Response(status=408, text="Request Timeout")
         except Exception:
+            logger.debug("_handle_webhook_request failed", exc_info=True)
             self._record_webhook_anomaly(remote_ip, "400")
             return web.json_response({"code": 400, "msg": "failed to read body"}, status=400)
 
@@ -4459,6 +4461,7 @@ def _render_qr(url: str) -> bool:
         qr.print_ascii(invert=True)
         return True
     except Exception:
+        logger.debug("_render_qr failed", exc_info=True)
         return False
 
 

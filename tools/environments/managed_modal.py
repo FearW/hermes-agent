@@ -88,6 +88,7 @@ class ManagedModalEnvironment(BaseModalExecutionEnvironment):
                 timeout=10,
             )
         except Exception as exc:
+            logger.debug("_start_modal_exec failed", exc_info=True)
             return ModalExecStart(
                 immediate_result=self._error_result(f"Managed Modal exec failed: {exc}")
             )
@@ -126,6 +127,7 @@ class ManagedModalEnvironment(BaseModalExecutionEnvironment):
                 timeout=(self._CONNECT_TIMEOUT_SECONDS, self._POLL_READ_TIMEOUT_SECONDS),
             )
         except Exception as exc:
+            logger.debug("_poll_modal_exec failed", exc_info=True)
             return self._error_result(f"Managed Modal exec poll failed: {exc}")
 
         if status_response.status_code == 404:
@@ -216,6 +218,7 @@ class ManagedModalEnvironment(BaseModalExecutionEnvironment):
         try:
             from tools.credential_files import get_credential_file_mounts
         except Exception:
+            logger.debug("_guard_unsupported_credential_passthrough failed", exc_info=True)
             return
 
         mounts = get_credential_file_mounts()
@@ -274,7 +277,7 @@ class ManagedModalEnvironment(BaseModalExecutionEnvironment):
                     return f"{prefix}: {message}"
                 return f"{prefix}: {json.dumps(payload, ensure_ascii=False)}"
         except Exception:
-            pass
+            logger.debug("_format_error failed", exc_info=True)
 
         text = response.text.strip()
         if text:

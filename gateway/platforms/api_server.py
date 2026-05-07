@@ -100,7 +100,7 @@ def _normalize_chat_content(
                         try:
                             parts.append(str(text)[:MAX_NORMALIZED_TEXT_LENGTH])
                         except Exception:
-                            pass
+                            logger.debug("_normalize_chat_content failed", exc_info=True)
                 # Silently skip image_url / other non-text parts
             elif isinstance(item, list):
                 nested = _normalize_chat_content(item, _max_depth=_max_depth, _depth=_depth + 1)
@@ -117,6 +117,7 @@ def _normalize_chat_content(
         result = str(content)
         return result[:MAX_NORMALIZED_TEXT_LENGTH] if len(result) > MAX_NORMALIZED_TEXT_LENGTH else result
     except Exception:
+        logger.debug("_normalize_chat_content failed", exc_info=True)
         return ""
 
 
@@ -298,10 +299,12 @@ class ResponseStore:
                 from hermes_constants import get_hermes_home
                 db_path = str(get_hermes_home() / "response_store.db")
             except Exception:
+                logger.debug("__init__ failed", exc_info=True)
                 db_path = ":memory:"
         try:
             self._conn = sqlite3.connect(db_path, check_same_thread=False)
         except Exception:
+            logger.debug("__init__ failed", exc_info=True)
             self._conn = sqlite3.connect(":memory:", check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute(
@@ -377,7 +380,7 @@ class ResponseStore:
         try:
             self._conn.close()
         except Exception:
-            pass
+            logger.debug("close failed", exc_info=True)
 
     def __len__(self) -> int:
         row = self._conn.execute("SELECT COUNT(*) FROM responses").fetchone()
@@ -628,7 +631,7 @@ class APIServerAdapter(BasePlatformAdapter):
             if profile and profile not in ("default", "custom"):
                 return profile
         except Exception:
-            pass
+            logger.debug("_resolve_model_name failed", exc_info=True)
         return "hermes-agent"
 
     def _cors_headers_for_origin(self, origin: str) -> Optional[Dict[str, str]]:
@@ -1210,7 +1213,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 result, agent_usage = await agent_task
                 usage = agent_usage or usage
             except Exception:
-                pass
+                logger.debug("_write_sse_chat_completion failed", exc_info=True)
 
             # Finish chunk
             finish_chunk = {
@@ -1234,7 +1237,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 try:
                     agent.interrupt("SSE client disconnected")
                 except Exception:
-                    pass
+                    logger.debug("_write_sse_chat_completion failed", exc_info=True)
             if not agent_task.done():
                 agent_task.cancel()
                 try:
@@ -1718,7 +1721,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 try:
                     agent.interrupt("SSE client disconnected")
                 except Exception:
-                    pass
+                    logger.debug("_write_sse_responses failed", exc_info=True)
             if not agent_task.done():
                 agent_task.cancel()
                 try:
@@ -1737,7 +1740,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 try:
                     agent.interrupt("SSE task cancelled")
                 except Exception:
-                    pass
+                    logger.debug("_write_sse_responses failed", exc_info=True)
             if not agent_task.done():
                 agent_task.cancel()
             logger.info("SSE task cancelled; persisted incomplete snapshot for %s", response_id)
@@ -2081,6 +2084,7 @@ class APIServerAdapter(BasePlatformAdapter):
             jobs = _cron_list(include_disabled=include_disabled)
             return web.json_response({"jobs": jobs})
         except Exception as e:
+            logger.debug("_handle_list_jobs failed", exc_info=True)
             return web.json_response({"error": str(e)}, status=500)
 
     async def _handle_create_job(self, request: "web.Request") -> "web.Response":
@@ -2129,6 +2133,7 @@ class APIServerAdapter(BasePlatformAdapter):
             job = _cron_create(**kwargs)
             return web.json_response({"job": job})
         except Exception as e:
+            logger.debug("_handle_create_job failed", exc_info=True)
             return web.json_response({"error": str(e)}, status=500)
 
     async def _handle_get_job(self, request: "web.Request") -> "web.Response":
@@ -2148,6 +2153,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 return web.json_response({"error": "Job not found"}, status=404)
             return web.json_response({"job": job})
         except Exception as e:
+            logger.debug("_handle_get_job failed", exc_info=True)
             return web.json_response({"error": str(e)}, status=500)
 
     async def _handle_update_job(self, request: "web.Request") -> "web.Response":
@@ -2181,6 +2187,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 return web.json_response({"error": "Job not found"}, status=404)
             return web.json_response({"job": job})
         except Exception as e:
+            logger.debug("_handle_update_job failed", exc_info=True)
             return web.json_response({"error": str(e)}, status=500)
 
     async def _handle_delete_job(self, request: "web.Request") -> "web.Response":
@@ -2200,6 +2207,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 return web.json_response({"error": "Job not found"}, status=404)
             return web.json_response({"ok": True})
         except Exception as e:
+            logger.debug("_handle_delete_job failed", exc_info=True)
             return web.json_response({"error": str(e)}, status=500)
 
     async def _handle_pause_job(self, request: "web.Request") -> "web.Response":
@@ -2219,6 +2227,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 return web.json_response({"error": "Job not found"}, status=404)
             return web.json_response({"job": job})
         except Exception as e:
+            logger.debug("_handle_pause_job failed", exc_info=True)
             return web.json_response({"error": str(e)}, status=500)
 
     async def _handle_resume_job(self, request: "web.Request") -> "web.Response":
@@ -2238,6 +2247,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 return web.json_response({"error": "Job not found"}, status=404)
             return web.json_response({"job": job})
         except Exception as e:
+            logger.debug("_handle_resume_job failed", exc_info=True)
             return web.json_response({"error": str(e)}, status=500)
 
     async def _handle_run_job(self, request: "web.Request") -> "web.Response":
@@ -2257,6 +2267,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 return web.json_response({"error": "Job not found"}, status=404)
             return web.json_response({"job": job})
         except Exception as e:
+            logger.debug("_handle_run_job failed", exc_info=True)
             return web.json_response({"error": str(e)}, status=500)
 
     # ------------------------------------------------------------------
@@ -2402,7 +2413,7 @@ class APIServerAdapter(BasePlatformAdapter):
             try:
                 loop.call_soon_threadsafe(q.put_nowait, event)
             except Exception:
-                pass
+                logger.debug("_push failed", exc_info=True)
 
         def _callback(event_type: str, tool_name: str = None, preview: str = None, args=None, **kwargs):
             ts = time.time()
@@ -2450,6 +2461,7 @@ class APIServerAdapter(BasePlatformAdapter):
         try:
             body = await request.json()
         except Exception:
+            logger.debug("_handle_runs failed", exc_info=True)
             return web.json_response(_openai_error("Invalid JSON"), status=400)
 
         raw_input = body.get("input")
@@ -2530,7 +2542,7 @@ class APIServerAdapter(BasePlatformAdapter):
                     "delta": delta,
                 })
             except Exception:
-                pass
+                logger.debug("_text_cb failed", exc_info=True)
 
         self._set_run_status(
             run_id,
@@ -2592,7 +2604,7 @@ class APIServerAdapter(BasePlatformAdapter):
                         "timestamp": time.time(),
                     })
                 except Exception:
-                    pass
+                    logger.debug("_run_and_close failed", exc_info=True)
                 raise
             except Exception as exc:
                 logger.exception("[api_server] run %s failed", run_id)
@@ -2610,13 +2622,13 @@ class APIServerAdapter(BasePlatformAdapter):
                         "error": str(exc),
                     })
                 except Exception:
-                    pass
+                    logger.debug("_run_and_close failed", exc_info=True)
             finally:
                 # Sentinel: signal SSE stream to close
                 try:
                     q.put_nowait(None)
                 except Exception:
-                    pass
+                    logger.debug("_run_and_close failed", exc_info=True)
                 self._active_run_agents.pop(run_id, None)
                 self._active_run_tasks.pop(run_id, None)
 
@@ -2714,7 +2726,7 @@ class APIServerAdapter(BasePlatformAdapter):
             try:
                 agent.interrupt("Stop requested via API")
             except Exception:
-                pass
+                logger.debug("_handle_stop_run failed", exc_info=True)
 
         if task is not None and not task.done():
             task.cancel()

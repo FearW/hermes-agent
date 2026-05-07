@@ -394,6 +394,7 @@ class TelegramAdapter(BasePlatformAdapter):
             # no public accessor exists for the polling request.
             polling_req = self._app.bot._request[0]  # noqa: SLF001
         except Exception:
+            logger.debug("_drain_polling_connections failed", exc_info=True)
             return
         try:
             await polling_req.shutdown()
@@ -456,7 +457,7 @@ class TelegramAdapter(BasePlatformAdapter):
             if self._app and self._app.updater and self._app.updater.running:
                 await self._app.updater.stop()
         except Exception:
-            pass
+            logger.debug("_handle_polling_network_error failed", exc_info=True)
 
         await self._drain_polling_connections()
 
@@ -505,7 +506,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 if self._app and self._app.updater and self._app.updater.running:
                     await self._app.updater.stop()
             except Exception:
-                pass
+                logger.debug("_handle_polling_conflict failed", exc_info=True)
             await asyncio.sleep(RETRY_DELAY)
             await self._drain_polling_connections()
             try:
@@ -1226,6 +1227,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 )
             except Exception as fmt_err:
                 # "Message is not modified" is a no-op, not an error
+                logger.debug("edit_message failed", exc_info=True)
                 if "not modified" in str(fmt_err).lower():
                     return SendResult(success=True, message_id=message_id)
                 # Fallback: retry without markdown formatting
@@ -1254,7 +1256,7 @@ class TelegramAdapter(BasePlatformAdapter):
                         text=truncated,
                     )
                 except Exception:
-                    pass  # best-effort truncation
+                    logger.debug("edit_message failed", exc_info=True)
                 return SendResult(success=True, message_id=message_id)
             # Flood control / RetryAfter — short waits are retried inline,
             # long waits return a failure immediately so streaming can fall back
@@ -1691,6 +1693,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 )
             except Exception:
                 # Markdown parse failure — retry as plain text
+                logger.debug("_handle_model_picker_callback failed", exc_info=True)
                 try:
                     await query.edit_message_text(
                         text=result_text,
@@ -1698,7 +1701,7 @@ class TelegramAdapter(BasePlatformAdapter):
                         reply_markup=None,
                     )
                 except Exception:
-                    pass
+                    logger.debug("_handle_model_picker_callback failed", exc_info=True)
             await query.answer(text="Model switched!")
 
             # Clean up state
@@ -1723,6 +1726,7 @@ class TelegramAdapter(BasePlatformAdapter):
             try:
                 provider_label = get_label(state["current_provider"])
             except Exception:
+                logger.debug("_handle_model_picker_callback failed", exc_info=True)
                 provider_label = state["current_provider"]
 
             await query.edit_message_text(
@@ -1808,7 +1812,7 @@ class TelegramAdapter(BasePlatformAdapter):
                         reply_markup=None,
                     )
                 except Exception:
-                    pass  # non-fatal if edit fails
+                    logger.debug("_handle_callback_query failed", exc_info=True)
 
                 # Resolve the approval — unblocks the agent thread
                 try:
@@ -1856,7 +1860,7 @@ class TelegramAdapter(BasePlatformAdapter):
                         reply_markup=None,
                     )
                 except Exception:
-                    pass
+                    logger.debug("_handle_callback_query failed", exc_info=True)
 
                 # Resolve via the module-level primitive.  The runner stored
                 # a handler keyed by session_key; we run it on the event
@@ -1902,7 +1906,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 reply_markup=None,
             )
         except Exception:
-            pass  # non-fatal if edit fails
+            logger.debug("_handle_callback_query failed", exc_info=True)
         # Write the response file
         try:
             from hermes_constants import get_hermes_home
@@ -2047,7 +2051,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 )
             return SendResult(success=True, message_id=str(msg.message_id))
         except Exception as e:
-            print(f"[{self.name}] Failed to send document: {e}")
+            logger.error("Failed to send document: %s", e)
             return await super().send_document(chat_id, file_path, caption, file_name, reply_to)
 
     async def send_video(
@@ -2078,7 +2082,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 )
             return SendResult(success=True, message_id=str(msg.message_id))
         except Exception as e:
-            print(f"[{self.name}] Failed to send video: {e}")
+            logger.error("Failed to send video: %s", e)
             return await super().send_video(chat_id, video_path, caption, reply_to)
 
     async def send_image(
@@ -2191,6 +2195,7 @@ class TelegramAdapter(BasePlatformAdapter):
                         message_thread_id=message_thread_id,
                     )
                 except Exception as e:
+                    logger.debug("send_typing failed", exc_info=True)
                     if message_thread_id is not None and self._is_thread_not_found_error(e):
                         await self._bot.send_chat_action(
                             chat_id=int(chat_id),
@@ -2463,6 +2468,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 try:
                     loaded = json.loads(raw)
                 except Exception:
+                    logger.debug("_compile_mention_patterns failed", exc_info=True)
                     loaded = [part.strip() for part in raw.splitlines() if part.strip()]
                     if not loaded:
                         loaded = [part.strip() for part in raw.split(",") if part.strip()]

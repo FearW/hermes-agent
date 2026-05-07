@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import os
+import logging
 from pathlib import Path
 from typing import Any, Dict
 
 from utils import env_var_enabled
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_BROWSER_PROVIDER = "local"
 _DEFAULT_MODAL_MODE = "auto"
@@ -108,7 +111,7 @@ def prefers_gateway(config_section: str) -> bool:
         if isinstance(section, dict):
             return bool(section.get("use_gateway"))
     except Exception:
-        pass
+        logger.debug("prefers_gateway failed", exc_info=True)
     return False
 
 
@@ -118,8 +121,8 @@ def fal_key_is_configured() -> bool:
     if value is None:
         try:
             from hermes_cli.config import get_env_value
-
             value = get_env_value("FAL_KEY")
         except Exception:
+            logger.debug("fal_key_is_configured failed", exc_info=True)
             value = None
     return bool(value and value.strip())

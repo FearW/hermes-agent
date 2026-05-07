@@ -11,8 +11,8 @@ import shutil
 import importlib.util
 from pathlib import Path
 
-from hermes_cli.config import get_project_root, get_hermes_home, get_env_path
-from hermes_constants import display_hermes_home
+from hermes_cli.config import get_project_root, get_env_path
+from hermes_constants import get_hermes_home, display_hermes_home
 
 PROJECT_ROOT = get_project_root()
 HERMES_HOME = get_hermes_home()

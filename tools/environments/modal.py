@@ -259,6 +259,7 @@ class ModalEnvironment(BaseEnvironment):
                 if restored_snapshot_id and restored_from_legacy_key:
                     _store_direct_snapshot(self._task_id, restored_snapshot_id)
         except Exception:
+            logger.debug("__init__ failed", exc_info=True)
             self._worker.stop()
             raise
 
@@ -413,6 +414,7 @@ class ModalEnvironment(BaseEnvironment):
                 try:
                     snapshot_id = self._worker.run_coroutine(_snapshot(), timeout=60)
                 except Exception:
+                    logger.debug("cleanup failed", exc_info=True)
                     snapshot_id = None
 
                 if snapshot_id:
@@ -427,7 +429,7 @@ class ModalEnvironment(BaseEnvironment):
         try:
             self._worker.run_coroutine(self._sandbox.terminate.aio(), timeout=15)
         except Exception:
-            pass
+            logger.debug("cleanup failed", exc_info=True)
         finally:
             self._worker.stop()
             self._sandbox = None

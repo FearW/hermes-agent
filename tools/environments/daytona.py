@@ -126,7 +126,7 @@ class DaytonaEnvironment(BaseEnvironment):
                 if requested_cwd in ("~", "/home/daytona"):
                     self.cwd = home
         except Exception:
-            pass
+            logger.debug("__init__ failed", exc_info=True)
         logger.info("Daytona: resolved home to %s, cwd to %s", self._remote_home, self.cwd)
 
         self._sync_manager = FileSyncManager(
@@ -199,7 +199,7 @@ class DaytonaEnvironment(BaseEnvironment):
                 try:
                     sandbox.stop()
                 except Exception:
-                    pass
+                    logger.debug("cancel failed", exc_info=True)
 
         if login:
             shell_cmd = f"bash -l -c {shlex.quote(cmd_string)}"

@@ -28,12 +28,15 @@ Usage:
 import os
 import re
 import difflib
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 from hermes_constants import get_hermes_home
 from tools.binary_extensions import BINARY_EXTENSIONS
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +96,7 @@ def _get_safe_write_root() -> Optional[str]:
     try:
         return os.path.realpath(os.path.expanduser(root))
     except Exception:
+        logger.debug("_get_safe_write_root failed", exc_info=True)
         return None
 
 

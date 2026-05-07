@@ -47,6 +47,7 @@ def _should_preserve_pending_create_key(response: requests.Response) -> bool:
     try:
         payload = response.json()
     except Exception:
+        logger.debug("_should_preserve_pending_create_key failed", exc_info=True)
         return False
 
     if not isinstance(payload, dict):
